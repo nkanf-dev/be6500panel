@@ -21,11 +21,11 @@ export function useRuntime(service: RuntimeService) {
     let active = true;
     let inFlight = false;
     const load = async () => {
-      if (inFlight || document.hidden) return;
+      if (inFlight || mutation.current || document.hidden) return;
       inFlight = true;
       try {
         const response = await runRequest(api.runtime(), controller.signal);
-        if (active) {
+        if (active && !mutation.current) {
           setStatus(response.services.find((item) => item.service === service));
           setEnabled(response.enabled && health?.mode === "host");
           setObservationError(undefined);

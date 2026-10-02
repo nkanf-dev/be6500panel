@@ -42,6 +42,16 @@ export function NativeConfigEditor({
       setLoading(false);
     }
   }
+  function createConfig() {
+    if (!runtime.status || runtime.status.configured || !runtime.enabled)
+      return;
+    setConfig("");
+    setOriginal("");
+    setGeneration(runtime.status.generation);
+    setError(undefined);
+    setSaved(false);
+    setReviewing(false);
+  }
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (generation === undefined || stale || !reviewing || loading) return;
@@ -72,12 +82,29 @@ export function NativeConfigEditor({
         }
       />
       <form className="config-form" onSubmit={save}>
+        {runtime.status && !runtime.status.configured && (
+          <div className="form-actions">
+            <span className="text-muted text-xs">尚无已保存配置</span>
+            <Button
+              type="button"
+              disabled={!runtime.enabled || runtime.pending || loading}
+              onClick={createConfig}
+            >
+              新建原生配置
+            </Button>
+          </div>
+        )}
         <Field
           label="原生配置内容"
           hint="载入和保存均使用认证 API；内容可能包含私密凭据"
         >
           <textarea
-            disabled={runtime.pending || loading}
+            disabled={
+              !runtime.enabled ||
+              generation === undefined ||
+              runtime.pending ||
+              loading
+            }
             aria-label="原生配置内容"
             className="mono"
             rows={18}

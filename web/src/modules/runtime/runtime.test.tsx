@@ -147,4 +147,41 @@ describe("managed runtime controls", () => {
       screen.getByRole("button", { name: "启动 sing-box" }),
     ).toBeDisabled();
   });
+  it("creates a first raw config locally with the observed generation, without fetching missing config", async () => {
+    const fetch = setup((url) =>
+      url === "/api/runtime"
+        ? jsonResponse({
+            enabled: true,
+            services: [{ ...runtimeStatus, configured: false, generation: 0 }],
+          })
+        : undefined,
+    );
+    const user = userEvent.setup();
+    render(<RuntimeView />);
+    await screen.findByRole("button", { name: "新建原生配置" });
+    await user.click(screen.getByRole("button", { name: "新建原生配置" }));
+    fireEvent.change(screen.getByLabelText("原生配置内容"), {
+      target: { value: "{}" },
+    });
+    expect(
+      fetch.mock.calls.filter(([url]) =>
+        url.startsWith("/api/runtime/config?"),
+      ),
+    ).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "审阅配置差异" }));
+    await user.click(
+      screen.getByRole("button", { name: "校验并 Commit 配置" }),
+    );
+    await screen.findByText("原生配置已校验并保存");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/configure",
+      expect.objectContaining({
+        body: JSON.stringify({
+          service: "sing-box",
+          config: "{}",
+          generation: 0,
+        }),
+      }),
+    );
+  });
 });

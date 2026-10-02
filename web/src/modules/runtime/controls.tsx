@@ -89,7 +89,7 @@ export function RuntimeControls({ runtime }: { runtime: RuntimeController }) {
               {status?.restarts ?? "—"}
             </dd>
           </div>
-          {status?.retryAt && (
+          {status?.state === "backoff" && status.retryAt && (
             <div>
               <dt>下次重试</dt>
               <dd>{status.retryAt}</dd>

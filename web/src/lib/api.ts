@@ -171,11 +171,13 @@ export const api = {
   runtimeStart: (service: RuntimeService) =>
     request("/runtime/start", RuntimeStatusSchema, {
       method: "POST",
+      timeoutMs: 90_000,
       body: { service },
     }),
   runtimeStop: (service: RuntimeService) =>
     request("/runtime/stop", RuntimeStatusSchema, {
       method: "POST",
+      timeoutMs: 30_000,
       body: { service },
     }),
   proxyNodes: () => request("/proxy/nodes", ProxyNodesSchema),
@@ -193,7 +195,11 @@ export const api = {
     }),
   proxyCapture: () => request("/proxy/capture", ProxyCaptureSchema),
   proxyCaptureApply: (body: ProxyCaptureInput) =>
-    request("/proxy/capture", ProxyCaptureSchema, { method: "POST", body }),
+    request("/proxy/capture", ProxyCaptureSchema, {
+      method: "POST",
+      body,
+      timeoutMs: 90_000,
+    }),
   network: () => request("/network", NetworkSchema),
   devices: () => request("/devices", DevicesSchema),
   logs: () => request("/logs?limit=100", LogsSchema),
