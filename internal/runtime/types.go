@@ -3,10 +3,12 @@
 package runtime
 
 import (
+	"be6500panel/internal/storage"
 	"context"
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -55,10 +57,18 @@ type Options struct {
 	MaxUncompressedBytes int64
 	MinFreeRunBytes      int64
 	MaxConfigBytes       int64
-	TailBytes            int
-	DownloadTimeout      time.Duration
-	CheckTimeout         time.Duration
-	ReadyTimeout         time.Duration
+	// StorageAdmission protects shared persistent recovery space. Nil preserves
+	// standalone compatibility; production wiring shares one gate with control
+	// and traffic. Config reads keep the previous 4 MiB accepted-config ceiling.
+	StorageAdmission storage.Admission
+	storageAdmitted  bool
+	storageRollback  bool
+	storageContext   context.Context
+	storageWrite     func(*os.File, []byte) (int, error) // test seam
+	TailBytes        int
+	DownloadTimeout  time.Duration
+	CheckTimeout     time.Duration
+	ReadyTimeout     time.Duration
 	// ResourceTimeout bounds owned network cleanup/restore independently of process TERM and listener readiness.
 	ResourceTimeout time.Duration
 	TermGrace       time.Duration
