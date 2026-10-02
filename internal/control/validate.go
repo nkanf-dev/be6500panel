@@ -154,61 +154,10 @@ func validate(module, content string) (parsed, []Issue) {
 		errors = append(errors, issue("invalid_field", "Invalid "+module+" field: "+key+"."))
 	}
 	for _, s := range p {
-		for k, vals := range s.values {
-			key := strings.ToLower(k)
-			for _, v := range vals {
-				switch key {
-				case "port", "src_port", "dest_port", "localport", "remoteport", "external_port", "internal_port":
-					if !ports(v) {
-						add(k)
-					}
-				case "ipaddr", "ip6addr", "gateway", "ip6gw", "src_ip", "dest_ip", "ip", "ip6", "dns":
-					if !ips(v) {
-						add(k)
-					}
-				case "netmask":
-					if !netmask(v) {
-						add(k)
-					}
-				case "mac", "macaddr", "src_mac", "dest_mac":
-					for _, m := range strings.Fields(v) {
-						if len(m) != 17 {
-							add(k)
-							break
-						}
-						if _, err := net.ParseMAC(m); err != nil {
-							add(k)
-							break
-						}
-					}
-				case "disabled", "enabled", "passwordauth", "rootpasswordauth", "rootlogin":
-					if !boolean(v) {
-						add(k)
-					}
-				case "hostname", "domain":
-					if !domain(v) {
-						add(k)
-					}
-				case "channel":
-					if module == "wireless" && v != "auto" && !integer(v, 1, 233) {
-						add(k)
-					}
-				case "txpower":
-					if module == "wireless" && !integer(v, 0, 40) {
-						add(k)
-					}
-				case "start", "limit":
-					if module == "dhcp" && !integer(v, 0, 65535) {
-						add(k)
-					}
-				case "mtu":
-					if !integer(v, 576, 65535) {
-						add(k)
-					}
-				case "input", "forward", "output":
-					if module == "firewall" && s.kind != "rule" && v != "ACCEPT" && v != "REJECT" && v != "DROP" {
-						add(k)
-					}
+		for key, values := range s.values {
+			for _, value := range values {
+				if !validNativeField(module, s.kind, key, value) {
+					add(key)
 				}
 			}
 		}
@@ -223,7 +172,7 @@ func validate(module, content string) (parsed, []Issue) {
 				add("key")
 			}
 		}
-		if module == "network" {
+		if module == "network" && s.kind == "interface" {
 			ip := net.ParseIP(one(s, "ipaddr"))
 			mask := one(s, "netmask")
 			if ip != nil && ip.To4() == nil && mask != "" {
@@ -232,6 +181,374 @@ func validate(module, content string) (parsed, []Issue) {
 		}
 	}
 	return p, errors
+}
+
+// Native scalar checks are scoped to exact, case-sensitive UCI namespaces.
+// Compound values (forwarding rules, rates, leases, device ports, select tokens)
+// and vendor extensions remain native text; this is not service validation.
+func validNativeField(module, kind, key, v string) bool {
+	switch module + "/" + kind {
+	case "network/interface":
+		switch key {
+		case "ip6assign":
+			return integer(v, 0, 128)
+		case "peerdns", "defaultroute", "delegate", "auto", "force_link", "disabled":
+			return boolean(v)
+		case "mtu":
+			return integer(v, 576, 65535)
+		case "metric", "demand":
+			return unsignedInteger(v, 0)
+		case "ipaddr", "ip6addr", "gateway", "ip6gw", "broadcast", "dns":
+			return ips(v)
+		case "netmask":
+			return netmask(v)
+		case "macaddr":
+			return macs(v, false)
+		}
+	case "network/device":
+		switch key {
+		case "vid":
+			return integer(v, 1, 4094)
+		case "mtu":
+			return integer(v, 576, 65535)
+		case "ipv6", "stp", "igmp_snooping", "multicast_querier", "bridge_empty", "vlan_filtering", "disabled":
+			return boolean(v)
+		case "ageing_time":
+			return unsignedInteger(v, 0)
+		case "priority":
+			return integer(v, 0, 65535)
+		case "macaddr":
+			return macs(v, false)
+		}
+	case "network/bridge-vlan":
+		switch key {
+		case "vlan":
+			return integer(v, 1, 4094)
+		case "local":
+			return boolean(v)
+		}
+	case "network/switch":
+		switch key {
+		case "reset", "enable_vlan", "enable_mirror_rx", "enable_mirror_tx":
+			return boolean(v)
+		case "mirror_source_port", "mirror_monitor_port":
+			return unsignedInteger(v, 0)
+		}
+	case "network/switch_vlan":
+		switch key {
+		case "vlan":
+			return unsignedInteger(v, 0)
+		case "vid":
+			return integer(v, 1, 4094)
+		}
+	case "network/route":
+		switch key {
+		case "metric":
+			return unsignedInteger(v, 0)
+		case "mtu":
+			return integer(v, 576, 65535)
+		case "onlink", "disabled":
+			return boolean(v)
+		case "target", "gateway", "source":
+			return ips(v)
+		case "netmask":
+			return netmask(v)
+		}
+	case "network/route6":
+		switch key {
+		case "metric":
+			return unsignedInteger(v, 0)
+		case "mtu":
+			return integer(v, 576, 65535)
+		case "onlink", "disabled":
+			return boolean(v)
+		case "target", "gateway", "source":
+			return ips(v)
+		}
+	case "network/rule":
+		switch key {
+		case "priority", "goto":
+			return unsignedInteger(v, 0)
+		case "invert", "disabled":
+			return boolean(v)
+		case "suppress_prefixlength":
+			return integer(v, 0, 128)
+		case "src", "dest":
+			return ips(v)
+		}
+	case "network/rule6":
+		switch key {
+		case "priority", "goto":
+			return unsignedInteger(v, 0)
+		case "invert", "disabled":
+			return boolean(v)
+		case "suppress_prefixlength":
+			return integer(v, 0, 128)
+		case "src", "dest":
+			return ips(v)
+		}
+	case "network/globals":
+		switch key {
+		case "ula_prefix":
+			return ips(v)
+		}
+	case "wireless/wifi-device":
+		switch key {
+		case "txpower":
+			return integer(v, 0, 40)
+		case "disabled", "legacy_rates", "noscan":
+			return boolean(v)
+		case "beacon_int":
+			return integer(v, 15, 65535)
+		case "distance":
+			return unsignedInteger(v, 0)
+		case "macaddr":
+			return macs(v, false)
+		case "channel":
+			return v == "auto" || integer(v, 1, 233)
+		}
+	case "wireless/wifi-iface":
+		switch key {
+		case "disabled", "hidden", "isolate", "wds", "wmm", "ieee80211r", "ieee80211k", "mesh_fwding":
+			return boolean(v)
+		case "maxassoc":
+			return unsignedInteger(v, 0)
+		case "dtim_period":
+			return integer(v, 1, 255)
+		case "auth_port", "acct_port":
+			return integer(v, 1, 65535)
+		case "bssid", "maclist":
+			return macs(v, false)
+		}
+	case "dhcp/dnsmasq":
+		switch key {
+		case "domainneeded", "boguspriv", "filterwin2k", "localise_queries", "rebind_protection", "rebind_localhost", "expandhosts", "authoritative", "readethers", "noresolv", "nohosts", "nonwildcard", "localservice", "strictorder", "allservers", "logqueries", "logdhcp":
+			return boolean(v)
+		case "port", "queryport":
+			return integer(v, 0, 65535)
+		case "cachesize", "dnsforwardmax", "dhcpleasemax":
+			return unsignedInteger(v, 0)
+		case "ednspacket_max":
+			return integer(v, 512, 65535)
+		case "domain":
+			return domain(v)
+		case "listen_address":
+			return ips(v)
+		}
+	case "dhcp/dhcp":
+		switch key {
+		case "start", "limit":
+			return integer(v, 0, 65535)
+		case "ignore", "force", "dynamicdhcp", "master", "ra_slaac":
+			return boolean(v)
+		case "ra_mininterval", "ra_maxinterval", "ra_lifetime":
+			return unsignedInteger(v, 0)
+		case "ra_mtu":
+			return integer(v, 1280, 65535)
+		case "dns":
+			return ips(v)
+		case "domain":
+			return domain(v)
+		case "netmask":
+			return netmask(v)
+		}
+	case "dhcp/host":
+		switch key {
+		case "dns", "broadcast":
+			return boolean(v)
+		case "ip":
+			return v == "ignore" || ips(v)
+		case "mac":
+			return macs(v, true)
+		}
+	case "dhcp/domain":
+		switch key {
+		case "ip":
+			return ips(v)
+		}
+	case "dhcp/odhcpd":
+		switch key {
+		case "maindhcp":
+			return boolean(v)
+		case "loglevel":
+			return integer(v, 0, 7)
+		}
+	case "dhcp/cname":
+		switch key {
+		case "ttl":
+			return unsignedInteger(v, 0)
+		}
+	case "dhcp/boot":
+		switch key {
+		case "serveraddress":
+			return ips(v)
+		}
+	case "dhcp/relay":
+		switch key {
+		case "local_addr", "server_addr":
+			return ips(v)
+		}
+	case "dhcp/srvhost":
+		switch key {
+		case "port":
+			return integer(v, 1, 65535)
+		case "class", "weight":
+			return integer(v, 0, 65535)
+		}
+	case "dhcp/mxhost":
+		switch key {
+		case "pref":
+			return integer(v, 0, 65535)
+		case "domain":
+			return domain(v)
+		}
+	case "firewall/defaults":
+		switch key {
+		case "synflood_protect", "drop_invalid", "flow_offloading", "flow_offloading_hw", "disable_ipv6":
+			return boolean(v)
+		case "input", "forward", "output":
+			return v == "ACCEPT" || v == "REJECT" || v == "DROP"
+		}
+	case "firewall/zone":
+		switch key {
+		case "masq", "masq6", "mtu_fix", "log", "enabled":
+			return boolean(v)
+		case "input", "forward", "output":
+			return v == "ACCEPT" || v == "REJECT" || v == "DROP"
+		}
+	case "firewall/forwarding":
+		switch key {
+		case "enabled":
+			return boolean(v)
+		}
+	case "firewall/rule":
+		switch key {
+		case "enabled", "utc_time":
+			return boolean(v)
+		case "limit_burst":
+			return unsignedInteger(v, 0)
+		case "src_ip", "dest_ip":
+			return ips(v)
+		case "src_mac":
+			return macs(v, false)
+		case "src_port", "dest_port":
+			return ports(v)
+		}
+	case "firewall/redirect":
+		switch key {
+		case "enabled", "reflection":
+			return boolean(v)
+		case "limit_burst":
+			return unsignedInteger(v, 0)
+		case "src_ip", "dest_ip", "src_dip":
+			return ips(v)
+		case "src_mac":
+			return macs(v, false)
+		case "src_port", "dest_port", "src_dport":
+			return ports(v)
+		}
+	case "firewall/nat":
+		switch key {
+		case "enabled":
+			return boolean(v)
+		case "limit_burst":
+			return unsignedInteger(v, 0)
+		case "src_ip", "dest_ip", "snat_ip":
+			return ips(v)
+		case "src_mac":
+			return macs(v, false)
+		case "src_port", "dest_port", "snat_port":
+			return ports(v)
+		}
+	case "firewall/include":
+		switch key {
+		case "enabled", "reload", "fw4_compatible":
+			return boolean(v)
+		}
+	case "firewall/ipset":
+		switch key {
+		case "maxelem":
+			return unsignedInteger(v, 1)
+		case "timeout":
+			return unsignedInteger(v, 0)
+		case "enabled":
+			return boolean(v)
+		}
+	case "system/system":
+		switch key {
+		case "log_size":
+			return unsignedInteger(v, 0)
+		case "log_port":
+			return integer(v, 1, 65535)
+		case "log_remote":
+			return boolean(v)
+		case "conloglevel", "cronloglevel":
+			return integer(v, 0, 8)
+		case "hostname":
+			return domain(v)
+		}
+	case "system/timeserver":
+		switch key {
+		case "enabled", "enable_server", "use_dhcp":
+			return boolean(v)
+		}
+	case "system/led":
+		switch key {
+		case "default":
+			return boolean(v)
+		case "delayon", "delayoff", "interval":
+			return unsignedInteger(v, 0)
+		}
+	case "dropbear/dropbear":
+		switch key {
+		case "Port":
+			return integer(v, 1, 65535)
+		case "PasswordAuth", "RootPasswordAuth", "RootLogin", "GatewayPorts", "enable", "mdns":
+			return boolean(v)
+		case "IdleTimeout", "SSHKeepAlive", "MaxAuthTries":
+			return unsignedInteger(v, 0)
+		}
+	}
+	return true
+}
+
+// An absent upper bound in the native field schema is not an arbitrary panel
+// limit. Parse unsigned values independently of the router's 32-bit int width.
+func unsignedInteger(v string, min uint64) bool {
+	n, err := strconv.ParseUint(v, 10, 64)
+	return err == nil && n >= min
+}
+
+func macs(v string, wildcard bool) bool {
+	fields := strings.Fields(v)
+	if len(fields) == 0 {
+		return false
+	}
+	for _, value := range fields {
+		if wildcard && value == "*" {
+			continue
+		}
+		if wildcard && strings.Contains(value, "*") {
+			octets := strings.Split(value, ":")
+			if len(octets) != 6 {
+				return false
+			}
+			for _, octet := range octets {
+				if octet != "*" && (len(octet) != 2 || !hexadecimal(octet)) {
+					return false
+				}
+			}
+			continue
+		}
+		if len(value) != 17 {
+			return false
+		}
+		address, err := net.ParseMAC(value)
+		if err != nil || len(address) != 6 {
+			return false
+		}
+	}
+	return true
 }
 func one(s section, k string) string {
 	v := s.values[k]
