@@ -132,6 +132,20 @@ type DNSEndpoint struct {
 	ServerName string
 }
 
+// LocalDNSConfig preserves the original router dnsmasq authority. Server must
+// be a literal loopback IP or an actual router address in ManagementIPs. Empty
+// Server/Port defaults to 127.0.0.1:53. Domains and Hostnames extend the standard
+// LAN suffixes and MiWiFi router aliases; unqualified lease names also stay local.
+// The caller sources extra domains/aliases from the router, never subscription
+// policy. dnsmasq must retain its original upstreams, not forward back to core.
+// UDP transport retries truncated replies over TCP in sing-box 1.14.2.
+type LocalDNSConfig struct {
+	Server    string
+	Port      uint16
+	Domains   []string
+	Hostnames []string
+}
+
 // RuleSetReference points to a locally staged, checksum-verified binary SRS.
 // SourceURL is provenance only: CompileNative never downloads or embeds it.
 // Kind is "domain" or "ip"; tags must be cn-domain/cn-ip/proxy-domain.
@@ -164,6 +178,7 @@ type CompileInput struct {
 	DNSListenAddress       string
 	DirectDNS              DNSEndpoint
 	ProxyDNS               DNSEndpoint
+	LocalDNS               *LocalDNSConfig `json:"-"`
 	FakeIP                 bool
 	AcceptUnsupportedRules bool
 	Diagnostics            []Diagnostic

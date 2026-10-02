@@ -76,7 +76,7 @@ func TestCompileNativeCurrentKeysAndTransport(t *testing.T) {
 		t.Fatal("DNS resources not bounded")
 	}
 	servers := maps(dns["servers"])
-	for _, s := range servers {
+	for _, s := range servers[:2] {
 		if s["type"] != "tls" || s["address"] != nil || s["address_resolver"] != nil || s["server"] == nil || s["tls"].(map[string]any)["server_name"] == nil {
 			t.Fatal("legacy or unauthenticated DNS fields")
 		}
@@ -179,8 +179,7 @@ func TestFakeIPNativeDNSHasRealNonAddressFallback(t *testing.T) {
 	}
 	m := decodeConfig(t, out)
 	dns := m["dns"].(map[string]any)
-	servers := maps(dns["servers"])
-	fake := servers[2]
+	fake := nativeDNSServer(t, m, "dns-fake")
 	if fake["type"] != "fakeip" || fake["inet4_range"] != "198.18.0.0/15" || fake["inet6_range"] != "fc00::/18" || dns["fakeip"] != nil {
 		t.Fatal("fake-IP transport not native")
 	}
@@ -219,7 +218,7 @@ func TestIPv6PolicyAndSeparateListenerBinds(t *testing.T) {
 				t.Fatal("missing dual-stack TPROXY listener")
 			}
 			if mode != IPv6Follow {
-				fake := maps(m["dns"].(map[string]any)["servers"])[2]
+				fake := nativeDNSServer(t, m, "dns-fake")
 				if fake["inet6_range"] != nil {
 					t.Fatal("fake IPv6 allocation when not captured")
 				}
