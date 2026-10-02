@@ -626,3 +626,203 @@ func TestSafeDiagnosticCauses(t *testing.T) {
 		}
 	}
 }
+
+func TestDeadlineWorkerSurvivesFailedRollbackAndManualRecovery(t *testing.T) {
+	f := newFixture(t)
+	o := f.options()
+	o.ConfirmationTimeout = 20 * time.Millisecond
+	failed := make(chan struct{}, 1)
+	secondRollback := make(chan struct{}, 1)
+	count := 0
+	o.Reload = func(context.Context, string) error {
+		count++
+		switch count {
+		case 2:
+			failed <- struct{}{}
+			return errors.New("synthetic first automatic rollback failure")
+		case 5:
+			secondRollback <- struct{}{}
+		}
+		return nil
+	}
+	m, err := New(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	first := stage(t, m, "network", strings.ReplaceAll(testNetwork, "192.168.31.1", "192.168.32.1"))
+	op, err := commit(t, m, first, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-failed:
+	case <-time.After(time.Second):
+		t.Fatal("first automatic rollback did not run")
+	}
+	if status := m.Status(); status.Enabled || status.ErrorCode != "rollback_failed" {
+		t.Fatalf("failed recovery not surfaced: %#v", status)
+	}
+	_, err = m.Stage(context.Background(), StageRequest{"network", testNetwork, m.Status().Generation})
+	errorCode(t, err, "rollback_failed")
+	rolled, err := m.Rollback(context.Background(), op.ID)
+	if err != nil || rolled.State != "rolled_back" || !m.Status().Enabled {
+		t.Fatalf("manual recovery failed: %#v %v", rolled, err)
+	}
+	second := stage(t, m, "network", strings.ReplaceAll(testNetwork, "192.168.31.1", "192.168.33.1"))
+	if _, err = commit(t, m, second, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-secondRollback:
+	case <-time.After(time.Second):
+		t.Fatal("deadline worker did not protect the second risky commit")
+	}
+	if status := m.Status(); !status.Enabled || status.PendingCommit != nil || readFixture(t, f, "network") != testNetwork {
+		t.Fatalf("second automatic rollback failed: %#v", status)
+	}
+}
+
+func TestFailedDeadlineRollbackRetriesWithoutSpinning(t *testing.T) {
+	f := newFixture(t)
+	o := f.options()
+	o.ConfirmationTimeout = 20 * time.Millisecond
+	attempts := make(chan time.Time, 8)
+	count := 0
+	o.Reload = func(context.Context, string) error {
+		count++
+		if count >= 2 {
+			attempts <- time.Now()
+			if count == 2 {
+				return errors.New("synthetic temporary rollback failure")
+			}
+		}
+		return nil
+	}
+	m, err := New(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	d := stage(t, m, "network", strings.ReplaceAll(testNetwork, "192.168.31.1", "192.168.32.1"))
+	if _, err = commit(t, m, d, true); err != nil {
+		t.Fatal(err)
+	}
+	var first time.Time
+	select {
+	case first = <-attempts:
+	case <-time.After(time.Second):
+		t.Fatal("automatic rollback did not run")
+	}
+	if status := m.Status(); status.ErrorCode != "rollback_failed" || status.Enabled {
+		t.Fatalf("rollback error not surfaced: %#v", status)
+	}
+	// Wake notifications must not bypass retry pacing.
+	for i := 0; i < 20; i++ {
+		m.signal()
+	}
+	select {
+	case <-attempts:
+		t.Fatal("rollback retry spun or bypassed its backoff")
+	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case next := <-attempts:
+		if next.Sub(first) < rollbackRetryInitial {
+			t.Fatalf("retry interval %s is shorter than %s", next.Sub(first), rollbackRetryInitial)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("temporary rollback failure was not retried")
+	}
+	if status := m.Status(); !status.Enabled || status.ErrorCode != "" || status.PendingCommit != nil || readFixture(t, f, "network") != testNetwork {
+		t.Fatalf("automatic recovery failed: %#v", status)
+	}
+}
+
+func TestRollbackRetryDelayIsBounded(t *testing.T) {
+	previous := time.Duration(0)
+	for _, want := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second} {
+		got := nextRollbackRetryDelay(previous)
+		if got != want {
+			t.Fatalf("delay after %s = %s, want %s", previous, got, want)
+		}
+		previous = got
+	}
+	if got := nextRollbackRetryDelay(time.Duration(1<<63 - 1)); got != rollbackRetryMaximum {
+		t.Fatalf("large retry delay overflowed: %s", got)
+	}
+}
+
+func TestCloseStopsFailedRollbackSupervisor(t *testing.T) {
+	f := newFixture(t)
+	o := f.options()
+	o.ConfirmationTimeout = 20 * time.Millisecond
+	failed := make(chan struct{}, 1)
+	count := 0
+	o.Reload = func(context.Context, string) error {
+		count++
+		if count >= 2 {
+			failed <- struct{}{}
+			return errors.New("synthetic persistent rollback failure")
+		}
+		return nil
+	}
+	m, err := New(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.Close() })
+	d := stage(t, m, "network", strings.ReplaceAll(testNetwork, "192.168.31.1", "192.168.32.1"))
+	if _, err = commit(t, m, d, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-failed:
+	case <-time.After(time.Second):
+		t.Fatal("automatic rollback did not run")
+	}
+	if err = m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("unexpected reload after Close: %d", count)
+	}
+	var j journal
+	if err = readJSON(filepath.Join(f.data, "journal.json"), &j); err != nil || j.Phase != "rolling_back" {
+		t.Fatalf("Close lost recovery journal: %#v %v", j, err)
+	}
+}
+
+func TestFailedApplyRecoveryWakesDeadlineSupervisor(t *testing.T) {
+	f := newFixture(t)
+	o := f.options()
+	retried := make(chan struct{}, 1)
+	count := 0
+	o.Reload = func(context.Context, string) error {
+		count++
+		if count <= 2 {
+			return errors.New("synthetic apply and initial recovery failure")
+		}
+		retried <- struct{}{}
+		return nil
+	}
+	m, err := New(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	d := stage(t, m, "dhcp", testDHCP+" option local '/retry/'\n")
+	_, err = commit(t, m, d, false)
+	errorCode(t, err, "rollback_failed")
+	if status := m.Status(); status.Enabled || status.ErrorCode != "rollback_failed" {
+		t.Fatalf("initial recovery error not surfaced: %#v", status)
+	}
+	select {
+	case <-retried:
+	case <-time.After(3 * time.Second):
+		t.Fatal("failed apply did not wake recovery supervisor")
+	}
+	if status := m.Status(); !status.Enabled || readFixture(t, f, "dhcp") != testDHCP {
+		t.Fatalf("automatic recovery failed: %#v", status)
+	}
+}

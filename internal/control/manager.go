@@ -672,6 +672,9 @@ func (m *Manager) Rollback(ctx context.Context, id string) (Operation, error) {
 	return m.rollbackLocked(recovery)
 }
 func (m *Manager) rollbackLocked(ctx context.Context) (Operation, error) {
+	// Wake the supervisor on both success and failure. A failed recovery must
+	// remain supervised even if it started manually or during a failed apply.
+	defer m.signal()
 	j := m.journal
 	if j == nil {
 		return Operation{}, failure("operation_not_found", "Rollback journal does not exist.")
@@ -741,20 +744,58 @@ func (m *Manager) rollbackLocked(ctx context.Context) (Operation, error) {
 		return cloneOperation(j.Operation), err
 	}
 	m.recoveryError = ""
-	m.signal()
 	m.logger.Info("Prior configuration restored", "code", "rolled_back", "operation", j.Operation.ID, "generation", generation)
 	return cloneOperation(j.Operation), nil
 }
+
+const (
+	rollbackRetryInitial = time.Second
+	rollbackRetryMaximum = 30 * time.Second
+)
+
+func nextRollbackRetryDelay(previous time.Duration) time.Duration {
+	if previous <= 0 {
+		return rollbackRetryInitial
+	}
+	if previous >= rollbackRetryMaximum/2 {
+		return rollbackRetryMaximum
+	}
+	return previous * 2
+}
+
 func (m *Manager) deadlineLoop() {
 	defer m.wg.Done()
+	var retryID string
+	var retryAt time.Time
+	var retryDelay time.Duration
 	for {
 		m.mu.Lock()
 		pending := m.pending()
+		recovering := m.recoveryError != "" && m.journal != nil && m.journal.Phase == "rolling_back"
+		var operationID string
+		if recovering {
+			operationID = m.journal.Operation.ID
+		}
 		m.mu.Unlock()
+
+		var due time.Time
+		if recovering {
+			if retryID != operationID {
+				retryID = operationID
+				retryDelay = nextRollbackRetryDelay(0)
+				retryAt = time.Now().Add(retryDelay)
+			}
+			due = retryAt
+		} else {
+			retryID, retryAt, retryDelay = "", time.Time{}, 0
+			if pending != nil {
+				due = pending.Deadline
+			}
+		}
 		var timer *time.Timer
 		var tick <-chan time.Time
-		if pending != nil {
-			delay := time.Until(pending.Deadline)
+		if !due.IsZero() {
+			delay := time.Until(due)
 			if delay < 0 {
 				delay = 0
 			}
@@ -774,13 +815,24 @@ func (m *Manager) deadlineLoop() {
 			continue
 		case <-tick:
 			m.mu.Lock()
-			if p := m.pending(); p != nil && !time.Now().Before(p.Deadline) {
+			if m.ctx.Err() != nil {
+				m.mu.Unlock()
+				return
+			}
+			p := m.pending()
+			expired := p != nil && !time.Now().Before(p.Deadline)
+			retryDue := m.recoveryError != "" && m.journal != nil && m.journal.Phase == "rolling_back" && m.journal.Operation.ID == retryID && !time.Now().Before(retryAt)
+			if expired || retryDue {
 				ctx, cancel := context.WithTimeout(m.ctx, 90*time.Second)
 				_, err := m.rollbackLocked(ctx)
 				cancel()
 				if err != nil {
-					m.mu.Unlock()
-					return
+					if retryID != m.journal.Operation.ID {
+						retryDelay = 0
+					}
+					retryID = m.journal.Operation.ID
+					retryDelay = nextRollbackRetryDelay(retryDelay)
+					retryAt = time.Now().Add(retryDelay)
 				}
 			}
 			m.mu.Unlock()

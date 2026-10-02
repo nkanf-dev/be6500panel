@@ -75,7 +75,13 @@ Network changes, LAN address/mask, WAN replacement, management service changes,
 broad firewall policies, primary Wi-Fi credential/radio changes and disabling all
 Wi-Fi require explicit risk acknowledgment. Such commits remain provisional for
 120 seconds by default. The server-provided deadline is authoritative. Timeout
-restores prior documents and fixed services. No new commit may run while pending.
+restores prior documents and fixed services. Failed rollback disables mutations
+and reports `rollback_failed`. The deadline supervisor remains alive and retries
+recovery after 1 second, then doubles the delay up to a 30-second maximum. Each
+attempt is limited to 90 seconds. Wake notifications do not bypass retry pacing.
+Manual Rollback can retry immediately; successful recovery clears the error and
+keeps later provisional commits protected. Close cancels retry work and retains
+the journal for restart recovery. No new commit may run while pending.
 Known guest interface changes need not require primary-Wi-Fi confirmation.
 
 Fixed reload argv:
