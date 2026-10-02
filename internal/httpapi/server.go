@@ -10,8 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"be6500panel/internal/capture"
+	"be6500panel/internal/control"
 	"be6500panel/internal/core"
 	"be6500panel/internal/modules"
+	"be6500panel/internal/router"
+	managedruntime "be6500panel/internal/runtime"
 )
 
 type Config struct {
@@ -23,6 +27,11 @@ type Config struct {
 	Heartbeat time.Duration
 	Logger    *slog.Logger
 	Logs      *core.LogBuffer
+	Router    *router.Adapter
+	Runtime   *managedruntime.Manager
+	Control   *control.Manager
+	DataDir   string
+	Capture   *capture.Controller
 }
 type Server struct {
 	system      *modules.System
@@ -38,6 +47,13 @@ type Server struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	closeOnce   sync.Once
+	router      *router.Adapter
+	runtime     *managedruntime.Manager
+	control     *control.Manager
+	dataDir     string
+	proxyState  *proxyState
+	capture     *capture.Controller
+	desiredMu   sync.Mutex
 }
 
 func New(cfg Config) (*Server, error) {
@@ -58,7 +74,7 @@ func New(cfg Config) (*Server, error) {
 		cfg.Logger = slog.New(core.NewRingHandler(slog.Default().Handler(), cfg.Logs))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel}, nil
+	return &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel}, nil
 }
 func (s *Server) Close() { s.closeOnce.Do(func() { s.cancel(); s.sampler.Close() }) }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +95,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Unknown API path.")
 		return
 	}
-	if method != r.Method {
+	allowedMethod := method == r.Method || (r.URL.Path == "/api/configuration/drafts" && r.Method == "DELETE") || (r.URL.Path == "/api/proxy/capture" && (r.Method == "POST" || r.Method == "DELETE"))
+	if !allowedMethod {
 		w.Header().Set("Allow", method)
 		fail(w, 405, "method_not_allowed", "Method is not allowed for this endpoint.")
 		return
@@ -90,6 +107,44 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/api/router":
+		s.routerSnapshot(w, r)
+	case "/api/runtime":
+		s.runtimes(w, r)
+	case "/api/runtime/acquire":
+		s.runtimeAcquire(w, r)
+	case "/api/runtime/configure":
+		s.runtimeConfigure(w, r)
+	case "/api/runtime/config":
+		s.runtimeConfig(w, r)
+	case "/api/runtime/start":
+		s.runtimeAction(w, r, true)
+	case "/api/runtime/stop":
+		s.runtimeAction(w, r, false)
+	case "/api/runtime/restore":
+		s.runtimeRestore(w, r)
+	case "/api/proxy/nodes":
+		s.proxyNodes(w, r)
+	case "/api/proxy/import":
+		s.proxyImport(w, r)
+	case "/api/proxy/select":
+		s.proxySelect(w, r)
+	case "/api/proxy/capture":
+		s.proxyCapture(w, r)
+	case "/api/configuration":
+		s.configDocuments(w, r)
+	case "/api/configuration/stage":
+		s.configStage(w, r)
+	case "/api/configuration/drafts":
+		s.configDrafts(w, r)
+	case "/api/configuration/commit":
+		s.configCommit(w, r)
+	case "/api/configuration/confirm":
+		s.configConfirm(w, r, false)
+	case "/api/configuration/rollback":
+		s.configConfirm(w, r, true)
+	case "/api/configuration/status":
+		s.configStatus(w, r)
 	case "/api/logs":
 		s.logsResponse(w, r)
 	case "/api/health":
@@ -97,11 +152,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Status   string `json:"status"`
 			Mode     string `json:"mode"`
 			ReadOnly bool   `json:"readOnly"`
-		}{"ok", s.system.Mode(), true})
+		}{"ok", s.system.Mode(), s.control == nil})
 	case "/api/modules":
 		writeJSON(w, 200, struct {
 			Modules []core.Module `json:"modules"`
-		}{s.registry.Modules()})
+		}{s.ModuleList()})
 	case "/api/system":
 		system, err := s.sampler.Latest()
 		if err != nil {
@@ -148,6 +203,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var routes = map[string]string{
+
+	"/api/router": "GET", "/api/runtime": "GET", "/api/runtime/acquire": "POST", "/api/runtime/configure": "POST", "/api/runtime/config": "GET", "/api/runtime/start": "POST", "/api/runtime/stop": "POST", "/api/runtime/restore": "POST",
+	"/api/proxy/nodes": "GET", "/api/proxy/import": "POST", "/api/proxy/select": "POST", "/api/proxy/capture": "GET",
+	"/api/configuration": "GET", "/api/configuration/stage": "POST", "/api/configuration/drafts": "GET", "/api/configuration/commit": "POST", "/api/configuration/confirm": "POST", "/api/configuration/rollback": "POST", "/api/configuration/status": "GET",
 	"/api/logs": "GET", "/api/health": "GET", "/api/modules": "GET", "/api/system": "GET", "/api/network": "GET", "/api/devices": "GET", "/api/frpc": "GET", "/api/events": "GET", "/api/proxy/plan": "POST", "/api/frpc/plan": "POST", "/api/operations/apply": "POST", "/api/session": "GET", "/api/session/login": "POST", "/api/session/logout": "POST",
 }
 

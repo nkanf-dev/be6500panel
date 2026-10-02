@@ -30,17 +30,21 @@ func fail(w http.ResponseWriter, status int, code, message string) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any, required ...string) bool {
+	return decodeJSONLimit(w, r, dst, MaxBodyBytes, required...)
+}
+
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64, required ...string) bool {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
 		fail(w, 415, "unsupported_media_type", "Content-Type must be application/json.")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			fail(w, 413, "body_too_large", "Request body exceeds 64 KiB.")
+			fail(w, 413, "body_too_large", "Request body exceeds the endpoint limit.")
 		} else {
 			fail(w, 400, "invalid_json", "Cannot read JSON body.")
 		}

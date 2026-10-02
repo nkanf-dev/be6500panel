@@ -1,5 +1,4 @@
-// be6500panel runs one read-only HTTP control-plane process. It never launches
-// shells, proxy/tunnel runtimes or router commands.
+// be6500panel runs a modular router control plane with explicit commit and runtime operations.
 package main
 
 import (
@@ -16,9 +15,14 @@ import (
 	"syscall"
 	"time"
 
+	"be6500panel/internal/capture"
+	"be6500panel/internal/control"
 	"be6500panel/internal/core"
 	"be6500panel/internal/httpapi"
 	"be6500panel/internal/modules"
+	"be6500panel/internal/router"
+	managedruntime "be6500panel/internal/runtime"
+	"path/filepath"
 )
 
 func main() {
@@ -31,6 +35,11 @@ func run() error {
 	listen := flag.String("listen", "127.0.0.1:8787", "HTTP bind address; non-loopback requires BE6500PANEL_PASSWORD")
 	demo := flag.Bool("demo", false, "Use explicitly labeled deterministic system samples (network still observes the host)")
 	webDir := flag.String("web-dir", "web/dist", "Prebuilt browser assets; API works without them")
+	dataDir := flag.String("data-dir", "", "Persistent private settings directory; enables runtime management")
+	runDir := flag.String("run-dir", "/tmp/be6500panel/runtime", "Volatile runtime artifact directory")
+	controlEnabled := flag.Bool("enable-control", false, "Enable staged UCI configuration commits")
+	adapterRoot := flag.String("router-root", "/", "Router observation/configuration root")
+	localArtifacts := flag.String("local-artifacts", "", "Trusted local artifact source directory")
 	flag.Parse()
 	logs := &core.LogBuffer{}
 	logger := slog.New(core.NewRingHandler(slog.NewJSONHandler(os.Stderr, nil), logs))
@@ -59,11 +68,48 @@ func run() error {
 	sampler := core.NewSampler(observation, 2*time.Second)
 	sampler.Start(ctx)
 	defer sampler.Close()
-	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs})
+	var runtimeManager *managedruntime.Manager
+	var controlManager *control.Manager
+	var captureManager *capture.Controller
+	var err error
+	if *dataDir != "" {
+		if password == "" {
+			return fmt.Errorf("runtime control requires BE6500PANEL_PASSWORD")
+		}
+		captureManager, err = capture.New(*dataDir, nil)
+		if err != nil {
+			return err
+		}
+		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, MaxCompressedBytes: 20 << 20, MaxUncompressedBytes: 40 << 20, ReadyHook: runtimeReadiness(func() *managedruntime.Manager { return runtimeManager }), ReadyTimeout: 10 * time.Second, CleanupHook: func(ctx context.Context, id string) error {
+			if id == managedruntime.SingBox {
+				return captureManager.Cleanup(ctx)
+			}
+			return nil
+		}})
+		if err != nil {
+			return err
+		}
+		defer runtimeManager.Close()
+	}
+	if *controlEnabled {
+		if *dataDir == "" || password == "" {
+			return fmt.Errorf("configuration control requires data-dir and password")
+		}
+		controlManager, err = control.New(control.Options{Root: *adapterRoot, DataDir: filepath.Join(*dataDir, "configuration"), Logger: logger, ConfirmationTimeout: 120 * time.Second})
+		if err != nil {
+			return err
+		}
+		defer controlManager.Close()
+	}
+	routerAdapter := router.New(*adapterRoot)
+	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager})
 	if err != nil {
 		return err
 	}
 	defer api.Close()
+	if runtimeManager != nil {
+		go restoreDesiredRuntimes(ctx, runtimeManager, *dataDir, logger)
+	}
 	registry, err := modules.Builtins(observer, modules.Network{})
 	if err != nil {
 		return err
@@ -78,7 +124,7 @@ func run() error {
 	server := &http.Server{Handler: api, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024, BaseContext: func(net.Listener) context.Context { return ctx }}
 	stopped := make(chan error, 1)
 	go func() { stopped <- server.Serve(listener) }()
-	logger.Info(fmt.Sprintf("HTTP server started: %s, read-only, authRequired=%t", observer.Mode(), password != ""), "code", "server_started", "module", "core", "listen", *listen, "mode", observer.Mode(), "readOnly", true, "authRequired", password != "")
+	logger.Info(fmt.Sprintf("HTTP server started: %s, control=%t, authRequired=%t", observer.Mode(), controlManager != nil, password != ""), "code", "server_started", "module", "core", "listen", *listen, "mode", observer.Mode(), "readOnly", controlManager == nil, "authRequired", password != "")
 	select {
 	case err := <-stopped:
 		if !errors.Is(err, http.ErrServerClosed) {
