@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -10,12 +10,45 @@ import {
   PanelHeader,
 } from "../../components/ui/primitives";
 import { api, errorMessage } from "../../lib/api";
-import type {
-  IPv6Policy,
-  ProxyNodes,
-  ProxySelectInput,
-} from "../../lib/contracts";
+import type { IPv6Policy, ProxyNodes } from "../../lib/contracts";
 import type { RuntimeController } from "../runtime/use-runtime";
+import { useAcceptedNodeConfig } from "./node-selector-config";
+import {
+  NODE_PAGE_SIZE,
+  useNodeFavorites,
+  useNodePreferences,
+  validPort,
+  type NodePreferences,
+} from "./node-selector-preferences";
+import { matchesRegion, NODE_REGIONS } from "./node-selector-regions";
+import "./node-selector.css";
+
+type Node = ProxyNodes["nodes"][number];
+function endpoint(node: Node) {
+  return `${node.server.includes(":") ? `[${node.server}]` : node.server}:${node.port}`;
+}
+function NodeSummary({
+  title,
+  node,
+  fallback,
+}: {
+  title: string;
+  node?: Node;
+  fallback: string;
+}) {
+  return (
+    <div className="node-selector-node-summary">
+      <span className="text-muted text-xs">{title}</span>
+      <strong>{node?.label ?? fallback}</strong>
+      {node && (
+        <span className="mono text-muted text-xs">
+          {endpoint(node)} · {node.protocol.toUpperCase()} /{" "}
+          {node.transport.toUpperCase()}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function NodeSelector({
   nodes,
@@ -28,30 +61,143 @@ export function NodeSelector({
   runtime: RuntimeController;
   onSelected: () => void;
 }) {
-  const [nodeId, setNodeId] = useState("");
-  const [ipv6, setIPv6] = useState<IPv6Policy>("direct");
-  const [ports, setPorts] = useState<ProxySelectInput["ports"]>({
-    mixed: 2080,
-    tproxy: 7893,
-    dns: 6450,
-  });
+  const [preferences, setPreferences] = useNodePreferences();
+  const { query, protocol, transport, favoritesOnly, region, ipv6, ports } =
+    preferences;
+  const nodeIds = useMemo(
+    () => nodes?.nodes.map((node) => node.id),
+    [nodes?.nodes],
+  );
+  const [favorites, toggleFavorite] = useNodeFavorites(nodeIds);
+  const favoriteIds = useMemo(() => new Set(favorites), [favorites]);
+  const accepted = useAcceptedNodeConfig(runtime, importing);
   const [pending, setPending] = useState(false);
-  const [sha256, setSHA256] = useState<string>();
-  const selectedId = nodeId || nodes?.selectedNodeId || "";
-  const valid = nodes?.nodes.some((node) => node.id === selectedId);
-  async function submit(event: React.FormEvent) {
+  const submitting = useRef(false);
+  const [saved, setSaved] = useState<string>();
+  const [focusId, setFocusId] = useState("");
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const listRef = useRef<HTMLDivElement>(null);
+  const all = nodes?.nodes ?? [];
+  const selectedId = preferences.selectedId || nodes?.selectedNodeId || "";
+  const selectedNode = all.find((node) => node.id === selectedId);
+  const currentNode = all.find((node) => node.id === nodes?.selectedNodeId);
+  const busy = runtime.pending || pending || importing;
+  const configReady =
+    accepted.ready &&
+    (runtime.status?.configured === false ||
+      preferences.acceptedGeneration === accepted.generation);
+  const validPorts =
+    Object.values(ports).every(validPort) &&
+    new Set(Object.values(ports)).size === 3;
+  const canSave =
+    !busy &&
+    runtime.enabled &&
+    !!selectedNode &&
+    !!runtime.status?.artifactAvailable &&
+    configReady &&
+    validPorts;
+  const filtered = useMemo(() => {
+    const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    return (nodes?.nodes ?? []).filter((node) => {
+      const text =
+        `${node.label} ${node.server} ${endpoint(node)} ${node.protocol} ${node.transport}`.toLocaleLowerCase();
+      return (
+        terms.every((term) => text.includes(term)) &&
+        (!protocol || node.protocol === protocol) &&
+        (!transport || node.transport === transport) &&
+        (!favoritesOnly || favoriteIds.has(node.id)) &&
+        matchesRegion(node.label, region)
+      );
+    });
+  }, [
+    nodes?.nodes,
+    query,
+    protocol,
+    transport,
+    favoritesOnly,
+    favoriteIds,
+    region,
+  ]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / NODE_PAGE_SIZE));
+  const page = Math.min(preferences.page, pageCount);
+  const offset = (page - 1) * NODE_PAGE_SIZE;
+  const visibleNodes = filtered.slice(offset, offset + NODE_PAGE_SIZE);
+  const selectionFiltered =
+    !!selectedNode && !filtered.some((node) => node.id === selectedId);
+  const filterActive =
+    !!query || !!protocol || !!transport || favoritesOnly || !!region;
+  const protocols = [...new Set(all.map((node) => node.protocol))].sort();
+  const transports = [...new Set(all.map((node) => node.transport))].sort();
+  const draft = !!selectedId && selectedId !== nodes?.selectedNodeId;
+
+  useEffect(() => {
+    if (accepted.inputs && accepted.generation !== undefined) {
+      setPreferences((previous) =>
+        previous.acceptedGeneration === accepted.generation
+          ? previous
+          : {
+              ...previous,
+              ...accepted.inputs,
+              acceptedGeneration: accepted.generation,
+            },
+      );
+    }
+  }, [accepted.inputs, accepted.generation, setPreferences]);
+  useEffect(() => {
+    if (nodes && page !== preferences.page)
+      setPreferences((previous) => ({ ...previous, page }));
+  }, [nodes, page, preferences.page, setPreferences]);
+  useEffect(() => {
+    // Page changes stay inside the bounded list, not at the old list scroll offset.
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [page, query, protocol, transport, favoritesOnly, region]);
+  useEffect(() => {
+    if (!focusId) return;
+    const row = rowRefs.current.get(focusId);
+    if (row) {
+      row.focus({ preventScroll: true });
+      row.scrollIntoView?.({ block: "nearest" });
+      setFocusId("");
+    }
+  }, [focusId, page, filtered]);
+
+  function updateFilter(update: Partial<NodePreferences>) {
+    setPreferences((previous) => ({ ...previous, ...update, page: 1 }));
+  }
+  function clearFilters() {
+    updateFilter({
+      query: "",
+      protocol: "",
+      transport: "",
+      favoritesOnly: false,
+      region: "",
+    });
+  }
+  function jumpToNode(id: string) {
+    const index = all.findIndex((node) => node.id === id);
+    if (index < 0) return;
+    setPreferences((previous) => ({
+      ...previous,
+      query: "",
+      protocol: "",
+      transport: "",
+      favoritesOnly: false,
+      region: "",
+      page: Math.floor(index / NODE_PAGE_SIZE) + 1,
+    }));
+    setFocusId(id);
+  }
+  function selectNode(id: string) {
+    setPreferences((previous) => ({ ...previous, selectedId: id }));
+    setSaved(undefined);
+  }
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (
-      importing ||
-      pending ||
-      runtime.pending ||
-      !runtime.enabled ||
-      !valid ||
-      !runtime.status?.artifactAvailable
-    )
+    if (!canSave || submitting.current || !event.currentTarget.checkValidity())
       return;
+    submitting.current = true;
     setPending(true);
-    setSHA256(undefined);
+    setSaved(undefined);
     try {
       await runtime.run(
         () =>
@@ -59,148 +205,441 @@ export function NodeSelector({
             .proxySelect({ nodeId: selectedId, ipv6, failure: "direct", ports })
             .pipe(
               Effect.map((response) => {
-                setSHA256(response.configSHA256);
+                setSaved(
+                  response.status.state === "running"
+                    ? "节点切换已生效"
+                    : "节点配置已保存",
+                );
                 onSelected();
                 return response.status;
               }),
             ),
-        "节点配置已 Commit",
+        "节点配置已保存",
       );
     } finally {
+      submitting.current = false;
       setPending(false);
     }
   }
   return (
-    <Panel>
+    <Panel className="node-selector">
       <PanelHeader
         title="代理节点"
-        subtitle="选择真实节点，编译并验证 sing-box 原生配置"
-        action={<Badge>{nodes?.nodes.length ?? 0} 个节点</Badge>}
+        subtitle="搜索、收藏并选择节点；保存前不会切换节点"
+        action={<Badge>{all.length} 个节点</Badge>}
       />
       <form onSubmit={submit}>
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>选择</th>
-                <th>名称 / 出口</th>
-                <th>协议</th>
-                <th>能力</th>
-              </tr>
-            </thead>
-            <tbody>
-              {nodes?.nodes.map((node) => (
-                <tr key={node.id}>
-                  <td>
-                    <input
-                      disabled={runtime.pending || pending || importing}
-                      type="radio"
-                      name="proxy-node"
-                      aria-label={`选择节点 ${node.label}`}
-                      checked={selectedId === node.id}
-                      onChange={() => {
-                        setNodeId(node.id);
-                        setSHA256(undefined);
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <strong>{node.label}</strong>
-                    <div className="mono text-muted">
-                      {node.server}:{node.port}
-                    </div>
-                  </td>
-                  <td>
-                    {node.protocol.toUpperCase()} /{" "}
-                    {node.transport.toUpperCase()}
-                  </td>
-                  <td>
-                    {[
-                      node.reality && "REALITY",
-                      node.vision && "Vision",
-                      node.utls && "uTLS",
-                      node.udp && "UDP",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!nodes?.nodes.length && (
-          <EmptyState title="暂无节点" detail="先导入订阅" />
-        )}
-        <div className="config-form">
-          <div className="form-grid">
-            <Field label="节点 IPv6 策略">
-              <select
-                className="select-trigger"
-                disabled={runtime.pending || pending || importing}
-                value={ipv6}
-                onChange={(event) => {
-                  setIPv6(event.target.value as IPv6Policy);
-                  setSHA256(undefined);
-                }}
-              >
-                <option value="follow">跟随代理</option>
-                <option value="direct">直连</option>
-                <option value="block">阻断</option>
-              </select>
-            </Field>
-            {(["mixed", "tproxy", "dns"] as const).map((name) => (
-              <Field key={name} label={`${name} 监听端口`}>
-                <input
-                  disabled={runtime.pending || pending || importing}
-                  type="number"
-                  required
-                  min={1}
-                  max={65535}
-                  value={ports[name]}
-                  onChange={(event) => {
-                    setPorts((previous) => ({
-                      ...previous,
-                      [name]: event.target.valueAsNumber,
-                    }));
-                    setSHA256(undefined);
-                  }}
-                />
-              </Field>
-            ))}
+        <section className="node-selector-summary" aria-label="节点选择与保存">
+          <div className="node-selector-summaries">
+            <NodeSummary
+              title="当前配置节点"
+              node={currentNode}
+              fallback={
+                nodes?.selectedNodeId
+                  ? "当前节点已不在订阅中"
+                  : "尚未保存节点配置"
+              }
+            />
+            <NodeSummary
+              title={draft ? "待保存节点" : "已选节点"}
+              node={selectedNode}
+              fallback={selectedId ? "已选节点已移除" : "尚未选择节点"}
+            />
           </div>
-          <p className="text-muted text-xs">
-            故障策略：回退直连。配置保存不会接管 LAN 客户端。
-          </p>
+          <div className="node-selector-apply">
+            <Badge tone={draft ? "warning" : "neutral"}>
+              {!selectedId
+                ? "尚未选择"
+                : draft
+                  ? "已选择 · 尚未保存"
+                  : "与当前配置一致"}
+            </Badge>
+            <span className="text-muted text-xs">
+              核心
+              {!runtime.status
+                ? "状态读取中"
+                : runtime.status.state === "running"
+                  ? "运行中"
+                  : runtime.status.state === "stopped"
+                    ? "已停止"
+                    : "未运行"}{" "}
+              · 延迟未测
+            </span>
+            <div className="node-selector-quick-actions">
+              <Button
+                type="button"
+                size="small"
+                disabled={!currentNode}
+                onClick={() => jumpToNode(currentNode!.id)}
+              >
+                定位当前节点
+              </Button>
+              {draft && (
+                <Button
+                  type="button"
+                  size="small"
+                  disabled={busy || !currentNode}
+                  onClick={() => {
+                    selectNode(currentNode!.id);
+                    jumpToNode(currentNode!.id);
+                  }}
+                >
+                  恢复当前节点选择
+                </Button>
+              )}
+              {selectedNode && selectedId !== currentNode?.id && (
+                <Button
+                  type="button"
+                  size="small"
+                  onClick={() => jumpToNode(selectedId)}
+                >
+                  定位已选节点
+                </Button>
+              )}
+            </div>
+            <Button type="submit" variant="primary" disabled={!canSave}>
+              {pending
+                ? "正在保存…"
+                : runtime.status?.state === "running"
+                  ? "保存并应用节点"
+                  : "保存节点配置"}
+            </Button>
+          </div>
+          {selectionFiltered && (
+            <p className="text-muted text-xs">
+              已选节点不在当前筛选结果中，保存仍使用此节点。
+            </p>
+          )}
+          {nodes && selectedId && !selectedNode && (
+            <p role="alert">已选节点已不在当前订阅中，请重新选择。</p>
+          )}
+          {!runtime.status?.artifactAvailable && (
+            <p className="text-muted text-xs">先在运行管理中获取运行文件。</p>
+          )}
+          {runtime.status?.configured &&
+            !configReady &&
+            accepted.error === undefined && (
+              <p role="status" className="text-muted text-xs">
+                正在读取当前 IPv6 和监听端口设置…
+              </p>
+            )}
+          {accepted.error !== undefined && (
+            <ErrorState
+              message={errorMessage(accepted.error)}
+              onRetry={accepted.reload}
+            />
+          )}
           {runtime.error !== undefined && (
             <ErrorState message={errorMessage(runtime.error)} />
           )}
-          {sha256 && (
-            <p role="status" className="mono wrap">
-              配置已校验并保存 · SHA-256 {sha256}
-            </p>
-          )}
-          <div className="form-actions">
-            <span className="text-muted text-xs">
-              {runtime.status?.artifactAvailable
-                ? "运行文件已就绪"
-                : "先在运行管理中获取运行文件"}
-            </span>
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={
-                importing ||
-                !runtime.enabled ||
-                runtime.pending ||
-                pending ||
-                !valid ||
-                !runtime.status?.artifactAvailable
-              }
+          {saved && <p role="status">{saved}</p>}
+        </section>
+
+        <div className="node-selector-controls">
+          <div className="node-selector-search-row">
+            <Field
+              label="搜索节点"
+              hint="名称（含标签中的地区文字）、地址、协议或传输；不推断实际地理位置"
             >
-              {pending ? "编译校验中…" : "生成并 Commit 节点配置"}
+              <input
+                type="search"
+                aria-label="搜索节点"
+                value={query}
+                placeholder="输入名称、地址或协议"
+                autoComplete="off"
+                onChange={(event) =>
+                  updateFilter({ query: event.target.value })
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.preventDefault();
+                }}
+              />
+            </Field>
+            <Button
+              type="button"
+              size="small"
+              disabled={!query}
+              onClick={() => updateFilter({ query: "" })}
+            >
+              清除搜索
             </Button>
           </div>
+          <div
+            className="node-selector-region-tags"
+            role="group"
+            aria-label="按名称地区标识筛选"
+          >
+            {[
+              { id: "", label: "全部" },
+              ...NODE_REGIONS,
+              { id: "other", label: "其他" },
+            ].map((item) => (
+              <Button
+                key={item.id}
+                type="button"
+                size="small"
+                aria-pressed={region === item.id}
+                onClick={() =>
+                  updateFilter({ region: item.id as NodePreferences["region"] })
+                }
+              >
+                {item.label}
+              </Button>
+            ))}
+          </div>
+          <div className="node-selector-filter-row">
+            <Field label="协议筛选">
+              <select
+                className="select-trigger"
+                value={protocol}
+                onChange={(event) =>
+                  updateFilter({ protocol: event.target.value })
+                }
+              >
+                <option value="">全部协议</option>
+                {protocol && !protocols.includes(protocol) && (
+                  <option value={protocol}>
+                    {protocol.toUpperCase()}（当前订阅无此协议）
+                  </option>
+                )}
+                {protocols.map((value) => (
+                  <option key={value} value={value}>
+                    {value.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="传输筛选">
+              <select
+                className="select-trigger"
+                value={transport}
+                onChange={(event) =>
+                  updateFilter({ transport: event.target.value })
+                }
+              >
+                <option value="">全部传输</option>
+                {transport && !transports.includes(transport) && (
+                  <option value={transport}>
+                    {transport.toUpperCase()}（当前订阅无此传输）
+                  </option>
+                )}
+                {transports.map((value) => (
+                  <option key={value} value={value}>
+                    {value.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <label className="node-selector-favorites-only">
+              <input
+                type="checkbox"
+                aria-label="仅收藏"
+                checked={favoritesOnly}
+                onChange={(event) =>
+                  updateFilter({ favoritesOnly: event.target.checked })
+                }
+              />
+              仅收藏{" "}
+              <span className="text-muted">
+                ({favorites.filter((id) => nodeIds?.includes(id)).length})
+              </span>
+            </label>
+            <Button
+              type="button"
+              size="small"
+              disabled={!filterActive}
+              onClick={clearFilters}
+            >
+              重置筛选
+            </Button>
+          </div>
+          <p className="text-muted text-xs" role="status" aria-live="polite">
+            {filtered.length} 个匹配 / 共 {all.length} 个节点 · 本页{" "}
+            {filtered.length ? offset + 1 : 0}–
+            {Math.min(offset + NODE_PAGE_SIZE, filtered.length)} · 每页{" "}
+            {NODE_PAGE_SIZE} 个
+          </p>
+        </div>
+        <nav className="node-selector-pagination" aria-label="节点分页">
+          <Button
+            type="button"
+            size="small"
+            disabled={page <= 1}
+            onClick={() =>
+              setPreferences((previous) => ({ ...previous, page: page - 1 }))
+            }
+          >
+            上一页
+          </Button>
+          <label>
+            页码{" "}
+            <select
+              className="select-trigger"
+              value={page}
+              disabled={!filtered.length}
+              onChange={(event) =>
+                setPreferences((previous) => ({
+                  ...previous,
+                  page: Number(event.target.value),
+                }))
+              }
+            >
+              {Array.from({ length: pageCount }, (_, index) => (
+                <option key={index + 1} value={index + 1}>
+                  第 {index + 1} / {pageCount} 页
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button
+            type="button"
+            size="small"
+            disabled={page >= pageCount}
+            onClick={() =>
+              setPreferences((previous) => ({ ...previous, page: page + 1 }))
+            }
+          >
+            下一页
+          </Button>
+        </nav>
+        <div className="node-selector-list" ref={listRef}>
+          <ul className="node-selector-cards" aria-label="代理节点列表">
+            {visibleNodes.map((node) => (
+              <li
+                key={node.id}
+                className={`node-selector-card${selectedId === node.id ? " node-selector-card-selected" : ""}`}
+              >
+                <button
+                  ref={(element) => {
+                    if (element) rowRefs.current.set(node.id, element);
+                    else rowRefs.current.delete(node.id);
+                  }}
+                  className="node-selector-select"
+                  disabled={busy}
+                  type="button"
+                  aria-label={`选择节点 ${node.label}`}
+                  aria-pressed={selectedId === node.id}
+                  onClick={() => selectNode(node.id)}
+                >
+                  <span className="node-selector-name">
+                    <strong>{node.label}</strong>
+                    <span className="mono text-muted">{endpoint(node)}</span>
+                    <span className="node-selector-row-state">
+                      {node.id === nodes?.selectedNodeId && (
+                        <Badge>当前配置</Badge>
+                      )}
+                      {selectedId === node.id && (
+                        <Badge tone="primary">已选</Badge>
+                      )}
+                    </span>
+                  </span>
+                  <span className="node-selector-protocol">
+                    <strong>
+                      {node.protocol.toUpperCase()} /{" "}
+                      {node.transport.toUpperCase()}
+                    </strong>
+                    <span className="text-muted">
+                      {[
+                        node.reality && "REALITY",
+                        node.vision && "Vision",
+                        node.utls && "uTLS",
+                        node.udp && "UDP",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </span>
+                  </span>
+                </button>
+                <Button
+                  type="button"
+                  className="node-selector-favorite"
+                  size="small"
+                  aria-label={`${favoriteIds.has(node.id) ? "取消收藏" : "收藏"}节点 ${node.label}`}
+                  aria-pressed={favoriteIds.has(node.id)}
+                  disabled={importing}
+                  onClick={() => toggleFavorite(node.id)}
+                >
+                  <span aria-hidden="true">
+                    {favoriteIds.has(node.id) ? "★" : "☆"}
+                  </span>
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        {!all.length ? (
+          <EmptyState title="暂无节点" detail="先导入订阅" />
+        ) : (
+          !filtered.length && (
+            <EmptyState
+              title="没有匹配的节点"
+              detail={
+                favoritesOnly
+                  ? "当前没有匹配的收藏节点。可关闭收藏筛选或重置筛选。"
+                  : "尝试更短的关键词，或重置协议和传输筛选。"
+              }
+            >
+              <Button type="button" onClick={clearFilters}>
+                显示全部节点
+              </Button>
+            </EmptyState>
+          )
+        )}
+
+        <div className="config-form node-selector-config">
+          <Field label="节点 IPv6 策略">
+            <select
+              className="select-trigger"
+              disabled={busy || !configReady}
+              value={ipv6}
+              onChange={(event) => {
+                setPreferences((previous) => ({
+                  ...previous,
+                  ipv6: event.target.value as IPv6Policy,
+                }));
+                setSaved(undefined);
+              }}
+            >
+              <option value="follow">跟随代理</option>
+              <option value="direct">直连</option>
+              <option value="block">阻断</option>
+            </select>
+          </Field>
+          <details className="node-selector-advanced">
+            <summary>高级设置 · 监听端口</summary>
+            <div className="form-grid">
+              {(["mixed", "tproxy", "dns"] as const).map((name) => (
+                <Field key={name} label={`${name} 监听端口`}>
+                  <input
+                    disabled={busy || !configReady}
+                    type="number"
+                    required
+                    min={1}
+                    max={65535}
+                    value={Number.isNaN(ports[name]) ? "" : ports[name]}
+                    onChange={(event) => {
+                      setPreferences((previous) => ({
+                        ...previous,
+                        ports: {
+                          ...previous.ports,
+                          [name]: event.target.valueAsNumber,
+                        },
+                      }));
+                      setSaved(undefined);
+                    }}
+                  />
+                </Field>
+              ))}
+            </div>
+          </details>
+          {!validPorts && (
+            <p role="alert">
+              监听端口须为 1–65535 的整数，且三个端口不能重复。
+            </p>
+          )}
+          <p className="text-muted text-xs">
+            故障策略：回退直连。保存节点配置不会接管 LAN 客户端。
+          </p>
         </div>
       </form>
     </Panel>

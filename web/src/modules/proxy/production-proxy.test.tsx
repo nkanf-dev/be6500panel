@@ -12,10 +12,39 @@ vi.mock("../../app/console-context", () => ({
   useConsole: () => ({ health: { mode: "host" } }),
 }));
 afterEach(() => vi.unstubAllGlobals());
+const savedNodeConfig = {
+  service: "sing-box",
+  generation: runtimeStatus.generation,
+  config: JSON.stringify({
+    inbounds: [
+      {
+        type: "mixed",
+        tag: "mixed-in",
+        listen: "192.168.31.1",
+        listen_port: 2080,
+      },
+      {
+        type: "tproxy",
+        tag: "tproxy-in",
+        listen: "127.0.0.1",
+        listen_port: 7893,
+      },
+      {
+        type: "direct",
+        tag: "dns-in",
+        listen: "192.168.31.1",
+        listen_port: 6450,
+      },
+    ],
+    route: { rules: [{ ip_version: 6, outbound: "direct" }] },
+  }),
+};
 function setup() {
   let imported = false;
   let selected = false;
   const fetch = vi.fn((url: string, init: RequestInit) => {
+    if (url === "/api/runtime/config?service=sing-box")
+      return Promise.resolve(jsonResponse(savedNodeConfig));
     if (url === "/api/runtime")
       return Promise.resolve(
         jsonResponse({ enabled: true, services: [runtimeStatus] }),
@@ -83,15 +112,13 @@ describe("real proxy operations", () => {
       }),
     );
     await user.click(
-      screen.getByRole("radio", { name: "选择节点 Synthetic Node" }),
+      screen.getByRole("button", { name: "选择节点 Synthetic Node" }),
     );
     expect(
       fetch.mock.calls.filter(([url]) => url === "/api/proxy/select"),
     ).toHaveLength(0);
-    await user.click(
-      screen.getByRole("button", { name: "生成并 Commit 节点配置" }),
-    );
-    await screen.findByText(/配置已校验并保存 · SHA-256/);
+    await user.click(screen.getByRole("button", { name: "保存节点配置" }));
+    await screen.findByText("节点配置已保存");
     expect(fetch).toHaveBeenCalledWith(
       "/api/proxy/select",
       expect.objectContaining({
@@ -133,6 +160,8 @@ describe("real proxy operations", () => {
     const fetch = setup();
     let active = false;
     fetch.mockImplementation((url: string, init: RequestInit) => {
+      if (url === "/api/runtime/config?service=sing-box")
+        return Promise.resolve(jsonResponse(savedNodeConfig));
       if (url === "/api/runtime")
         return Promise.resolve(
           jsonResponse({
@@ -206,23 +235,28 @@ describe("real proxy operations", () => {
     const fetch = setup();
     let complete: (value: Response) => void = () => {};
     fetch.mockImplementation((url: string) =>
-      url === "/api/runtime"
-        ? Promise.resolve(
-            jsonResponse({ enabled: true, services: [runtimeStatus] }),
-          )
-        : url === "/api/proxy/nodes"
+      url === "/api/runtime/config?service=sing-box"
+        ? Promise.resolve(jsonResponse(savedNodeConfig))
+        : url === "/api/runtime"
           ? Promise.resolve(
-              jsonResponse({ ...proxyNodes, selectedNodeId: "node-synthetic" }),
+              jsonResponse({ enabled: true, services: [runtimeStatus] }),
             )
-          : new Promise<Response>((resolve) => {
-              complete = resolve;
-            }),
+          : url === "/api/proxy/nodes"
+            ? Promise.resolve(
+                jsonResponse({
+                  ...proxyNodes,
+                  selectedNodeId: "node-synthetic",
+                }),
+              )
+            : new Promise<Response>((resolve) => {
+                complete = resolve;
+              }),
     );
     const user = userEvent.setup();
     render(<ProxyPage />);
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "生成并 Commit 节点配置" }),
+        screen.getByRole("button", { name: "保存节点配置" }),
       ).toBeEnabled(),
     );
     await user.type(
@@ -230,9 +264,7 @@ describe("real proxy operations", () => {
       "https://subscriptions.example.test/new",
     );
     await user.click(screen.getByRole("button", { name: "解析并导入节点" }));
-    expect(
-      screen.getByRole("button", { name: "生成并 Commit 节点配置" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "保存节点配置" })).toBeDisabled();
     expect(screen.getByRole("tab", { name: "运行管理" })).toBeDisabled();
     complete(jsonResponse(proxyNodes));
     await screen.findByText("已导入 1 个节点");
