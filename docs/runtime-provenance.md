@@ -23,3 +23,17 @@ Only frpc, not frps. RawSHA256 d92fcc4e62232bae6d58030d2a73f3d2caf49e19742800c9a
 ## Rule data
 
 CN domain/IP SRS data remains fetched from the maintained source with upstream licensing/attribution. Not included in this runtime asset set. Panel source uses MIT; these external executables retain their own licenses.
+
+## sing-box 1.14.2 ARMv7 local telemetry build
+
+Unmodified upstream v1.14.2 source and the same Go1.26.2 compiler. Add the upstream `with_clash_api` build tag to the minimal build above; no QUIC, gVisor, Web UI, or file cache is enabled. The telemetry controller is private and binds only `127.0.0.1:9090`; the panel reads bounded connection counters. HTTPS request internals are not observable.
+
+```text
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath \
+  -tags with_utls,with_clash_api,badlinkname,tfogo_checklinkname0 \
+  -ldflags "-X runtime.godebugDefault=multipathtcp=0,tlssha1=1 -checklinkname=0 -X github.com/sagernet/sing-box/constant.Version=1.14.2 -s -w -buildid=" \
+  -o sing-box ./cmd/sing-box
+gzip -9 -n -c sing-box > sing-box-1.14.2-linux-armv7-telemetry.gz
+```
+
+ELF bytes `34013310`, SHA256 `e0f600f4b3115ffc28362f4e5f71dc1dfa3da6d7093df6a9aad27a603c4499ee`. Gzip bytes `12172894`, SHA256 `14cd2454e18ec60827e82a67d0a3a413c977aa35362afd2c9f3a79f9e5f02955`. The telemetry build adds about 0.19MiB to the minimal ELF. Existing minimal configurations remain supported; a telemetry controller is not silently added to an incompatible core.
