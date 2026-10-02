@@ -228,12 +228,17 @@ describe("observed device capture", () => {
     await user.click(choice("Phone test"));
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     const dialog = screen.getByRole("alertdialog", { name: "确认客户端接管" });
+    expect(
+      within(dialog).getByText(
+        "开启透明代理将接管指定终端的网络流量，请确认是否继续。",
+      ),
+    ).toBeInTheDocument();
     expect(within(dialog).getByText(first.mac)).toBeInTheDocument();
     expect(within(dialog).getByText(second.mac)).toBeInTheDocument();
     expect(within(dialog).queryByText(offline.mac)).not.toBeInTheDocument();
     expect(mutations("POST")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
-    await screen.findByText("接管中");
+    await screen.findByText("已生效");
     expect(fetch).toHaveBeenCalledWith(
       "/api/proxy/capture",
       expect.objectContaining({
@@ -246,7 +251,7 @@ describe("observed device capture", () => {
     );
     expect(mutations("POST")).toHaveLength(1);
     expect(
-      screen.getByText(/规则已应用（不代表互联网连通性已验证）/),
+      screen.getByText(/接管规则已生效（不代表互联网连通性已验证）/),
     ).toBeInTheDocument();
   });
   it("invalidates confirmation when selection, policy, restore or refresh changes", async () => {
@@ -283,7 +288,7 @@ describe("observed device capture", () => {
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     expect(mutations("POST")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
-    await screen.findByText("接管中");
+    await screen.findByText("已生效");
     expect(JSON.parse(mutations("POST")[0][1].body as string)).toEqual({
       devices: [{ mac: first.mac }, { mac: second.mac }, { mac: offline.mac }],
       ipv6: "direct",
@@ -319,7 +324,7 @@ describe("observed device capture", () => {
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     expect(mutations("POST")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
-    await screen.findByText("接管中");
+    await screen.findByText("已生效");
     expect(JSON.parse(mutations("POST")[1][1].body as string)).toEqual({
       devices: [{ mac: first.mac }, { mac: offline.mac }],
       ipv6: "direct",
@@ -408,7 +413,7 @@ describe("observed device capture", () => {
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     expect(mutations("POST")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
-    await screen.findByText("接管中");
+    await screen.findByText("已生效");
     expect(fetch).toHaveBeenCalledWith(
       "/api/proxy/capture",
       expect.objectContaining({
@@ -445,9 +450,10 @@ describe("saved versus live capture", () => {
     expect(choice("Missing test")).toBeChecked();
     expect(screen.getByText("未在当前 LAN 观察到")).toBeInTheDocument();
     expect(screen.getByText("已暂停")).toBeInTheDocument();
-    expect(
-      screen.getByText(/实时接管：未确认生效 · suspended/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/实时接管：未确认生效/)).toBeInTheDocument();
+    const diagnostics = screen.getByText("高级诊断").closest("details");
+    expect(diagnostics).not.toHaveAttribute("open");
+    expect(within(diagnostics!).getByText("suspended")).toBeInTheDocument();
     expect(screen.getByLabelText("接管 IPv6 策略")).toHaveValue("block");
     expect(screen.getByLabelText("客户端 IPv6")).toHaveValue("2001:db8::21");
     const region = within(
@@ -518,7 +524,7 @@ describe("saved versus live capture", () => {
     expect(screen.getByText(/兼容旧版地址选择/)).toHaveTextContent(first.ip);
     expect(choice("Mac test")).toBeChecked();
     expect(choice("Phone test")).not.toBeChecked();
-    expect(screen.getByText("接管中")).toBeInTheDocument();
+    expect(screen.getByText("已生效")).toBeInTheDocument();
   });
   it("Stop calls only runtime stop, suspends live capture and preserves checked devices", async () => {
     const { fetch, runtime, mutations } = setup({
@@ -585,9 +591,9 @@ describe("saved versus live capture", () => {
       },
     });
     await ready();
-    expect(screen.getByText("部分接管")).toBeInTheDocument();
+    expect(screen.getByText("部分已生效")).toBeInTheDocument();
     expect(
-      screen.getByText(/仅已解析设备的规则已应用；其余设备等待当前地址/),
+      screen.getByText(/仅已解析设备的接管规则已生效；其余设备等待当前地址/),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/未解析设备不会接管，也不会使用过期 IP/),
@@ -598,12 +604,12 @@ describe("saved versus live capture", () => {
       screen.getByRole("region", { name: "已保存的接管选择" }),
     );
     expect(region.getByText(second.mac).closest("li")).toHaveTextContent(
-      `${second.ip} · 实时规则已应用`,
+      `${second.ip} · 实时规则已生效`,
     );
     expect(
       region.getByText("02:00:00:00:00:99").closest("li"),
     ).toHaveTextContent("等待当前地址");
-    expect(screen.queryByText("接管中")).not.toBeInTheDocument();
+    expect(screen.queryByText("已生效")).not.toBeInTheDocument();
   });
   it("shows capture errors and pending cleanup instead of claiming a working path", async () => {
     setup({
@@ -618,7 +624,7 @@ describe("saved versus live capture", () => {
     expect(screen.getByText("清理待完成")).toBeInTheDocument();
     expect(screen.getByText("address unresolved")).toBeInTheDocument();
     expect(screen.getByText(/不能视为已撤回/)).toBeInTheDocument();
-    expect(screen.queryByText(/规则已应用/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/接管规则已生效/)).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "禁用接管并清除选择" }),
     ).toBeEnabled();
@@ -848,7 +854,7 @@ describe("device observation failures", () => {
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
     await screen.findByText(/current device unresolved · capture_failed/);
-    expect(screen.queryByText("接管中")).not.toBeInTheDocument();
+    expect(screen.queryByText("已生效")).not.toBeInTheDocument();
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(mutations("POST")).toHaveLength(1);
   });

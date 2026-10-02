@@ -102,11 +102,11 @@ export function CapturePanel({
     : capture.cleanupPending
       ? "清理待完成"
       : capture.active && capture.state === "partial"
-        ? "部分接管"
+        ? "部分已生效"
         : capture.error
           ? "接管异常"
           : capture.active
-            ? "接管中"
+            ? "已生效"
             : desired
               ? "已暂停"
               : retained
@@ -219,7 +219,7 @@ export function CapturePanel({
     <Panel>
       <PanelHeader
         title="设备接管"
-        subtitle="只接管明确勾选的 LAN 设备；默认 IPv6 直连。应用前须确认，策略须与已 Commit 的节点一致。"
+        subtitle="只接管明确勾选的 LAN 设备；默认 IPv6 直连。开启前须确认，策略须与已应用的节点配置一致。"
         action={
           <Badge
             tone={
@@ -261,7 +261,7 @@ export function CapturePanel({
                 !capture.cleanupPending &&
                 (!capture.error || capture.state === "partial") &&
                 client.ip
-                  ? " · 实时规则已应用"
+                  ? " · 实时规则已生效"
                   : !client.ip
                     ? " · 等待当前地址"
                     : " · 实时接管未生效"}
@@ -287,15 +287,30 @@ export function CapturePanel({
           {capture?.active &&
           !capture.cleanupPending &&
           capture.state === "partial"
-            ? "仅已解析设备的规则已应用；其余设备等待当前地址（不代表互联网连通性已验证）"
+            ? "仅已解析设备的接管规则已生效；其余设备等待当前地址（不代表互联网连通性已验证）"
             : capture?.active && !capture.cleanupPending && !capture.error
-              ? "规则已应用（不代表互联网连通性已验证）"
+              ? "接管规则已生效（不代表互联网连通性已验证）"
               : capture
                 ? "未确认生效"
                 : "状态未知"}
-          {capture?.state ? ` · ${capture.state}` : ""}
-          {capture?.active ? ` · ${capture.commands} 条命令` : ""}
         </p>
+        {capture && (
+          <details>
+            <summary>高级诊断</summary>
+            <dl className="key-values">
+              {capture.state && (
+                <div>
+                  <dt>接管状态</dt>
+                  <dd className="mono">{capture.state}</dd>
+                </div>
+              )}
+              <div>
+                <dt>实时规则命令数</dt>
+                <dd>{capture.commands}</dd>
+              </div>
+            </dl>
+          </details>
+        )}
         {capture?.cleanupPending && (
           <ErrorState message="接管规则清理尚未完成；请重试禁用接管并检查诊断，不能视为已撤回。" />
         )}
@@ -496,10 +511,10 @@ export function CapturePanel({
         {runtime.result && <p role="status">{runtime.result}</p>}
         {confirming === "apply" && (
           <div role="alertdialog" aria-label="确认客户端接管">
-            <p>
-              将替换已保存的选择，只对以下 {selected.length}{" "}
-              台设备应用透明代理和 DNS 接管。IPv6 策略为 {ipv6}
-              。离线设备等待当前地址。
+            <p>开启透明代理将接管指定终端的网络流量，请确认是否继续。</p>
+            <p className="text-muted text-xs">
+              将替换已保存的选择，仅接管以下 {selected.length} 台设备。IPv6
+              策略为 {ipv6}。离线设备等待当前地址。
             </p>
             <ul>
               {selected.map((mac) => {

@@ -190,7 +190,7 @@ describe("real proxy operations", () => {
       ),
     ).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
-    await screen.findByText("接管中");
+    await screen.findByText("已生效");
     expect(fetch).toHaveBeenCalledWith(
       "/api/proxy/capture",
       expect.objectContaining({
