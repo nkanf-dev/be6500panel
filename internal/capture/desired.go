@@ -145,11 +145,16 @@ func (c *Controller) Desired() Desired {
 	d.Devices = slices.Clone(d.Devices)
 	return d
 }
-func (c *Controller) saveDesiredLocked(d Desired) error {
+func (c *Controller) saveDesiredLocked(ctx context.Context, d Desired, recovery bool) error {
 	raw, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}
+	release, err := c.admitStorageLocked(ctx, temporaryStorageBytes(raw), recovery)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err = atomicSave(c.desiredPath, raw); err != nil {
 		// A directory sync may fail after rename committed. Treat the bytes
 		// actually on disk as authoritative so an off switch stays off here too.
@@ -176,11 +181,7 @@ func (c *Controller) Select(ctx context.Context, d Desired) (Status, error) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.failedPlan = nil
-	if err = c.saveDesiredLocked(normalized); err != nil {
-		return c.statusLocked(), errors.Join(err, c.cleanupLocked(ctx))
-	}
-	return c.restoreLocked(ctx)
+	return c.selectLocked(ctx, normalized)
 }
 
 // Disable persists the off switch before cleanup. Even failed cleanup cannot
@@ -188,14 +189,7 @@ func (c *Controller) Select(ctx context.Context, d Desired) (Status, error) {
 func (c *Controller) Disable(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := c.saveDesiredLocked(Desired{IPv6: c.desired.IPv6}); err != nil {
-		return errors.Join(err, c.cleanupLocked(ctx))
-	}
-	if err := c.cleanupLocked(ctx); err != nil {
-		c.restoreError = "capture_cleanup_failed"
-		return err
-	}
-	return nil
+	return c.disableLocked(ctx, Desired{IPv6: c.desired.IPv6})
 }
 
 // Restore is invoked only after accepted core listeners pass readiness.
@@ -220,6 +214,9 @@ func (c *Controller) restoreLocked(ctx context.Context) (Status, error) {
 	d := c.desired
 	d.Devices = slices.Clone(d.Devices)
 	input, clients, err := c.builder(ctx, d)
+	return c.restoreBuiltLocked(ctx, input, clients, err)
+}
+func (c *Controller) restoreBuiltLocked(ctx context.Context, input proxy.RulesPlanInput, clients []Client, err error) (Status, error) {
 	c.clients = slices.Clone(clients)
 	var partial *PartialScopeError
 	pendingDevices := errors.As(err, &partial)
@@ -317,14 +314,7 @@ func (c *Controller) DisableRetainingSelection(ctx context.Context) error {
 	defer c.mu.Unlock()
 	desired := c.desired
 	desired.Enabled = false
-	if err := c.saveDesiredLocked(desired); err != nil {
-		return errors.Join(err, c.cleanupLocked(ctx))
-	}
-	if err := c.cleanupLocked(ctx); err != nil {
-		c.restoreError = "capture_cleanup_failed"
-		return err
-	}
-	return nil
+	return c.disableLocked(ctx, desired)
 }
 
 // Refresh runs in the runtime mutation lane after current listener readiness.

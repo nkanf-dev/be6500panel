@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"be6500panel/internal/proxy"
+	"be6500panel/internal/storage"
 )
 
 type Runner func(context.Context, []string) ([]byte, error)
@@ -52,19 +53,21 @@ func (e *CommandError) Error() string {
 func (e *CommandError) Unwrap() error { return e.Err }
 
 type Controller struct {
-	mu             sync.Mutex
-	path           string
-	runner         Runner
-	tableNames     func() (map[string]int, error)
-	plan           *proxy.OwnedRulesPlan
-	active         bool
-	cleanupPending bool
-	desiredPath    string
-	desired        Desired
-	clients        []Client
-	restoreError   string
-	builder        Builder
-	failedPlan     *proxy.OwnedRulesPlan
+	mu               sync.Mutex
+	path             string
+	runner           Runner
+	tableNames       func() (map[string]int, error)
+	plan             *proxy.OwnedRulesPlan
+	active           bool
+	cleanupPending   bool
+	desiredPath      string
+	desired          Desired
+	clients          []Client
+	restoreError     string
+	builder          Builder
+	failedPlan       *proxy.OwnedRulesPlan
+	storageAdmission storage.Admission
+	storageReserved  bool
 }
 
 func New(dataDir string, runner Runner) (*Controller, error) {
@@ -135,22 +138,22 @@ func (c *Controller) applyLocked(ctx context.Context, input proxy.RulesPlanInput
 	if c.plan != nil {
 		return c.statusLocked(), errors.New("capture already staged; stop first")
 	}
-	input.ClientMACs = maps.Clone(input.ClientMACs)
-	input.ClientIPv4s = slices.Clone(input.ClientIPv4s)
-	input.ClientIPv6s = slices.Clone(input.ClientIPv6s)
-	input.EndpointIPs = slices.Clone(input.EndpointIPs)
-	input.ManagementIPs = slices.Clone(input.ManagementIPs)
-	input.RouterDNSAddresses = slices.Clone(input.RouterDNSAddresses)
+	input = cloneInput(input)
 	plan, err := proxy.PlanOwnedRules(input)
 	if err != nil {
 		return c.statusLocked(), err
 	}
 	plan = clonePlan(plan)
-	if err = c.preflight(ctx, plan); err != nil {
-		return c.statusLocked(), err
-	}
 	raw, err := json.Marshal(journal{OwnedRulesPlan: plan, Input: &input})
 	if err != nil {
+		return c.statusLocked(), err
+	}
+	release, err := c.admitStorageLocked(ctx, temporaryStorageBytes(raw), false)
+	if err != nil {
+		return c.statusLocked(), err
+	}
+	defer release()
+	if err = c.preflight(ctx, plan); err != nil {
 		return c.statusLocked(), err
 	}
 	if err = atomicSave(c.path, raw); err != nil {
@@ -341,4 +344,14 @@ func (c *Controller) absentMACChain(ctx context.Context, args []string, out []by
 	inspection := []string{args[0], "-w", "5", "-t", args[4], "-S", target}
 	output, inspectionErr := c.execute(ctx, inspection)
 	return resourceAbsent(inspection, output, inspectionErr)
+}
+
+func cloneInput(input proxy.RulesPlanInput) proxy.RulesPlanInput {
+	input.ClientMACs = maps.Clone(input.ClientMACs)
+	input.ClientIPv4s = slices.Clone(input.ClientIPv4s)
+	input.ClientIPv6s = slices.Clone(input.ClientIPv6s)
+	input.EndpointIPs = slices.Clone(input.EndpointIPs)
+	input.ManagementIPs = slices.Clone(input.ManagementIPs)
+	input.RouterDNSAddresses = slices.Clone(input.RouterDNSAddresses)
+	return input
 }
