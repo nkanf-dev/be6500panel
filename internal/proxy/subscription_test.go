@@ -153,7 +153,7 @@ func TestBoundedYAMLAndAmbiguity(t *testing.T) {
 	cases := []string{
 		strings.Repeat("x", MaxSubscriptionBytes+1), syntheticYAML + "\n---\nproxies: []",
 		"proxies: &private []", "proxies: []\nproxies: []",
-		"proxies: []\nextra: " + strings.Repeat("[", 40) + "0" + strings.Repeat("]", 40),
+		"proxies: []\nextra: " + strings.Repeat("[", 1025) + "0" + strings.Repeat("]", 1025),
 		"proxies: []\nextra: " + strings.Repeat("a", 8193),
 		"proxies: [{name: a}]\nrules: [123]",
 	}
@@ -208,6 +208,62 @@ func TestKnownRules(t *testing.T) {
 		if _, code, _ := parseRule(s, nil); code == "" {
 			t.Fatalf("unknown rule accepted: %s", s)
 		}
+	}
+}
+
+func TestSubscriptionReaderDoesNotConsumeBeyondLimit(t *testing.T) {
+	r := &countingReader{left: MaxSubscriptionBytes + 1000}
+	if _, err := ParseClashYAML(r); err == nil {
+		t.Fatal("oversized subscription accepted")
+	}
+	if r.read != MaxSubscriptionBytes+1 {
+		t.Fatalf("consumed %d bytes", r.read)
+	}
+}
+
+type countingReader struct{ left, read int }
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	if r.left == 0 {
+		return 0, io.EOF
+	}
+	n := len(p)
+	if n > r.left {
+		n = r.left
+	}
+	for i := 0; i < n; i++ {
+		p[i] = 'x'
+	}
+	r.read += n
+	r.left -= n
+	return n, nil
+}
+
+func TestPreflightRejectsASTAmplificationBeforeDecode(t *testing.T) {
+	hostile := []byte("proxies: []\nextra: [" + strings.Repeat("0,", 900000) + "0]\n")
+	if len(hostile) > MaxSubscriptionBytes {
+		t.Fatal("fixture must stay under byte cap")
+	}
+	if err := preflightYAML(hostile); err == nil || !strings.Contains(err.Error(), "lexical budget") {
+		t.Fatal("hostile AST amplification passed admission")
+	}
+	if _, err := ParseClashYAML(bytes.NewReader(hostile)); err == nil || !strings.Contains(err.Error(), "lexical budget") {
+		t.Fatal("hostile AST reached YAML parser")
+	}
+	// Collection/null-node punctuation, deeply nested flow, and indentation
+	// must be rejected by admission rather than after a full tree was built.
+	for _, data := range []string{
+		"proxies: []\nextra: [" + strings.Repeat(",", maxYAMLLexicalUnits) + "]",
+		"proxies: []\nextra: " + strings.Repeat("[", 1025) + "0" + strings.Repeat("]", 1025),
+		"proxies: []\n---\nextra: [" + strings.Repeat("0,", 100) + "0]",
+	} {
+		if err := preflightYAML([]byte(data)); err == nil {
+			t.Fatal("excessive or multi-document YAML passed preflight")
+		}
+	}
+	// Long whitespace sequences do not create a huge split-lines allocation.
+	if err := preflightYAML([]byte(strings.Repeat("\n", MaxSubscriptionBytes))); err == nil {
+		t.Fatal("whitespace amplification passed lexical admission")
 	}
 }
 func FuzzParseClashYAML(f *testing.F) {

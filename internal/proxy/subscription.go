@@ -33,6 +33,9 @@ func ParseClashYAML(r io.Reader) (Subscription, error) {
 	if len(data) > MaxSubscriptionBytes {
 		return out, fmt.Errorf("subscription exceeds %d bytes", MaxSubscriptionBytes)
 	}
+	if err = preflightYAML(data); err != nil {
+		return out, err
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var doc yaml.Node
 	if err = dec.Decode(&doc); err != nil {
@@ -121,6 +124,86 @@ func ParseClashYAML(r io.Reader) (Subscription, error) {
 	return out, nil
 }
 
+// preflightYAML bounds the work *before* yaml.v3 allocates an AST. The public
+// decoder has no streaming event/AST allocation limit. A byte limit alone is
+// not sufficient: a 2 MiB flow sequence can otherwise allocate >170 MiB.
+//
+// Count conservative lexical units, including punctuation inside quoted text
+// (overcounting is intentional). Each scalar/collection/null node requires a
+// run or delimiter. This conservative budget bounds tree amplification before
+// decoding. Collections and indentation have separate admission limits. This is an admission filter, not a second
+// YAML parser: yaml.v3 still decides all actual syntax and semantic values.
+const maxYAMLLexicalUnits = 65536
+
+func preflightYAML(data []byte) error {
+	units, run := 0, 0
+	for _, c := range data {
+		word := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
+		if word {
+			if run == 0 {
+				units++
+			}
+			run++
+			if run > 8192 {
+				return fmt.Errorf("subscription YAML scalar admission limit exceeded")
+			}
+		} else {
+			units++
+			run = 0
+		}
+		if units > maxYAMLLexicalUnits {
+			return fmt.Errorf("subscription YAML lexical budget exceeded")
+		}
+	}
+	// Syntax-agnostic structural admission avoids relying on quote parsing
+	// for a resource limit. Count even harmless brackets in names/comments.
+	// Accepted subscription syntax normally uses only a few nesting levels.
+	opens := 0
+	for _, c := range data {
+		if c == '[' || c == '{' {
+			opens++
+			if opens > 1024 {
+				return fmt.Errorf("subscription YAML collection admission limit exceeded")
+			}
+		}
+	}
+
+	indents := []int{0}
+	seenContent := false
+	for start := 0; start < len(data); {
+		end := start
+		for end < len(data) && data[end] != '\n' {
+			end++
+		}
+		line := bytes.TrimSuffix(data[start:end], []byte{'\r'})
+		start = end + 1
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 || trimmed[0] == '#' || trimmed[0] == '%' {
+			continue
+		}
+		// Column-zero document markers are rejected before allocating any second
+		// AST. Markers inside a quoted/block scalar can be rejected conservatively.
+		if bytes.HasPrefix(line, []byte("---")) && (len(line) == 3 || line[3] <= 32 || line[3] == '#') {
+			if seenContent {
+				return fmt.Errorf("subscription must contain one YAML document")
+			}
+			continue
+		}
+		seenContent = true
+		indent := len(line) - len(bytes.TrimLeft(line, " "))
+		for len(indents) > 1 && indent < indents[len(indents)-1] {
+			indents = indents[:len(indents)-1]
+		}
+		if indent > indents[len(indents)-1] {
+			indents = append(indents, indent)
+			if len(indents) > 32 {
+				return fmt.Errorf("subscription YAML indentation admission limit exceeded")
+			}
+		}
+	}
+
+	return nil
+}
 func validateYAML(n *yaml.Node, depth int, count *int) error {
 	*count++
 	if depth > 32 || *count > 100000 {

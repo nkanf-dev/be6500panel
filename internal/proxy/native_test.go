@@ -238,6 +238,32 @@ func TestIPv6PolicyAndSeparateListenerBinds(t *testing.T) {
 		})
 	}
 }
+
+func TestNativePrivateBypassDoesNotReserveFakeRangesWhenDisabled(t *testing.T) {
+	out, err := CompileNative(CompileInput{Node: testNode(t), IPv6: IPv6Follow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := decodeConfig(t, out)
+	found4, found6 := false, false
+	for _, r := range maps(config["route"].(map[string]any)["rules"]) {
+		prefixes, ok := r["ip_cidr"].([]any)
+		if !ok || r["outbound"] != "direct" {
+			continue
+		}
+		for _, prefix := range prefixes {
+			if prefix == "198.18.0.0/15" {
+				found4 = true
+			}
+			if prefix == "fc00::/7" {
+				found6 = true
+			}
+		}
+	}
+	if !found4 || !found6 {
+		t.Fatal("private bypass excludes unused fake allocations")
+	}
+}
 func TestCompilerRejectsInvalidInputs(t *testing.T) {
 	n := testNode(t)
 	inputs := []CompileInput{

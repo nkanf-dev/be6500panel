@@ -140,7 +140,7 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	}
 	bootstrap = sortedUnique(bootstrap)
 	// These are explicit bypasses, not a deprecated geoip private database.
-	private := []string{"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "192.0.0.0/24", "224.0.0.0/4", "240.0.0.0/4", "::/128", "::1/128", "fe80::/10", "fc00::/7", "ff00::/8"}
+	private := []string{"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "192.0.0.0/24", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4", "::/128", "::1/128", "fe80::/10", "fc00::/7", "ff00::/8"}
 
 	routeRules := []map[string]any{{"inbound": []string{"dns-in"}, "action": "hijack-dns"}}
 	if len(bypass) > 0 {
