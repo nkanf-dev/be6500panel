@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   verify:
-    if: ${{ !startsWith(github.event.head_commit.message, 'docs:') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,3 +24,5 @@ jobs:
       - run: make test
       - run: go test -race ./...
       - run: make build armv7
+      - run: cd web && bunx playwright install --with-deps chromium
+      - run: cd web && bun run test:browser
