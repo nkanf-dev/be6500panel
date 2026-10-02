@@ -117,12 +117,10 @@ describe("managed runtime controls", () => {
       fetch.mock.calls.filter(([url]) => url === "/api/runtime/configure"),
     ).toHaveLength(0);
     expect(
-      screen.getByRole("button", { name: "校验并 Commit 配置" }),
+      screen.getByRole("button", { name: "校验并应用更改" }),
     ).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "审阅配置差异" }));
-    await user.click(
-      screen.getByRole("button", { name: "校验并 Commit 配置" }),
-    );
+    await user.click(screen.getByRole("button", { name: "校验并应用更改" }));
     await screen.findByText("配置已变化 · generation_conflict");
     expect(screen.getByLabelText("原生配置内容")).toHaveValue('{"log":{}}');
     expect(fetch).toHaveBeenCalledWith(
@@ -169,9 +167,7 @@ describe("managed runtime controls", () => {
       ),
     ).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "审阅配置差异" }));
-    await user.click(
-      screen.getByRole("button", { name: "校验并 Commit 配置" }),
-    );
+    await user.click(screen.getByRole("button", { name: "校验并应用更改" }));
     await screen.findByText("原生配置已校验并保存");
     expect(fetch).toHaveBeenCalledWith(
       "/api/runtime/configure",

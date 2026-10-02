@@ -19,5 +19,13 @@ describe("read-only plan status", () => {
     expect(screen.getByText("拟议步骤")).toBeInTheDocument();
     expect(container.querySelector(".plan-steps .text-success")).toBeNull();
     expect(screen.getByRole("button", { name: "应用计划" })).toBeDisabled();
+    const diagnostics = screen.getByText("高级诊断").closest("details");
+    expect(diagnostics).not.toHaveAttribute("open");
+    expect(container.querySelector(".panel-header")).not.toHaveTextContent(
+      plan.id,
+    );
+    expect(container.querySelector(".panel-header")).not.toHaveTextContent(
+      "generation",
+    );
   });
 });

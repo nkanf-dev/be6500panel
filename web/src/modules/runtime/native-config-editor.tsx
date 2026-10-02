@@ -78,7 +78,7 @@ export function NativeConfigEditor({
     <Panel>
       <PanelHeader
         title="原生配置"
-        subtitle={`${runtime.service === "sing-box" ? "JSON" : "TOML"} · generation ${generation ?? "—"}`}
+        subtitle={`${runtime.service === "sing-box" ? "JSON" : "TOML"} · 校验后保存，是否已生效请查看运行状态`}
         action={
           <Button
             size="small"
@@ -128,19 +128,21 @@ export function NativeConfigEditor({
         </Field>
         {error !== undefined && <ErrorState message={errorMessage(error)} />}
         {stale && (
-          <ErrorState message="配置 generation 已变化 · generation_conflict。保留当前编辑内容；重新载入后再保存。" />
+          <ErrorState message="配置已被更新。当前编辑内容已保留，请重新载入最新配置后再应用更改。" />
         )}
         {reviewing && (
           <div aria-label="原生配置差异">
             <h3>配置差异</h3>
-            <p className="text-muted text-xs">- 已保存 · + 待提交</p>
+            <p className="text-muted text-xs">- 已保存 · + 待应用更改</p>
             <pre className="mono wrap">
               {nativeConfigDiff(original, config)}
             </pre>
           </div>
         )}
         {saved && (
-          <p role="status">保存完成。再次编辑前请载入最新 generation。</p>
+          <p role="status">
+            配置已保存。再次编辑前请载入最新配置；是否已生效请查看运行状态。
+          </p>
         )}
         <div className="form-actions">
           <span className="text-muted text-xs">先载入；保存前执行原生校验</span>
@@ -167,11 +169,32 @@ export function NativeConfigEditor({
                 !reviewing
               }
             >
-              校验并 Commit 配置
+              校验并应用更改
             </Button>
           </div>
         </div>
       </form>
+      <details className="panel-bottom">
+        <summary>高级诊断</summary>
+        <dl className="key-values">
+          <div>
+            <dt>编辑基线</dt>
+            <dd className="mono">generation {generation ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>当前配置</dt>
+            <dd className="mono">
+              generation {runtime.status?.generation ?? "—"}
+            </dd>
+          </div>
+          {stale && (
+            <div>
+              <dt>状态码</dt>
+              <dd className="mono">generation_conflict</dd>
+            </div>
+          )}
+        </dl>
+      </details>
       <Dialog.Root
         open={replaceAction !== undefined}
         onOpenChange={(open) => {
@@ -184,8 +207,7 @@ export function NativeConfigEditor({
             <div className="config-form">
               <Dialog.Title>丢弃未保存的原生配置？</Dialog.Title>
               <Dialog.Description>
-                当前编辑尚未
-                Commit。继续会替换本地文本，不会更改已保存的运行配置。
+                当前编辑尚未应用更改。继续会替换本地文本，不会更改已保存的运行配置。
               </Dialog.Description>
               <div className="form-actions">
                 <Dialog.Close asChild>

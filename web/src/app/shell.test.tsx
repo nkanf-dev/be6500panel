@@ -36,6 +36,9 @@ describe("truthful workspace control labels", () => {
     view();
     expect(screen.getByText("配置控制已启用")).toBeInTheDocument();
     expect(screen.queryByText("Full control")).not.toBeInTheDocument();
+    expect(screen.getByText("高级诊断").closest("details")).not.toHaveAttribute(
+      "open",
+    );
   });
   it("keeps read-only deployment explicit", () => {
     state.health = { mode: "host", readOnly: true };

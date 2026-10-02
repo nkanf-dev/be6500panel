@@ -38,9 +38,9 @@ export function ProxySetupGuidance({
           : !status.artifactAvailable
             ? "先获取校验过的 sing-box 运行文件"
             : !nodes?.nodes.length
-              ? "下一步：导入自己的订阅，再选择节点并 Commit 配置"
+              ? "下一步：导入自己的订阅，再选择节点并应用更改"
               : !status.configured
-                ? "下一步：选择节点并 Commit 配置；保存不会自动启动"
+                ? "下一步：选择节点并应用更改；核心未运行时只保存配置，不会自动启动"
                 : status.state !== "running"
                   ? "配置已保存；到运行管理启动 sing-box"
                   : "核心运行中；需要透明代理时再单独审阅一个客户端的接管";
@@ -83,7 +83,7 @@ export function ProxySetupGuidance({
                   : "待获取"
                 : "未知"}
             </Badge>{" "}
-            在运行管理中填写 HTTPS 地址、SHA-256 与匹配设备的版本。
+            在运行管理中获取适配设备的运行文件，下载后先校验再使用。
           </li>
           <li>
             导入并选择节点：
@@ -93,7 +93,7 @@ export function ProxySetupGuidance({
             当前只支持 Clash YAML 中的 VLESS / TCP 节点，不是任意订阅格式转换。
           </li>
           <li>
-            Commit 配置：
+            应用更改：
             <Badge>
               {status
                 ? status.configured
@@ -101,9 +101,7 @@ export function ProxySetupGuidance({
                   : "待配置"
                 : "未知"}
             </Badge>{" "}
-            更换节点需重新
-            Commit；预览策略不影响这里。服务端还需预置已校验的本地规则集；缺失时会返回
-            rules_unavailable，浏览器尚无规则集下载入口。
+            更换节点后需再次应用更改。核心未运行时只保存配置；预览策略不影响这里。服务端还需预置已校验的本地规则集，浏览器尚无规则集下载入口。
           </li>
           <li>
             启动核心：
@@ -121,6 +119,13 @@ export function ProxySetupGuidance({
             不自动使用代理。
           </li>
         </ol>
+        <details>
+          <summary>高级诊断</summary>
+          <p className="text-muted text-xs">
+            本地规则集缺失时返回 rules_unavailable；运行文件下载需校验
+            SHA-256。应用更改成功不代表远端节点已连通。
+          </p>
+        </details>
         <div className="form-actions">
           <Button
             type="button"

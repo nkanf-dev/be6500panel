@@ -19,11 +19,7 @@ export function PlanView({
     <Panel className="plan-panel">
       <PanelHeader
         title="变更计划"
-        subtitle={
-          plan
-            ? `generation ${plan.generation} · ${plan.id}`
-            : "验证后生成协调步骤"
-        }
+        subtitle={plan ? "只读预览，不应用运行配置" : "验证后生成协调步骤"}
         action={
           plan && (
             <Badge tone={stale ? "warning" : "success"}>
@@ -69,6 +65,19 @@ export function PlanView({
               </ul>
             </div>
           )}
+          <details className="panel-bottom">
+            <summary>高级诊断</summary>
+            <dl className="key-values">
+              <div>
+                <dt>计划标识</dt>
+                <dd className="mono wrap">{plan.id}</dd>
+              </div>
+              <div>
+                <dt>计划代际</dt>
+                <dd>{plan.generation}</dd>
+              </div>
+            </dl>
+          </details>
           <div className="plan-footer">
             <span className="text-muted text-xs">
               此预览不能应用；实际配置请在节点与运行管理中操作

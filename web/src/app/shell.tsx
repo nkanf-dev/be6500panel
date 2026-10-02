@@ -146,7 +146,12 @@ export function Shell({
           >
             <PanelLeftClose size={16} />
           </Button>
-          {!collapsed && <span>v0.1.0</span>}
+          {!collapsed && (
+            <details>
+              <summary>高级诊断</summary>
+              <span>面板版本 v0.1.0</span>
+            </details>
+          )}
         </div>
       </div>
     </>

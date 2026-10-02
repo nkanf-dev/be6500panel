@@ -27,7 +27,16 @@ describe("native runtime config replacement", () => {
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
-    render(<NativeConfigEditor runtime={runtime} />);
+    const { container } = render(<NativeConfigEditor runtime={runtime} />);
+    expect(
+      screen.getByRole("button", { name: "校验并应用更改" }),
+    ).toBeDisabled();
+    expect(screen.getByText("高级诊断").closest("details")).not.toHaveAttribute(
+      "open",
+    );
+    expect(container.querySelector(".panel-header")).not.toHaveTextContent(
+      "generation",
+    );
     fireEvent.click(screen.getByRole("button", { name: "载入配置" }));
     await waitFor(() =>
       expect(screen.getByLabelText("原生配置内容")).toHaveValue("{}"),
