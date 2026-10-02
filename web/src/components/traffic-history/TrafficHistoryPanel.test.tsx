@@ -103,7 +103,7 @@ describe("durable history panel", () => {
     expect(screen.getByText("1 分钟 · 3.3%")).toBeInTheDocument();
     expect(screen.getByText("30 秒")).toBeInTheDocument();
     expect(screen.getByText("400 天")).toBeInTheDocument();
-    expect(screen.getByText("已持久化")).toBeInTheDocument();
+    expect(screen.getByText("持久存储已启用")).toBeInTheDocument();
     expect(screen.getByText("2026-10-02T17:00:00.000Z")).toBeInTheDocument();
     expect(screen.getByText(/不补齐启用前的历史/)).toBeInTheDocument();
     expect(screen.queryByLabelText("样本范围")).not.toBeInTheDocument();
@@ -141,6 +141,40 @@ describe("durable history panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "导出 CSV" }));
     expect(vi.mocked(downloadTrafficHistory).mock.calls[0][0].range).toBe("1y");
   });
+  it("distinguishes enabled persistence from unsynced latest measurements and reports the actual flush time", async () => {
+    load.mockResolvedValue({
+      ...historyFixture(),
+      maxUnsyncedSeconds: 60,
+      lastFlushAt: "2026-10-02T18:00:00Z",
+    });
+    renderPanel();
+    await screen.findByText("持久存储已启用");
+    expect(screen.queryByText("已持久化")).not.toBeInTheDocument();
+    const persistence =
+      screen.getByText(/持久存储已启用不表示最新测量已全部写入/);
+    expect(persistence).toHaveTextContent("最近最多 1 分钟的未写入测量");
+    expect(persistence).toHaveTextContent(
+      "最近成功持久写入：2026-10-02T18:00:00.000Z（UTC）",
+    );
+    expect(
+      screen.getByText(/当前接口标签不代表每条历史记录归属同一接口/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("服务器 WAN 聚合历史（当前接口：WAN · test-wan）", {
+        selector: ".viz-source",
+      }),
+    ).toBeInTheDocument();
+  });
+  it("does not fabricate a successful flush timestamp or write-loss bound when the API omits them", async () => {
+    load.mockResolvedValue(historyFixture());
+    renderPanel();
+    await screen.findByText("持久存储已启用");
+    const persistence =
+      screen.getByText(/持久存储已启用不表示最新测量已全部写入/);
+    expect(persistence).toHaveTextContent("服务未报告未写入测量的最大丢失窗口");
+    expect(persistence).toHaveTextContent("尚未报告成功持久写入时间");
+    expect(persistence).not.toHaveTextContent("最近成功持久写入：");
+  });
   it("makes persistence failures visible instead of implying durable history", async () => {
     load.mockResolvedValue({
       ...historyFixture(),
@@ -148,7 +182,7 @@ describe("durable history panel", () => {
       error: "permission denied: history path",
     });
     renderPanel();
-    expect(await screen.findByText("未持久化")).toBeInTheDocument();
+    expect(await screen.findByText("持久存储未启用")).toBeInTheDocument();
     expect(
       screen.getByText("permission denied: history path"),
     ).toBeInTheDocument();
@@ -185,7 +219,7 @@ describe("durable history panel", () => {
     expect(load).not.toHaveBeenCalled();
     expect(screen.getByText("演示数据")).toBeInTheDocument();
     expect(screen.getByText(/不代表服务器历史记录/)).toBeInTheDocument();
-    expect(screen.queryByText("已持久化")).not.toBeInTheDocument();
+    expect(screen.queryByText("持久存储已启用")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "导出 CSV" }),
     ).not.toBeInTheDocument();

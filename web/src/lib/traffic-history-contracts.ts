@@ -68,6 +68,8 @@ export const TrafficHistorySchema = Schema.Struct({
     coverageSeconds: nonNegative,
   }),
   oldestAt: Schema.optional(rfc3339),
+  lastFlushAt: Schema.optional(rfc3339),
+  maxUnsyncedSeconds: Schema.optional(nonNegative),
   error: Schema.optional(Schema.String),
 });
 export type TrafficHistorySample = typeof TrafficHistorySampleSchema.Type;

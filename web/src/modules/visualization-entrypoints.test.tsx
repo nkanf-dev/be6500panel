@@ -117,7 +117,7 @@ describe("production visualization entry points", () => {
     const fetch = vi.fn().mockResolvedValue(jsonResponse(historyFixture()));
     vi.stubGlobal("fetch", fetch);
     renderPanel(<OverviewPage navigate={vi.fn()} />);
-    await screen.findByText("来源：WAN · test-wan");
+    await screen.findByText("来源：服务器 WAN 聚合历史（当前接口：WAN · test-wan）");
     expect(
       screen.getByRole("button", { name: "编辑布局" }),
     ).toBeInTheDocument();
@@ -133,7 +133,10 @@ describe("production visualization entry points", () => {
     ).not.toBeInTheDocument();
     const traffic = screen.getByRole("region", { name: "WAN 流量历史" });
     expect(
-      within(traffic).getByText("WAN · test-wan", { selector: ".viz-source" }),
+      within(traffic).getByText(
+        "服务器 WAN 聚合历史（当前接口：WAN · test-wan）",
+        { selector: ".viz-source" },
+      ),
     ).toBeInTheDocument();
     expect(within(traffic).getByRole("img")).toBeInTheDocument();
     expect(

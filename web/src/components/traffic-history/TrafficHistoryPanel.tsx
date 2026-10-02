@@ -151,7 +151,7 @@ export function TrafficHistoryPanel({
                 <div>
                   <dt>持久存储</dt>
                   <dd>
-                    {data.persistent ? "已持久化" : "未持久化"}
+                    {data.persistent ? "持久存储已启用" : "持久存储未启用"}
                     {!data.enabled && " · 记录未启用"}
                   </dd>
                 </div>
@@ -164,11 +164,26 @@ export function TrafficHistoryPanel({
                   </dd>
                 </div>
               </dl>
+              {data.persistent && (
+                <p className="traffic-history-note">
+                  持久存储已启用不表示最新测量已全部写入。
+                  {data.maxUnsyncedSeconds !== undefined
+                    ? `存储正常时，异常断电或进程退出可能丢失最近最多 ${trafficDuration(data.maxUnsyncedSeconds)}的未写入测量；写入故障时可能超过此窗口。`
+                    : "服务未报告未写入测量的最大丢失窗口。"}
+                  {data.lastFlushAt
+                    ? `最近成功持久写入：${trafficTimestamp(data.lastFlushAt)}（UTC）。`
+                    : "尚未报告成功持久写入时间。"}
+                </p>
+              )}
               {data.enabled && !data.persistent && (
                 <p className="traffic-history-note" role="alert">
                   历史未写入持久存储；请检查服务存储配置和错误。重启后记录可能丢失。
                 </p>
               )}
+              <p className="traffic-history-note">
+                历史为各时段默认路由 WAN
+                的聚合记录；当前接口标签不代表每条历史记录归属同一接口。
+              </p>
               <p className="traffic-history-note">
                 仅显示实际记录，不补齐启用前的历史。总量来自接口计数器差值，不是速率求和。缺失或不完整时间桶在曲线上留空，已有测量仍可在数据表中查看。
               </p>
@@ -186,7 +201,7 @@ export function TrafficHistoryPanel({
       <TrafficTrend
         demo={demo}
         samples={hasMeasurements ? data?.samples : []}
-        source={data?.source || "服务器 WAN 记录"}
+        source={`服务器 WAN 聚合历史（当前接口：${data?.source || "尚未选择"}）`}
         title="WAN 流量历史"
         range={data?.range}
         resolutionSeconds={data?.resolutionSeconds}

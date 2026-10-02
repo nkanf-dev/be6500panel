@@ -32,6 +32,27 @@ describe("durable history HTTP contract", () => {
       );
     },
   );
+  it("decodes optional flush metadata without treating enabled storage as fully synced", async () => {
+    const history = {
+      ...historyFixture(),
+      lastFlushAt: "2026-10-02T18:00:00Z",
+      maxUnsyncedSeconds: 60,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond(history)));
+    await expect(loadTrafficHistory("30m")).resolves.toEqual(history);
+    expect(() =>
+      Schema.decodeUnknownSync(TrafficHistorySchema)({
+        ...history,
+        maxUnsyncedSeconds: -1,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(TrafficHistorySchema)({
+        ...history,
+        lastFlushAt: "18:00",
+      }),
+    ).toThrow();
+  });
   it("rejects a mismatched range instead of displaying it under a different selection", async () => {
     vi.stubGlobal(
       "fetch",
