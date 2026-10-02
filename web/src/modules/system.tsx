@@ -17,6 +17,10 @@ import {
 import { useConsole } from "../app/console-context";
 import { errorMessage } from "../lib/api";
 import { bytes, timestamp, uptime } from "../lib/format";
+import {
+  ConfigurationEditor,
+  ConfigurationWorkspace,
+} from "../components/configuration";
 import { LogsPanel } from "./logs";
 import { useEffect, useState } from "react";
 
@@ -48,6 +52,9 @@ export function SystemPage() {
           {[
             { id: "resources", label: "系统资源", icon: Cpu },
             { id: "diagnostics", label: "诊断与日志", icon: FileText },
+            { id: "configuration", label: "系统配置", icon: Terminal },
+            { id: "management", label: "SSH 配置", icon: Terminal },
+            { id: "changes", label: "配置变更", icon: FileText },
           ].map((item) => (
             <button
               role="tab"
@@ -68,7 +75,13 @@ export function SystemPage() {
       {systemError !== undefined && (
         <ErrorState message={errorMessage(systemError)} onRetry={refresh} />
       )}
-      {tab === "resources" ? (
+      {tab === "configuration" ? (
+        <ConfigurationEditor module="system" />
+      ) : tab === "management" ? (
+        <ConfigurationEditor module="dropbear" />
+      ) : tab === "changes" ? (
+        <ConfigurationWorkspace />
+      ) : tab === "resources" ? (
         system ? (
           <>
             <div className="two-column">

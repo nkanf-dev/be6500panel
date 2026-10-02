@@ -1,92 +1,80 @@
-import { Activity, ChevronRight, Plus } from "lucide-react";
 import { useState } from "react";
-import { useConsole } from "../app/console-context";
+import { ConfigurationEditor } from "../components/configuration";
+import { RouterViewTabs, type RouterView } from "./router-view-tabs";
+import { RouterDevices } from "./router-devices";
+import { RouterDns } from "./router-dns";
+import { RouterFirewall } from "./router-firewall";
 import {
-  Badge,
-  Button,
-  EmptyState,
-  Panel,
-  PanelHeader,
-} from "../components/ui/primitives";
+  RouterObservationFrame,
+  RouterToolbar,
+  useRouterObservation,
+} from "./router-frame";
 import { moduleById, type PageId } from "./registry";
-import { ActivityHeatmap } from "../components/visualizations";
+import { RouterWifi } from "./router-wifi";
 
-const columns: Record<string, readonly string[]> = {
-  devices: ["设备名称", "IP 地址", "连接方式", "状态", "策略"],
-  wifi: ["无线网络", "频段", "信道", "安全协议", "状态"],
-  dns: ["解析器", "协议", "地址", "路由策略", "状态"],
-  firewall: ["规则", "链", "匹配条件", "动作", "命中"],
-};
-const entities: Record<string, string> = {
-  devices: "设备发现",
-  wifi: "无线适配器",
-  dns: "DNS 适配器",
-  firewall: "防火墙适配器",
-};
+const observationPages = {
+  devices: {
+    modules: ["devices"],
+    description: "DHCP 租约与 ARP 记录 · ARP 状态不等同于可达性探测",
+    component: RouterDevices,
+  },
+  wifi: {
+    modules: ["wifi"],
+    description: "UCI 无线配置 · 配置信道不等同于实际射频信道",
+    component: RouterWifi,
+    configurationModule: "wireless",
+  },
+  dns: {
+    modules: ["dns", "devices.leases"],
+    description: "上游解析器与 DHCP 租约计数",
+    component: RouterDns,
+    configurationModule: "dhcp",
+  },
+  firewall: {
+    modules: ["firewall"],
+    description: "filter 默认策略 · 规则数为各表总计",
+    component: RouterFirewall,
+    configurationModule: "firewall",
+  },
+} as const;
+
+// Keep the export name used by existing application routes.
 export function UnavailablePage({ id }: { id: PageId }) {
-  const registration = moduleById(id);
-  const { capabilities, health } = useConsole();
-  const module = capabilities.find((item) => item.id === id);
-  const [showDetails, setShowDetails] = useState(false);
-  const Icon = registration.icon;
+  const page = observationPages[id as keyof typeof observationPages];
+  const observation = useRouterObservation(page?.modules ?? []);
+  const [view, setView] = useState<RouterView>("observation");
+  if (!page) return null;
+  const configurationModule =
+    "configurationModule" in page ? page.configurationModule : undefined;
+  const Content = page.component;
   return (
     <div className="page-stack">
-      <div className="page-toolbar">
-        <span className="status-text text-muted">
-          <Activity size={14} />
-          {entities[id]} · 未接入
-        </span>
-        <Button size="small" disabled>
-          <Plus size={14} />
-          {id === "devices" ? "添加策略" : "新建配置"}
-        </Button>
-      </div>
-      <Panel>
-        <PanelHeader
-          title={registration.title}
-          subtitle={registration.description}
-          action={<Badge>未接入</Badge>}
-        />
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                {columns[id]?.map((column) => (
-                  <th key={column}>{column}</th>
-                ))}
-              </tr>
-            </thead>
-          </table>
+      {configurationModule && (
+        <div className="page-toolbar">
+          <RouterViewTabs
+            label={`${moduleById(id).title}视图`}
+            value={view}
+            onChange={setView}
+          />
         </div>
-        <EmptyState
-          icon={<Icon size={26} />}
-          title={`${entities[id]}未接入`}
-          detail="等待设备适配器"
-        >
-          <Button
-            variant="ghost"
-            size="small"
-            onClick={() => setShowDetails(!showDetails)}
+      )}
+      {configurationModule && view === "configuration" ? (
+        <ConfigurationEditor
+          key={configurationModule}
+          module={configurationModule}
+        />
+      ) : (
+        <>
+          <RouterToolbar observation={observation} />
+          <RouterObservationFrame
+            title={moduleById(id).title}
+            subtitle={page.description}
+            observation={observation}
           >
-            {showDetails ? "收起能力" : "能力详情"}
-            <ChevronRight size={14} />
-          </Button>
-        </EmptyState>
-        {showDetails && (
-          <div className="capability-detail">
-            {module?.capabilities.map((capability) => (
-              <div key={capability.id}>
-                <span>{capability.title}</span>
-                <Badge tone={capability.supported ? "success" : "neutral"}>
-                  {capability.supported ? "支持" : "未接入"}
-                </Badge>
-                <p>{capability.reason}</p>
-              </div>
-            )) ?? <p>尚未读取能力清单</p>}
-          </div>
-        )}
-      </Panel>
-      {id === "devices" && <ActivityHeatmap demo={health?.mode === "demo"} />}
+            {(snapshot) => <Content snapshot={snapshot} />}
+          </RouterObservationFrame>
+        </>
+      )}
     </div>
   );
 }

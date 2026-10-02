@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { App } from "./app";
 import { useConsole } from "./console-context";
+import {
+  routerSnapshot,
+  jsonResponse,
+} from "../modules/production-fixtures.test-data";
 import { errorMessage } from "../lib/api";
 import { ThemeProvider } from "../theme";
 
@@ -75,6 +79,8 @@ beforeEach(() => {
       );
     if (url === "/api/modules")
       return Promise.resolve(respond({ modules: [] }));
+    if (url === "/api/router")
+      return Promise.resolve(jsonResponse(routerSnapshot));
     if (url === "/api/system")
       return Promise.resolve(
         observationFailed

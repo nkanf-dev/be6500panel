@@ -21,8 +21,15 @@ import { bytes, timestamp, uptime } from "../lib/format";
 import { modules, type PageId } from "./registry";
 
 export function OverviewPage({ navigate }: { navigate: (id: PageId) => void }) {
-  const { system, systemError, health, capabilities, connection } =
-    useConsole();
+  const {
+    system,
+    systemError,
+    health,
+    capabilities,
+    connection,
+    trafficSamples,
+    trafficSource,
+  } = useConsole();
   const memoryUsed = system
     ? Math.max(0, system.memory.totalBytes - system.memory.availableBytes)
     : undefined;
@@ -94,7 +101,11 @@ export function OverviewPage({ navigate }: { navigate: (id: PageId) => void }) {
         <ErrorState message={errorMessage(systemError)} />
       )}
       <div className="dashboard-grid">
-        <TrafficTrend demo={health?.mode === "demo"} />
+        <TrafficTrend
+          demo={health?.mode === "demo"}
+          samples={trafficSamples}
+          source={trafficSource}
+        />
         <Panel className="environment-panel">
           <PanelHeader
             title="运行环境"
@@ -128,7 +139,13 @@ export function OverviewPage({ navigate }: { navigate: (id: PageId) => void }) {
             </div>
             <div>
               <dt>写入策略</dt>
-              <dd>只读</dd>
+              <dd>
+                {health
+                  ? health.readOnly
+                    ? "观察模式"
+                    : "Commit 配置 / 运行管理"
+                  : "—"}
+              </dd>
             </div>
           </dl>
           <div className="panel-bottom">

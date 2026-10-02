@@ -4,10 +4,16 @@ import {
   useContext,
   useEffect,
   useState,
+  useRef,
   type ReactNode,
 } from "react";
 import { api, ApiError, runRequest } from "../lib/api";
-import type { Health, ModuleInfo, SystemInfo } from "../lib/contracts";
+import type {
+  Health,
+  ModuleInfo,
+  SystemInfo,
+  RouterSnapshot,
+} from "../lib/contracts";
 import { connectStatusStream, type ConnectionState } from "../lib/events";
 
 interface ConsoleContextValue {
@@ -15,6 +21,12 @@ interface ConsoleContextValue {
   capabilities: readonly ModuleInfo[];
   system?: SystemInfo;
   systemError?: unknown;
+  router?: RouterSnapshot;
+  routerError?: unknown;
+  routerLoading: boolean;
+  refreshRouter: () => void;
+  trafficSamples: readonly { time: string; rx: number; tx: number }[];
+  trafficSource?: string;
   connection: ConnectionState;
   refresh: () => void;
   refreshing: boolean;
@@ -32,11 +44,22 @@ export function ConsoleProvider({
   const [capabilities, setCapabilities] = useState<readonly ModuleInfo[]>([]);
   const [system, setSystem] = useState<SystemInfo>();
   const [systemError, setSystemError] = useState<unknown>();
+  const [router, setRouter] = useState<RouterSnapshot>();
+  const [routerError, setRouterError] = useState<unknown>();
+  const [routerLoading, setRouterLoading] = useState(true);
+  const sampleRouter = useRef<() => void>(() => {});
+  const [trafficSamples, setTrafficSamples] = useState<
+    { time: string; rx: number; tx: number }[]
+  >([]);
+  const [trafficSource, setTrafficSource] = useState<string>();
+  const trafficInterface = useRef("");
+  const refreshRouter = useCallback(() => sampleRouter.current(), []);
   const [error, setError] = useState<unknown>();
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [refreshing, setRefreshing] = useState(true);
   const refresh = useCallback(() => {
     setRefreshing(true);
+    refreshRouter();
     const handle = (error: unknown) => {
       if (error instanceof ApiError && error.status === 401) onUnauthorized();
       return error;
@@ -60,7 +83,7 @@ export function ConsoleProvider({
         })
         .catch((error) => setSystemError(handle(error))),
     ]).finally(() => setRefreshing(false));
-  }, [onUnauthorized]);
+  }, [onUnauthorized, refreshRouter]);
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -123,6 +146,92 @@ export function ConsoleProvider({
       disposeStream();
     };
   }, [onUnauthorized]);
+  // One serialized router sampler for all pages. Keep only real WAN points.
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    let inFlight = false;
+    const sample = async () => {
+      if (inFlight || document.hidden || !navigator.onLine) return;
+      inFlight = true;
+      try {
+        const snapshot = await runRequest(api.router(), controller.signal);
+        if (!active) return;
+        setRouter(snapshot);
+        setRouterError(undefined);
+        const defaults = snapshot.routes
+          .filter(
+            (route) =>
+              route.destination === "0.0.0.0/0" ||
+              route.destination === "default" ||
+              route.destination === "::/0",
+          )
+          .slice()
+          .sort((a, b) => a.metric - b.metric);
+        const wan =
+          defaults.find((route) => route.family === "ipv4")?.interface ||
+          defaults[0]?.interface;
+        const counter =
+          snapshot.traffic.find((item) => item.interface === wan) ||
+          snapshot.traffic.find((item) =>
+            /^(wan|ppp|eth0\.1)/.test(item.interface),
+          );
+        if (
+          counter &&
+          !snapshot.errors.some(
+            (error) =>
+              error.module === "traffic" || error.module.startsWith("traffic."),
+          )
+        ) {
+          const changed = trafficInterface.current !== counter.interface;
+          trafficInterface.current = counter.interface;
+          setTrafficSource(`WAN · ${counter.interface}`);
+          setTrafficSamples((previous) => {
+            const points = changed ? [] : previous;
+            if (points.at(-1)?.time === snapshot.sampledAt) return points;
+            return [
+              ...points,
+              {
+                time: snapshot.sampledAt,
+                rx: counter.rxBytesPerSecond,
+                tx: counter.txBytesPerSecond,
+              },
+            ].slice(-300);
+          });
+        } else {
+          trafficInterface.current = "";
+          setTrafficSamples([]);
+          setTrafficSource(undefined);
+        }
+      } catch (cause) {
+        if (!active) return;
+        if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
+        setRouterError(cause);
+      } finally {
+        inFlight = false;
+        if (active) setRouterLoading(false);
+      }
+    };
+    sampleRouter.current = () => {
+      void sample();
+    };
+    setRouterLoading(true);
+    void sample();
+    const timer = window.setInterval(() => {
+      void sample();
+    }, 2000);
+    const visible = () => {
+      if (!document.hidden) void sample();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearInterval(timer);
+      sampleRouter.current = () => {};
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [onUnauthorized]);
   return (
     <ConsoleContext.Provider
       value={{
@@ -130,6 +239,12 @@ export function ConsoleProvider({
         capabilities,
         system,
         systemError,
+        router,
+        routerError,
+        routerLoading,
+        refreshRouter,
+        trafficSamples: routerError ? [] : trafficSamples,
+        trafficSource,
         connection,
         refresh,
         refreshing,
