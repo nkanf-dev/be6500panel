@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -71,17 +72,96 @@ func emptyFIB(out []byte, err error) bool {
 	}
 	return false
 }
+
+// showCaptureTable accepts the old ip-full's bare exit-2 dump diagnostic only
+// after a successful all-table read proves the fixed owned table has no route.
+// Other netlink/executable/context failures are never treated as empty tables.
+func (c *Controller) showCaptureTable(ctx context.Context, family int, names map[string]int) ([]byte, error) {
+	out, err := c.execute(ctx, routeShow(family))
+	if err == nil {
+		return out, nil
+	}
+	if emptyFIB(out, err) {
+		return nil, nil
+	}
+	var exitErr *exec.ExitError
+	if strings.TrimSpace(string(out)) != "Dump terminated" || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+		return out, err
+	}
+	allArgs := []string{"ip", "-" + strconv.Itoa(family), "route", "show", "table", "all"}
+	all, fallbackErr := c.execute(ctx, allArgs)
+	if fallbackErr != nil {
+		return out, errors.Join(err, fallbackErr)
+	}
+	if proofErr := captureTableAbsent(all, family, names); proofErr != nil {
+		return out, errors.Join(err, proofErr)
+	}
+	return nil, nil
+}
+func captureTableAbsent(out []byte, family int, names map[string]int) error {
+	// main-table routes omit `table`; non-main routes always print the numeric
+	// ID or its rt_tables alias. Validate route starts so diagnostic text cannot
+	// be mistaken for a successful empty dump.
+	previousRoute := false
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if fields[0] == "nexthop" && previousRoute {
+			continue
+		}
+		destination := fields[0]
+		switch destination {
+		case "local", "broadcast", "unicast", "unreachable", "prohibit", "blackhole", "throw", "nat", "anycast", "multicast":
+			if len(fields) < 2 {
+				return errors.New("cannot verify complete route table dump")
+			}
+			destination = fields[1]
+		}
+		if destination != "default" {
+			addr, e := netip.ParseAddr(destination)
+			if e != nil {
+				prefix, pe := netip.ParsePrefix(destination)
+				if pe != nil {
+					return errors.New("cannot verify complete route table dump")
+				}
+				addr = prefix.Addr()
+			}
+			if addr.Is4() != (family == 4) {
+				return errors.New("unexpected family in route table dump")
+			}
+		}
+		previousRoute = true
+		for i, field := range fields {
+			if field != "table" {
+				continue
+			}
+			if i+1 >= len(fields) {
+				return errors.New("cannot parse route table in all-table dump")
+			}
+			number, e := tableNumber(fields[i+1], names)
+			if e != nil {
+				return e
+			}
+			if number == proxy.CaptureTable {
+				return errors.New("capture table occupied in all-table dump")
+			}
+		}
+	}
+	return nil
+}
 func (c *Controller) preflight(ctx context.Context, plan proxy.OwnedRulesPlan) error {
 	names, err := c.tableNames()
 	if err != nil {
 		return fmt.Errorf("capture table alias preflight: %w", err)
 	}
 	for _, family := range plan.Ownership.RouteFamilies {
-		out, err := c.execute(ctx, routeShow(family))
-		if err != nil && !emptyFIB(out, err) {
+		out, err := c.showCaptureTable(ctx, family, names)
+		if err != nil {
 			return err
 		}
-		if err == nil && len(bytes.TrimSpace(out)) != 0 {
+		if len(bytes.TrimSpace(out)) != 0 {
 			return errors.New("capture table occupied")
 		}
 		out, err = c.execute(ctx, ruleShow(family))
@@ -402,13 +482,9 @@ func (c *Controller) observeLocked(ctx context.Context) error {
 		pending = errors.Join(pending, err)
 	}
 	for _, family := range c.plan.Ownership.RouteFamilies {
-		out, err := c.execute(ctx, routeShow(family))
+		out, err := c.showCaptureTable(ctx, family, names)
 		if err != nil {
-			if emptyFIB(out, err) {
-				missing = true
-			} else {
-				pending = errors.Join(pending, err)
-			}
+			pending = errors.Join(pending, err)
 		} else if !hasLocalRoute(out, family) {
 			missing = true
 		}

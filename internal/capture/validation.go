@@ -69,7 +69,7 @@ func validate(a []string) error {
 		return err
 	}
 	if a[0] == "ip" && len(a) >= 2 && (a[1] == "-4" || a[1] == "-6") {
-		if slices.Equal(a[2:], []string{"route", "show", "table", strconv.Itoa(proxy.CaptureTable)}) || slices.Equal(a[2:], []string{"rule", "show"}) {
+		if slices.Equal(a[2:], []string{"route", "show", "table", strconv.Itoa(proxy.CaptureTable)}) || slices.Equal(a[2:], []string{"route", "show", "table", "all"}) || slices.Equal(a[2:], []string{"rule", "show"}) {
 			return nil
 		}
 	}

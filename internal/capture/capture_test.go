@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -678,5 +680,158 @@ func TestInspectionCannotSilentlyTruncate(t *testing.T) {
 	c := testController(t, func(context.Context, []string) ([]byte, error) { return []byte(strings.Repeat("x", 64<<10)), nil })
 	if _, err := c.execute(context.Background(), []string{"iptables", "-w", "5", "-t", "mangle", "-S"}); err == nil {
 		t.Fatal("truncated inspection could hide colliding mark")
+	}
+}
+
+func TestLegacyDumpTerminatedRequiresSuccessfulAllTablesProof(t *testing.T) {
+	for _, tc := range []struct {
+		name, all string
+		allErr    error
+		wantError bool
+	}{
+		{name: "empty", all: ""},
+		{name: "standard", all: "default via 192.168.31.1 dev eth0 proto static\n192.168.31.0/24 dev br-lan proto kernel scope link src 192.168.31.1\nlocal 192.168.31.1 dev br-lan table local proto kernel scope host\n"},
+		{name: "other-table", all: "default dev eth0 table 100\n"},
+		{name: "multipath", all: "default table main proto static\n nexthop via 192.0.2.1 dev eth0 weight 1\n nexthop via 192.0.2.2 dev eth1 weight 1\n"},
+		{name: "numeric-occupied", all: "local default dev lo table 16500\n", wantError: true},
+		{name: "named-occupied", all: "local default dev lo table capture\n", wantError: true},
+		{name: "unknown-alias", all: "local default dev lo table unknown\n", wantError: true},
+		{name: "malformed", all: "local default dev lo table\n", wantError: true},
+		{name: "error-text", all: "Dump terminated\n", wantError: true},
+		{name: "failed", allErr: errors.New("exit status 2"), wantError: true},
+		{name: "truncated", all: strings.Repeat("x", 64<<10), wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			mutations := 0
+			exitTwo := testExitError(t, 2)
+			c := testController(t, func(ctx context.Context, a []string) ([]byte, error) {
+				if a[0] == "ip" && a[2] == "route" && a[3] == "show" {
+					if a[5] == "all" {
+						calls++
+						return []byte(tc.all), tc.allErr
+					}
+					return []byte("Dump terminated\n"), exitTwo
+				}
+				if !isReadCommand(a) {
+					mutations++
+				}
+				return idleRunner(ctx, a)
+			})
+			_, err := c.Apply(context.Background(), testInput())
+			if (err != nil) != tc.wantError || calls != 1 {
+				t.Fatalf("err=%v fallbackcalls=%d", err, calls)
+			}
+			if tc.wantError && mutations != 0 {
+				t.Fatal("mutated without successful empty-table proof")
+			}
+		})
+	}
+}
+func TestLegacyFIBFallbackRejectsOtherErrors(t *testing.T) {
+	for _, tc := range []struct {
+		out string
+		err error
+	}{
+		{"Dump terminated\npermission denied", errors.New("exit status 2")},
+		{"permission denied", errors.New("exit status 1")},
+		{"Dump terminated", context.DeadlineExceeded},
+		{"Dump terminated", context.Canceled},
+	} {
+		fallback := 0
+		c := testController(t, func(ctx context.Context, a []string) ([]byte, error) {
+			if a[0] == "ip" && a[2] == "route" && a[3] == "show" {
+				if a[5] == "all" {
+					fallback++
+				}
+				return []byte(tc.out), tc.err
+			}
+			return idleRunner(ctx, a)
+		})
+		if _, err := c.Apply(context.Background(), testInput()); err == nil || fallback != 0 {
+			t.Fatalf("unexpected fallback=%d err=%v", fallback, err)
+		}
+	}
+}
+func TestLegacyEmptyTableVerificationUsesSameFamily(t *testing.T) {
+	c := testController(t, idleRunner)
+	var reads []string
+	exitTwo := testExitError(t, 2)
+	c.runner = func(_ context.Context, a []string) ([]byte, error) {
+		reads = append(reads, strings.Join(a, " "))
+		if a[5] == "all" {
+			return []byte("unreachable default dev lo table default metric 4294967295\n"), nil
+		}
+		return []byte("Dump terminated\n"), exitTwo
+	}
+	out, err := c.showCaptureTable(context.Background(), 6, map[string]int{"default": 253})
+	if err != nil || len(out) != 0 || !reflect.DeepEqual(reads, []string{"ip -6 route show table 16500", "ip -6 route show table all"}) {
+		t.Fatalf("reads=%v out=%q err=%v", reads, out, err)
+	}
+}
+
+func TestLegacyExitCodeHelper(t *testing.T) {
+	code := os.Getenv("B6P_CAPTURE_TEST_EXIT")
+	if code == "2" {
+		os.Exit(2)
+	}
+	if code == "1" {
+		os.Exit(1)
+	}
+}
+func testExitError(t *testing.T, code int) error {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestLegacyExitCodeHelper$")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("B6P_CAPTURE_TEST_EXIT=%d", code))
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != code {
+		t.Fatalf("cannot make test exit error: %v", err)
+	}
+	return err
+}
+func TestLegacyFIBFallbackRequiresActualExitTwo(t *testing.T) {
+	for _, failure := range []error{testExitError(t, 1), errors.New("exit status 2")} {
+		fallback := false
+		c := testController(t, func(context.Context, []string) ([]byte, error) { fallback = true; return nil, nil })
+		initial := true
+		c.runner = func(_ context.Context, a []string) ([]byte, error) {
+			if initial {
+				initial = false
+				return []byte("Dump terminated"), failure
+			}
+			fallback = true
+			return nil, nil
+		}
+		if _, err := c.showCaptureTable(context.Background(), 4, map[string]int{}); err == nil || fallback {
+			t.Fatalf("wrong exit accepted: %v", err)
+		}
+	}
+}
+func TestReconcileLegacyVerifiedEmptyTableReportsMissing(t *testing.T) {
+	c := testController(t, idleRunner)
+	p := testPlan(t)
+	c.plan = &p
+	c.active = true
+	exitTwo := testExitError(t, 2)
+	c.runner = func(_ context.Context, a []string) ([]byte, error) {
+		if a[0] == "ip" && a[2] == "route" {
+			if a[5] == "all" {
+				return []byte("default via 192.168.31.1 dev eth0\n"), nil
+			}
+			return []byte("Dump terminated\n"), exitTwo
+		}
+		if a[0] == "ip" && a[2] == "rule" {
+			return []byte("16500: from 192.0.2.10 iif br-lan fwmark 0x4000/0x4000 lookup 16500\n"), nil
+		}
+		if len(a) > 5 && (a[5] == "-S" || a[5] == "-C") {
+			return nil, nil
+		}
+		t.Fatalf("unexpected argv %v", a)
+		return nil, nil
+	}
+	state, err := c.Reconcile(context.Background())
+	if err == nil || state.Active || !state.CleanupPending || !strings.Contains(err.Error(), "resources missing") {
+		t.Fatalf("verified empty wrongly unknown: %+v %v", state, err)
 	}
 }
