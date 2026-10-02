@@ -67,7 +67,7 @@ export function CapturePanel({ runtime }: { runtime: RuntimeController }) {
     <Panel>
       <PanelHeader
         title="单客户端接管"
-        subtitle="明确指定地址，不自动接管整个 LAN"
+        subtitle="明确指定地址；IPv6 策略须与节点已 Commit 的策略相同"
         action={
           <Badge tone={capture?.active ? "success" : "neutral"}>
             {capture?.active ? "接管中" : "未接管"}
@@ -116,6 +116,7 @@ export function CapturePanel({ runtime }: { runtime: RuntimeController }) {
             }
           >
             <input
+              aria-label="客户端 IPv6"
               required={ipv6 !== "direct"}
               disabled={pending || runtime.pending}
               autoComplete="off"

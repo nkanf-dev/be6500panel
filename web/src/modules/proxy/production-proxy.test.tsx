@@ -96,7 +96,7 @@ describe("real proxy operations", () => {
       expect.objectContaining({
         body: JSON.stringify({
           nodeId: "node-synthetic",
-          ipv6: "follow",
+          ipv6: "direct",
           failure: "direct",
           ports: { mixed: 2080, tproxy: 7893, dns: 6450 },
         }),

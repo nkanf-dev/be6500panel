@@ -29,7 +29,7 @@ export function NodeSelector({
   onSelected: () => void;
 }) {
   const [nodeId, setNodeId] = useState("");
-  const [ipv6, setIPv6] = useState<IPv6Policy>("follow");
+  const [ipv6, setIPv6] = useState<IPv6Policy>("direct");
   const [ports, setPorts] = useState<ProxySelectInput["ports"]>({
     mixed: 2080,
     tproxy: 7893,
