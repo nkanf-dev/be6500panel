@@ -8,6 +8,7 @@ import { ConsoleProvider } from "./console-context";
 import { Login } from "./login";
 import { Shell } from "./shell";
 import { ModulePage } from "./pages";
+import { clearConfigurationSession } from "../components/configuration";
 
 export function App() {
   const [session, setSession] = useState<Session>();
@@ -28,14 +29,13 @@ export function App() {
     setPage(id);
     window.scrollTo?.({ top: 0 });
   }, []);
-  const onUnauthorized = useCallback(
-    () =>
-      setSession((previous) => ({
-        authenticated: false,
-        authRequired: previous?.authRequired ?? true,
-      })),
-    [],
-  );
+  const onUnauthorized = useCallback(() => {
+    clearConfigurationSession();
+    setSession((previous) => ({
+      authenticated: false,
+      authRequired: previous?.authRequired ?? true,
+    }));
+  }, []);
   useEffect(() => {
     window.addEventListener("be6500panel:unauthorized", onUnauthorized);
     return () =>
@@ -43,7 +43,9 @@ export function App() {
   }, [onUnauthorized]);
   const logout = async () => {
     try {
-      setSession(await runRequest(api.logout()));
+      const nextSession = await runRequest(api.logout());
+      clearConfigurationSession();
+      setSession(nextSession);
     } catch (error) {
       setError(error);
     }
