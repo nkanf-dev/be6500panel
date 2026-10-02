@@ -64,18 +64,65 @@ export function ConsoleProvider({
   useEffect(() => {
     refresh();
   }, [refresh]);
-  useEffect(
-    () =>
-      connectStatusStream(
-        (snapshot) => {
+  useEffect(() => {
+    let disposed = false;
+    let probing = false;
+    const controller = new AbortController();
+    let disposeStream = () => {};
+    const expireSession = () => {
+      disposeStream();
+      if (!disposed) onUnauthorized();
+    };
+    // EventSource hides HTTP status. Probe existing APIs once per disconnect,
+    // serialized across retries. The stream remains the only reconnect timer.
+    const probe = async () => {
+      if (disposed || probing || document.hidden || !navigator.onLine) return;
+      probing = true;
+      try {
+        const session = await runRequest(api.session(), controller.signal);
+        if (disposed) return;
+        if (session.authRequired && !session.authenticated) {
+          expireSession();
+          return;
+        }
+        const snapshot = await runRequest(api.system(), controller.signal);
+        if (!disposed) {
           setSystem(snapshot);
           setSystemError(undefined);
-        },
-        setConnection,
-        (error) => setSystemError(new ApiError(error)),
-      ),
-    [],
-  );
+        }
+      } catch (error) {
+        if (disposed) return;
+        if (error instanceof ApiError && error.status === 401) expireSession();
+        else setSystemError(error);
+      } finally {
+        probing = false;
+      }
+    };
+    disposeStream = connectStatusStream(
+      (snapshot) => {
+        setSystem(snapshot);
+        setSystemError(undefined);
+      },
+      (state) => {
+        setConnection(state);
+        if (state === "offline") {
+          setSystemError(
+            new ApiError({
+              code: "status_stream_unavailable",
+              message: "状态采样中断",
+            }),
+          );
+          void probe();
+        }
+      },
+      (error) => setSystemError(new ApiError(error)),
+    );
+    return () => {
+      disposed = true;
+      controller.abort();
+      disposeStream();
+    };
+  }, [onUnauthorized]);
   return (
     <ConsoleContext.Provider
       value={{
