@@ -25,7 +25,11 @@ func (c *Collector) Query(ctx context.Context, name string, maxPoints int) (Hist
 	if c.closed {
 		return History{}, ErrClosed
 	}
-	h := History{Enabled: true, Persistent: c.storageError == "", RetentionDays: RetentionDays, Source: c.sourceName, Range: name, Samples: []Sample{}}
+	h := History{Enabled: true, Persistent: c.storageError == "", RetentionDays: RetentionDays, Source: c.sourceName, Range: name, Samples: []Sample{}, MaxUnsyncedSeconds: int64(FlushInterval / time.Second)}
+	if !c.lastFlushAt.IsZero() {
+		lastFlushAt := c.lastFlushAt
+		h.LastFlushAt = &lastFlushAt
+	}
 	if c.storageError != "" {
 		h.Error = c.storageError
 	} else if c.observationError != "" {

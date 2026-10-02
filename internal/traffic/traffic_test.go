@@ -520,3 +520,47 @@ func TestNoTemporaryArchivesOrUnboundedInterfaceFiles(t *testing.T) {
 		t.Fatal("interface names or archives grew disk", files)
 	}
 }
+
+func TestFlushMetadataDoesNotClaimNewestSampleIsPersisted(t *testing.T) {
+	dir := t.TempDir()
+	c := newTestCollector(t, dir)
+	start := alignedTime()
+	now := start.Add(2 * time.Second)
+	c.now = func() time.Time { return now }
+	c.record(snapshot(start, "eth0.2", 100, 100))
+	c.record(snapshot(now, "eth0.2", 300, 140))
+	h := queryTest(t, c, "30m", 1500)
+	if !h.Persistent || h.LastFlushAt != nil || h.MaxUnsyncedSeconds != 60 {
+		t.Fatal("storage capability conflated with newest sync", h)
+	}
+	if err := c.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	now = start.Add(4 * time.Second)
+	c.record(snapshot(now, "eth0.2", 600, 200))
+	h = queryTest(t, c, "30m", 1500)
+	if h.LastFlushAt == nil || !h.LastFlushAt.Equal(start.Add(2*time.Second)) {
+		t.Fatal("latest dirty sample claimed persisted", h.LastFlushAt)
+	}
+	*h.LastFlushAt = h.LastFlushAt.AddDate(10, 0, 0) // API timestamps are copies, not collector pointers
+	if err := c.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	now = start.Add(6 * time.Second)
+	if err := c.Flush(); err != nil {
+		t.Fatal(err)
+	} // no dirty data: do not advance timestamp
+	h = queryTest(t, c, "30m", 1500)
+	if !h.LastFlushAt.Equal(start.Add(4 * time.Second)) {
+		t.Fatal("empty flush timestamp fabricated", h.LastFlushAt)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restored := newTestCollector(t, dir)
+	restored.now = func() time.Time { return now }
+	h = queryTest(t, restored, "30m", 1500)
+	if !h.Persistent || h.LastFlushAt != nil || h.Summary.RXBytes != 500 {
+		t.Fatal("restart invented actual flush timestamp", h)
+	}
+}

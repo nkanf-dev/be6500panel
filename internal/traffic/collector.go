@@ -24,6 +24,7 @@ type Collector struct {
 	rings            []*ring
 	previous         *observation
 	latest           time.Time
+	lastFlushAt      time.Time
 	sourceName       string
 	observationError string
 	storageError     string
@@ -269,6 +270,15 @@ func (c *Collector) Flush() error {
 	return c.flushLocked()
 }
 func (c *Collector) flushLocked() error {
+	changed := false
+	for _, r := range c.rings {
+		for _, dirty := range r.dirty {
+			if dirty {
+				changed = true
+				break
+			}
+		}
+	}
 	for _, r := range c.rings {
 		if err := r.flush(); err != nil {
 			c.storageError = "Traffic history could not be synced to persistent storage."
@@ -276,6 +286,9 @@ func (c *Collector) flushLocked() error {
 		}
 	}
 	c.storageError = ""
+	if changed {
+		c.lastFlushAt = c.now().UTC()
+	}
 	return nil
 }
 

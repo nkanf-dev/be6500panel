@@ -78,7 +78,11 @@ type History struct {
 	Samples           []Sample   `json:"samples"`
 	Summary           Summary    `json:"summary"`
 	OldestAt          *time.Time `json:"oldestAt,omitempty"`
-	Error             string     `json:"error,omitempty"`
+	// LastFlushAt is a successful dirty-data sync in this process, not a
+	// guarantee that the newest sample is durable. Omitted after restart.
+	LastFlushAt        *time.Time `json:"lastFlushAt,omitempty"`
+	MaxUnsyncedSeconds int64      `json:"maxUnsyncedSeconds,omitempty"`
+	Error              string     `json:"error,omitempty"`
 }
 
 // Disabled returns the same contract when collection was not configured.

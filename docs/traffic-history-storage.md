@@ -1,14 +1,17 @@
 # WAN traffic history storage
 
 `internal/traffic` records one real WAN series. A server-owned worker samples
-`router.Adapter.Snapshot` every two seconds. No browser, SSE subscription, chart,
+`router.NewWANSource(routerAdapter).Snapshot` every two seconds. This bounded
+source reads only `/proc/net/dev`, `/proc/net/route`, and IPv6 routes when no
+IPv4 default exists. It has its own cache/lock and never reads device leases,
+WiFi, platform, or firewall, and never starts subprocesses. No browser, SSE subscription, chart,
 or device client needs to be connected. It uses raw receive/transmit counters,
 not the adapter's rate fields.
 
 ## Enable and integrate
 
 Provide `traffic.Options{DataDir: filepath.Join(dataDir, "traffic"), Source:
-routerAdapter}` to `traffic.New`. Set `dataDir` to a persistent location such as
+router.NewWANSource(routerAdapter)}` to `traffic.New`. Set `dataDir` to a persistent location such as
 `/data/be6500panel`. Empty `dataDir` must disable collection explicitly. Never use
 `/tmp`, silently fall back to RAM, or create an implicit series per interface.
 
@@ -104,7 +107,14 @@ process also skips its first counter interval (normally up to two seconds),
 and last observation boundaries persist at millisecond precision to prevent
 re-counting intervals after a backward wall-clock change,
 and all downtime is uncovered. `Close()` attempts to save current measurements.
-A flush error makes API `persistent: false` and supplies a safe error message;
+`persistent: true` means persistent storage is enabled and healthy, **not** that
+the newest minute of samples has already been saved. `maxUnsyncedSeconds: 60`
+states the scheduled flush interval. Optional `lastFlushAt` is the latest
+successful dirty-data sync time in the current process; it is omitted until a
+flush after restart because observation timestamps are not flush timestamps.
+The source name identifies the **current** default route; this single aggregate
+WAN history can contain earlier interfaces and must not label all past samples
+as belonging to the latest interface. A flush error makes API `persistent: false` and supplies a safe error message;
 collection remains bounded and can recover if a later minute flush succeeds.
 This is not an undisclosed memory-only fallback.
 
