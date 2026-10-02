@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   Button,
@@ -10,20 +10,64 @@ import {
 import { api, errorMessage, runRequest } from "../../lib/api";
 import { nativeConfigDiff } from "./config-diff";
 import type { RuntimeController } from "./use-runtime";
+import {
+  clearAcceptedRuntimeEditorBuffer,
+  emptyRuntimeEditorBuffer,
+  readRuntimeEditorBuffer,
+  runtimeEditorSessionEpoch,
+  subscribeRuntimeEditorClear,
+  writeRuntimeEditorBuffer,
+  type RuntimeEditorBuffer,
+} from "./editor-session";
 
 export function NativeConfigEditor({
   runtime,
 }: {
   runtime: RuntimeController;
 }) {
-  const [config, setConfig] = useState("");
-  const [original, setOriginal] = useState("");
+  const [buffer, setBuffer] = useState<RuntimeEditorBuffer>(() =>
+    readRuntimeEditorBuffer(runtime.service),
+  );
+  const currentBuffer = useRef(buffer);
+  const sessionEpoch = useRef(runtimeEditorSessionEpoch());
+  const lifetime = useRef<AbortController | undefined>(undefined);
+  const { config, original, generation } = buffer;
+  const replaceBuffer = (next: RuntimeEditorBuffer) => {
+    currentBuffer.current = next;
+    writeRuntimeEditorBuffer(runtime.service, next, sessionEpoch.current);
+    setBuffer(next);
+  };
   const [reviewing, setReviewing] = useState(false);
-  const [generation, setGeneration] = useState<number>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>();
   const [saved, setSaved] = useState(false);
   const [replaceAction, setReplaceAction] = useState<"reload" | "create">();
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    sessionEpoch.current = runtimeEditorSessionEpoch();
+    const restored = readRuntimeEditorBuffer(runtime.service);
+    currentBuffer.current = restored;
+    setBuffer(restored);
+    const unsubscribe = subscribeRuntimeEditorClear(() => {
+      lifetime.current?.abort();
+      lifetime.current = new AbortController();
+      sessionEpoch.current = runtimeEditorSessionEpoch();
+      const empty = emptyRuntimeEditorBuffer();
+      currentBuffer.current = empty;
+      setBuffer(empty);
+      setReviewing(false);
+      setSaved(false);
+      setLoading(false);
+      setError(undefined);
+      setReplaceAction(undefined);
+    });
+    return () => {
+      unsubscribe();
+      lifetime.current?.abort();
+      lifetime.current = undefined;
+    };
+  }, [runtime.service]);
   const dirty = config !== original && !saved;
   const requestReplacement = (action: "reload" | "create") => {
     if (dirty) setReplaceAction(action);
@@ -35,27 +79,42 @@ export function NativeConfigEditor({
     runtime.status !== undefined &&
     generation !== runtime.status.generation;
   async function fetchConfig() {
+    const requestEpoch = runtimeEditorSessionEpoch();
+    const signal = lifetime.current?.signal;
+    const active = () =>
+      !!signal &&
+      !signal.aborted &&
+      lifetime.current?.signal === signal &&
+      requestEpoch === runtimeEditorSessionEpoch();
     setLoading(true);
     setError(undefined);
     setSaved(false);
     try {
-      const response = await runRequest(api.runtimeConfig(runtime.service));
-      setConfig(response.config);
-      setOriginal(response.config);
+      const response = await runRequest(
+        api.runtimeConfig(runtime.service),
+        signal,
+      );
+      if (!active()) return;
+      replaceBuffer({
+        config: response.config,
+        original: response.config,
+        generation: response.generation,
+      });
       setReviewing(false);
-      setGeneration(response.generation);
     } catch (cause) {
-      setError(cause);
+      if (active()) setError(cause);
     } finally {
-      setLoading(false);
+      if (active()) setLoading(false);
     }
   }
   function createConfig() {
     if (!runtime.status || runtime.status.configured || !runtime.enabled)
       return;
-    setConfig("");
-    setOriginal("");
-    setGeneration(runtime.status.generation);
+    replaceBuffer({
+      config: "",
+      original: "",
+      generation: runtime.status.generation,
+    });
     setError(undefined);
     setSaved(false);
     setReviewing(false);
@@ -64,13 +123,34 @@ export function NativeConfigEditor({
     event.preventDefault();
     if (generation === undefined || stale || !reviewing || loading) return;
     setSaved(false);
+    const acceptedBuffer = { ...currentBuffer.current };
+    const requestEpoch = runtimeEditorSessionEpoch();
+    const signal = lifetime.current?.signal;
     const accepted = await runtime.run(
       () =>
         api.runtimeConfigure({ service: runtime.service, config, generation }),
       "原生配置已校验并保存",
     );
+    if (requestEpoch !== runtimeEditorSessionEpoch()) return;
     if (accepted) {
-      setGeneration(undefined);
+      // Do not retain accepted text as an unsaved draft, even if the tab unmounted.
+      clearAcceptedRuntimeEditorBuffer(
+        runtime.service,
+        acceptedBuffer,
+        requestEpoch,
+      );
+      if (!signal || signal.aborted || lifetime.current?.signal !== signal)
+        return;
+      if (
+        currentBuffer.current.config !== acceptedBuffer.config ||
+        currentBuffer.current.original !== acceptedBuffer.original ||
+        currentBuffer.current.generation !== acceptedBuffer.generation
+      )
+        return;
+      replaceBuffer({
+        config: acceptedBuffer.config,
+        original: acceptedBuffer.config,
+      });
       setSaved(true);
     }
   }
@@ -120,7 +200,10 @@ export function NativeConfigEditor({
             autoComplete="off"
             value={config}
             onChange={(event) => {
-              setConfig(event.target.value);
+              replaceBuffer({
+                ...currentBuffer.current,
+                config: event.target.value,
+              });
               setSaved(false);
               setReviewing(false);
             }}

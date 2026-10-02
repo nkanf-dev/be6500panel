@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { NativeConfigEditor } from "./native-config-editor";
+import { clearRuntimeEditorSession } from "./editor-session";
 import { jsonResponse, runtimeStatus } from "../production-fixtures.test-data";
 import type { RuntimeController } from "./use-runtime";
 const runtime = {
@@ -14,7 +15,10 @@ const runtime = {
   refresh: vi.fn(),
   run: vi.fn(),
 } satisfies RuntimeController;
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  clearRuntimeEditorSession();
+  vi.unstubAllGlobals();
+});
 describe("native runtime config replacement", () => {
   it("keeps dirty text and makes no read until reload is explicitly confirmed", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>

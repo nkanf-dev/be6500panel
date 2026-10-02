@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useRuntime } from "./use-runtime";
 import { RuntimeControls } from "./controls";
 import { NativeConfigEditor } from "./native-config-editor";
+import { clearRuntimeEditorSession } from "./editor-session";
 import { jsonResponse, runtimeStatus } from "../production-fixtures.test-data";
 
 const consoleState = vi.hoisted(() => ({ health: { mode: "host" } }));
@@ -20,6 +21,7 @@ function RuntimeView() {
   );
 }
 afterEach(() => {
+  clearRuntimeEditorSession();
   vi.unstubAllGlobals();
   consoleState.health.mode = "host";
 });
