@@ -1,8 +1,8 @@
-# RouterDeck modular router control platform
+# be6500panel modular router control platform
 
 ## Product
 
-RouterDeck is a self-hosted, professional router control plane built for our own Xiaomi BE6500 RN02. Proxy is one domain module, not the application identity. The long-term UI replaces the factory daily management surface; factory Web/SSH remain fallback until real-device acceptance. This first delivery is a runnable public source foundation, not production network control. No deployment to the router, no changes to its network, no public credentials or device snapshots.
+be6500panel is a self-hosted, professional router control plane built for our own Xiaomi BE6500 RN02. Proxy is one domain module, not the application identity. The long-term UI replaces the factory daily management surface; factory Web/SSH remain fallback until real-device acceptance. This first delivery is a runnable public source foundation, not production network control. No deployment to the router, no changes to its network, no public credentials or device snapshots.
 
 ## Runtime architecture
 
@@ -29,7 +29,7 @@ Network-changing resources have one owner: network owns interfaces/routes/policy
 - GET /api/session: {authenticated:boolean,authRequired:boolean}; POST /api/session/login {password} creates HttpOnly SameSite=Strict cookie; POST /api/session/logout.
 - Other error envelope {error:{code,message}}. Unknown API path is JSON404, never SPA fallback.
 
-Development default: --listen 127.0.0.1:8787 --demo. Authentication optional only on loopback; non-loopback requires ROUTERDECK_PASSWORD, otherwise startup fails. Password env never returned/logged, constant-time validation, bounded attempts, authenticated API/SSE when enabled, same-origin checks for unsafe methods; no arbitrary shell/file endpoint. Static UI may serve unauthenticated login. Graceful cancellation. Go standard library except narrowly justified tooling.
+Development default: --listen 127.0.0.1:8787 --demo. Authentication optional only on loopback; non-loopback requires BE6500PANEL_PASSWORD, otherwise startup fails. Password env never returned/logged, constant-time validation, bounded attempts, authenticated API/SSE when enabled, same-origin checks for unsafe methods; no arbitrary shell/file endpoint. Static UI may serve unauthenticated login. Graceful cancellation. Go standard library except narrowly justified tooling.
 
 ## Frontend
 
@@ -43,7 +43,7 @@ Custom sing-box ARMv7 with VLESS/REALITY/Vision/uTLS/UDP. Core/tmp cache reconst
 
 ## Verification and honesty
 
-Go tests/race/vet; API/auth/SSE/oversize/invalid inputs/unsupported apply. Frontend typecheck, unit tests and production build; screenshots/browser smoke if supported. Static ELF32 ARM build measured. Endpoints only read host data; CI never touches devices. Public GitHub source creation is authorized, remote name RouterDeck under authenticated account. No private source files copied; synthetic documentation data only. Reports state delivered/unsupported/untested exactly.
+Go tests/race/vet; API/auth/SSE/oversize/invalid inputs/unsupported apply. Frontend typecheck, unit tests and production build; screenshots/browser smoke if supported. Static ELF32 ARM build measured. Endpoints only read host data; CI never touches devices. Public GitHub source creation is authorized, remote name be6500panel under authenticated account. No private source files copied; synthetic documentation data only. Reports state delivered/unsupported/untested exactly.
 
 ## Visualization and theme separation
 

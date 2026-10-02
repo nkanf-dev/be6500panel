@@ -9,6 +9,6 @@ web/dist/
 coverage/
 playwright-report/
 test-results/
-routerdeck
+be6500panel
 *.tgz
 *.gz
