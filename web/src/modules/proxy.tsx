@@ -9,6 +9,7 @@ import { NativeConfigEditor } from "./runtime/native-config-editor";
 import { ProxyImportForm } from "./proxy/import-form";
 import { NodeSelector } from "./proxy/node-selector";
 import { CapturePanel } from "./proxy/capture-panel";
+import { ConnectionAnalysis } from "./proxy/connection-analysis";
 import { ProxyDiagnostics } from "./proxy/diagnostics";
 import { ProxyPlanPreview } from "./proxy-plan-preview";
 
@@ -27,6 +28,7 @@ export function ProxyPage() {
             { id: "nodes", label: "节点" },
             { id: "runtime", label: "运行管理" },
             { id: "capture", label: "客户端接管" },
+            { id: "analysis", label: "连接分析" },
             { id: "diagnostics", label: "诊断" },
             { id: "preview", label: "计划预览" },
           ].map((item) => (
@@ -88,6 +90,8 @@ export function ProxyPage() {
         </>
       ) : tab === "capture" ? (
         <CapturePanel runtime={runtime} />
+      ) : tab === "analysis" ? (
+        <ConnectionAnalysis />
       ) : tab === "diagnostics" ? (
         <ProxyDiagnostics diagnostics={nodes?.diagnostics} />
       ) : (
