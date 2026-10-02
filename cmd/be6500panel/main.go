@@ -23,6 +23,7 @@ import (
 	"be6500panel/internal/proxy"
 	"be6500panel/internal/router"
 	managedruntime "be6500panel/internal/runtime"
+	"be6500panel/internal/storage"
 	"be6500panel/internal/telemetry"
 	"be6500panel/internal/traffic"
 	"be6500panel/internal/transport"
@@ -79,6 +80,19 @@ func run() error {
 	var captureManager *capture.Controller
 	var err error
 	var artifactClient *http.Client
+	var flashBudget *storage.Budget
+	if *dataDir != "" {
+		if err := os.MkdirAll(*dataDir, 0700); err != nil {
+			return err
+		}
+		flashBudget, err = storage.New(storage.Options{EmergencyPath: filepath.Join(*dataDir, ".rollback-reserve")})
+		if err != nil {
+			return err
+		}
+		if err = flashBudget.Replenish(ctx); err != nil {
+			logger.Warn("Rollback space reserve unavailable", "code", "storage_reserve_unavailable", "module", "core")
+		}
+	}
 	if *artifactTransport == "curl" {
 		artifactClient = &http.Client{Transport: transport.CurlTransport{}}
 	} else if *artifactTransport != "native" {
@@ -92,6 +106,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		captureManager.SetStorageAdmission(flashBudget.Admit)
 		// A boot journal proves ownership, not a healthy core. Withdraw it even
 		// when no runtime is desired; the saved MAC scope stays separate.
 		withdrawCtx, cancelWithdraw := context.WithTimeout(ctx, 30*time.Second)
@@ -100,7 +115,7 @@ func run() error {
 		if withdrawErr != nil {
 			logger.Warn("Boot capture cleanup pending", "code", "capture_cleanup_failed", "module", "proxy")
 		}
-		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, HTTPClient: artifactClient, MaxCompressedBytes: 20 << 20, DownloadTimeout: 6 * time.Minute, MaxUncompressedBytes: 40 << 20, ReadyHook: func(ctx context.Context, id string) error {
+		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, HTTPClient: artifactClient, StorageAdmission: flashBudget.Admit, MaxConfigBytes: 512 << 10, MaxCompressedBytes: 20 << 20, DownloadTimeout: 6 * time.Minute, MaxUncompressedBytes: 40 << 20, ReadyHook: func(ctx context.Context, id string) error {
 			err := runtimeReadiness(func() *managedruntime.Manager { return runtimeManager })(ctx, id)
 			if err != nil && id == managedruntime.SingBox {
 				withdrawCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -111,6 +126,12 @@ func run() error {
 		}, ReadyTimeout: 15 * time.Second, RestoreHook: func(ctx context.Context, id string) error {
 			if id != managedruntime.SingBox {
 				return nil
+			}
+			if controlManager != nil {
+				status := controlManager.Status()
+				if !status.Enabled || status.ErrorCode != "" || status.PendingCommit != nil {
+					return captureManager.Suspend(ctx, "capture_configuration_pending")
+				}
 			}
 			_, err := captureManager.Restore(ctx)
 			return err
@@ -144,7 +165,7 @@ func run() error {
 		if *dataDir == "" || password == "" {
 			return fmt.Errorf("configuration control requires data-dir and password")
 		}
-		controlManager, err = control.New(control.Options{Root: *adapterRoot, DataDir: filepath.Join(*dataDir, "configuration"), Logger: logger, ConfirmationTimeout: 120 * time.Second})
+		controlManager, err = control.New(control.Options{Root: *adapterRoot, DataDir: filepath.Join(*dataDir, "configuration"), Logger: logger, ConfirmationTimeout: 120 * time.Second, StorageAdmission: flashBudget.Admit, PreserveLANManagement: true})
 		if err != nil {
 			return err
 		}
@@ -153,7 +174,7 @@ func run() error {
 	var history *traffic.Collector
 	historyError := ""
 	if *dataDir != "" {
-		history, err = traffic.New(traffic.Options{DataDir: filepath.Join(*dataDir, "traffic"), Source: router.NewWANSource(routerAdapter)})
+		history, err = traffic.New(traffic.Options{DataDir: filepath.Join(*dataDir, "traffic"), Source: router.NewWANSource(routerAdapter), StorageAdmission: flashBudget.Admit})
 		if err != nil {
 			historyError = "历史存储未就绪；请检查持久存储空间和历史文件，实时状态仍可使用。"
 			logger.Warn("Persistent traffic history unavailable", "code", "history_storage_unavailable", "module", "network")
@@ -190,7 +211,7 @@ func run() error {
 		metrics.Start(ctx)
 		defer metrics.Close()
 	}
-	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager, Traffic: history, TrafficError: historyError, Telemetry: metrics})
+	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager, Traffic: history, TrafficError: historyError, Telemetry: metrics, StorageAdmission: flashBudget.Admit})
 	if err != nil {
 		return err
 	}

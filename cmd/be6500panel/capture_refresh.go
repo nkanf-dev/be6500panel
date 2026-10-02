@@ -34,8 +34,11 @@ func refreshDesiredCapture(ctx context.Context, manager *managedruntime.Manager,
 			if !controller.Status().Desired {
 				return nil
 			}
-			if configuration != nil && configuration.Status().PendingCommit != nil {
-				return controller.Suspend(ctx, "capture_configuration_pending")
+			if configuration != nil {
+				status := configuration.Status()
+				if !status.Enabled || status.ErrorCode != "" || status.PendingCommit != nil {
+					return controller.Suspend(ctx, "capture_configuration_pending")
+				}
 			}
 			_, err := controller.Refresh(ctx)
 			return err

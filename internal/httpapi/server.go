@@ -16,52 +16,55 @@ import (
 	"be6500panel/internal/modules"
 	"be6500panel/internal/router"
 	managedruntime "be6500panel/internal/runtime"
+	"be6500panel/internal/storage"
 	"be6500panel/internal/telemetry"
 	"be6500panel/internal/traffic"
 )
 
 type Config struct {
-	System       *modules.System
-	Network      modules.Network
-	Sampler      *core.Sampler
-	Password     string
-	WebDir       string
-	Heartbeat    time.Duration
-	Logger       *slog.Logger
-	Logs         *core.LogBuffer
-	Router       *router.Adapter
-	Runtime      *managedruntime.Manager
-	Control      *control.Manager
-	DataDir      string
-	Capture      *capture.Controller
-	Traffic      *traffic.Collector
-	TrafficError string
-	Telemetry    *telemetry.Collector
+	System           *modules.System
+	Network          modules.Network
+	Sampler          *core.Sampler
+	Password         string
+	WebDir           string
+	Heartbeat        time.Duration
+	Logger           *slog.Logger
+	Logs             *core.LogBuffer
+	Router           *router.Adapter
+	Runtime          *managedruntime.Manager
+	Control          *control.Manager
+	DataDir          string
+	Capture          *capture.Controller
+	Traffic          *traffic.Collector
+	TrafficError     string
+	Telemetry        *telemetry.Collector
+	StorageAdmission storage.Admission
 }
 type Server struct {
-	system       *modules.System
-	network      modules.Network
-	sampler      *core.Sampler
-	registry     *core.Registry
-	coordinator  *core.Coordinator
-	auth         *auth
-	heartbeat    time.Duration
-	logger       *slog.Logger
-	logs         *core.LogBuffer
-	static       http.Handler
-	ctx          context.Context
-	cancel       context.CancelFunc
-	closeOnce    sync.Once
-	router       *router.Adapter
-	runtime      *managedruntime.Manager
-	control      *control.Manager
-	dataDir      string
-	proxyState   *proxyState
-	capture      *capture.Controller
-	traffic      *traffic.Collector
-	trafficError string
-	telemetry    *telemetry.Collector
-	desiredMu    sync.Mutex
+	system           *modules.System
+	network          modules.Network
+	sampler          *core.Sampler
+	registry         *core.Registry
+	coordinator      *core.Coordinator
+	auth             *auth
+	heartbeat        time.Duration
+	logger           *slog.Logger
+	logs             *core.LogBuffer
+	static           http.Handler
+	ctx              context.Context
+	cancel           context.CancelFunc
+	closeOnce        sync.Once
+	router           *router.Adapter
+	runtime          *managedruntime.Manager
+	control          *control.Manager
+	dataDir          string
+	proxyState       *proxyState
+	capture          *capture.Controller
+	traffic          *traffic.Collector
+	trafficError     string
+	telemetry        *telemetry.Collector
+	storageAdmission storage.Admission
+	desiredMu        sync.Mutex
 }
 
 func New(cfg Config) (*Server, error) {
@@ -82,7 +85,7 @@ func New(cfg Config) (*Server, error) {
 		cfg.Logger = slog.New(core.NewRingHandler(slog.Default().Handler(), cfg.Logs))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, traffic: cfg.Traffic, trafficError: cfg.TrafficError, telemetry: cfg.Telemetry, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel}, nil
+	return &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, traffic: cfg.Traffic, trafficError: cfg.TrafficError, telemetry: cfg.Telemetry, storageAdmission: cfg.StorageAdmission, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel}, nil
 }
 func (s *Server) Close() { s.closeOnce.Do(func() { s.cancel(); s.sampler.Close() }) }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

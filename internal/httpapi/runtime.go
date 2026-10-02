@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 
@@ -38,6 +39,9 @@ func (s *Server) runtimes(w http.ResponseWriter, r *http.Request) {
 	}{s.runtime != nil, states})
 }
 func (s *Server) runtimeAcquire(w http.ResponseWriter, r *http.Request) {
+	if !s.runtimeMutationAllowed(w) {
+		return
+	}
 	if !s.runtimeEnabled(w) {
 		return
 	}
@@ -52,6 +56,9 @@ func (s *Server) runtimeAcquire(w http.ResponseWriter, r *http.Request) {
 	s.runtimeResult(w, input.Service, "artifact_acquired", state, err)
 }
 func (s *Server) runtimeConfigure(w http.ResponseWriter, r *http.Request) {
+	if !s.runtimeMutationAllowed(w) {
+		return
+	}
 	if !s.runtimeEnabled(w) {
 		return
 	}
@@ -83,6 +90,9 @@ func (s *Server) runtimeConfig(w http.ResponseWriter, r *http.Request) {
 	}{id, string(raw), generation})
 }
 func (s *Server) runtimeAction(w http.ResponseWriter, r *http.Request, start bool) {
+	if start && !s.runtimeMutationAllowed(w) {
+		return
+	}
 	if !s.runtimeEnabled(w) {
 		return
 	}
@@ -108,6 +118,9 @@ func (s *Server) runtimeAction(w http.ResponseWriter, r *http.Request, start boo
 	s.runtimeResult(w, input.Service, code, state, err)
 }
 func (s *Server) runtimeRestore(w http.ResponseWriter, r *http.Request) {
+	if !s.runtimeMutationAllowed(w) {
+		return
+	}
 	if !s.runtimeEnabled(w) {
 		return
 	}
@@ -122,8 +135,32 @@ func (s *Server) runtimeRestore(w http.ResponseWriter, r *http.Request) {
 	s.runtimeResult(w, input.Service, "runtime_config_restored", state, err)
 }
 func (s *Server) runtimeResult(w http.ResponseWriter, service, code string, state managedruntime.Status, err error) {
+	if state.Service != "" && (code == "config_committed" || code == "runtime_config_restored" || code == "artifact_acquired" || state.Restored || state.NeedsRecovery) {
+		if persistErr := s.persistDesired(service, state.Desired); persistErr != nil && err == nil {
+			fail(w, 500, "storage_failed", "运行目标保存失败；请刷新运行状态")
+			return
+		}
+	}
 	if err != nil {
 		s.logger.Warn("Runtime operation failed", "module", service, "code", "runtime_operation_failed")
+		if state.Service != "" {
+			recorder := httptest.NewRecorder()
+			s.runtimeError(recorder, err)
+			var envelope errorEnvelope
+			if json.Unmarshal(recorder.Body.Bytes(), &envelope) == nil {
+				if state.Restored {
+					envelope.Error.Message += "；已恢复上一可运行配置"
+				}
+				if state.NeedsRecovery {
+					envelope.Error.Message += "；恢复未完成，请检查运行状态"
+				}
+				writeJSON(w, recorder.Code, struct {
+					Error  apiError              `json:"error"`
+					Status managedruntime.Status `json:"status"`
+				}{envelope.Error, state})
+				return
+			}
+		}
 		s.runtimeError(w, err)
 		return
 	}
@@ -177,5 +214,5 @@ func (s *Server) persistDesired(service string, desired bool) error {
 	if err != nil {
 		return err
 	}
-	return writePrivateFile(path, raw)
+	return s.writePrivate(s.ctx, path, raw, !desired)
 }

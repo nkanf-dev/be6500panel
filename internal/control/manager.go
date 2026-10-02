@@ -18,26 +18,27 @@ import (
 
 // Manager serializes live mutations. A journal is retained for the last operation.
 type Manager struct {
-	mu               sync.Mutex
-	root, dataDir    string
-	logger           *slog.Logger
-	runner           Runner
-	verify           func(context.Context, []string) error
-	reloadHook       func(context.Context, string) error
-	timeout          time.Duration
-	ctx              context.Context
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	wake             chan struct{}
-	closed           bool
-	lockFile         *os.File
-	closeOnce        sync.Once
-	disk             diskState
-	journal          *journal
-	recoveryError    string
-	storageAdmission func(context.Context, string, int64, bool) (func(), error)
-	storageReserved  bool // Protected by mu; transaction writes share one reservation.
-	storageRecovery  bool // Includes recovery state and journal completion writes.
+	mu                    sync.Mutex
+	root, dataDir         string
+	logger                *slog.Logger
+	runner                Runner
+	verify                func(context.Context, []string) error
+	reloadHook            func(context.Context, string) error
+	timeout               time.Duration
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	wg                    sync.WaitGroup
+	wake                  chan struct{}
+	closed                bool
+	lockFile              *os.File
+	closeOnce             sync.Once
+	disk                  diskState
+	journal               *journal
+	recoveryError         string
+	storageAdmission      func(context.Context, string, int64, bool) (func(), error)
+	storageReserved       bool // Protected by mu; transaction writes share one reservation.
+	storageRecovery       bool // Includes recovery state and journal completion writes.
+	preserveLANManagement bool
 }
 
 func New(o Options) (*Manager, error) {
@@ -89,7 +90,7 @@ func New(o Options) (*Manager, error) {
 		o.ConfirmationTimeout = 120 * time.Second
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{root: root, dataDir: data, runner: o.Runner, logger: o.Logger, verify: o.Verify, reloadHook: o.Reload, timeout: o.ConfirmationTimeout, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), lockFile: lock, storageAdmission: o.StorageAdmission}
+	m := &Manager{root: root, dataDir: data, runner: o.Runner, logger: o.Logger, verify: o.Verify, reloadHook: o.Reload, timeout: o.ConfirmationTimeout, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), lockFile: lock, storageAdmission: o.StorageAdmission, preserveLANManagement: o.PreserveLANManagement}
 	fail := func(e error) (*Manager, error) { cancel(); unlockStore(lock); return nil, e }
 	err = readJSON(filepath.Join(data, "state.json"), &m.disk)
 	if os.IsNotExist(err) {
@@ -341,6 +342,11 @@ func (m *Manager) validateNativeSet(ctx context.Context, candidates map[string]s
 	}
 	for module, content := range candidates {
 		combined[module] = content
+		if m.preserveLANManagement && module == "network" {
+			if issues := validateLANManagement(live[module].Content, content); len(issues) > 0 {
+				return issues
+			}
+		}
 		if issues := validateExecutionChanges(module, live[module].Content, content); len(issues) > 0 {
 			return issues
 		}

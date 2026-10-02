@@ -70,8 +70,11 @@ func (s *Server) proxyCapture(w http.ResponseWriter, r *http.Request) {
 	}
 	var status capture.Status
 	err := s.runtime.ReadyOperation(r.Context(), managedruntime.SingBox, func(ctx context.Context) error {
-		if s.control != nil && s.control.Status().PendingCommit != nil {
-			return errors.New("capture_configuration_pending")
+		if s.control != nil {
+			configuration := s.control.Status()
+			if !configuration.Enabled || configuration.ErrorCode != "" || configuration.PendingCommit != nil {
+				return errors.New("capture_configuration_pending")
+			}
 		}
 		var err error
 		status, err = s.capture.Select(ctx, capture.Desired{Devices: input.Devices, ClientIPv4: input.ClientIPv4, ClientIPv6: input.ClientIPv6, IPv6: input.IPv6})

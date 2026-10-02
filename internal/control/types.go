@@ -25,6 +25,9 @@ type Options struct {
 	Verify              func(context.Context, []string) error
 	Reload              func(context.Context, string) error
 	ConfirmationTimeout time.Duration
+	// PreserveLANManagement refuses address/device migration until the panel's
+	// LAN-only listener and reconnect workflow can move atomically with it.
+	PreserveLANManagement bool
 	// StorageAdmission reserves full temporary allocations on the target
 	// filesystem. recovery permits the shared owner to use its rollback reserve.
 	// The returned release is held until writes and temporary cleanup finish.

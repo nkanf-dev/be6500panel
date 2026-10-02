@@ -15,16 +15,16 @@ func (s *Server) ModuleList() []core.Module {
 				m.State = "ready"
 				m.Capabilities = []core.Capability{{ID: "observe", Title: "设备观察", Supported: true}}
 				if m.ID != "devices" {
-					m.Capabilities = append(m.Capabilities, core.Capability{ID: "configure", Title: "配置 Commit", Supported: s.control != nil})
+					m.Capabilities = append(m.Capabilities, core.Capability{ID: "configure", Title: "配置管理", Supported: s.control != nil})
 				}
 			}
 		case "network":
 			if s.control != nil {
-				m.Capabilities = append(m.Capabilities, core.Capability{ID: "configure", Title: "配置 Commit", Supported: true})
+				m.Capabilities = append(m.Capabilities, core.Capability{ID: "configure", Title: "配置管理", Supported: true})
 			}
 		case "system":
 			if s.control != nil {
-				m.Capabilities = append(m.Capabilities, core.Capability{ID: "configure", Title: "配置 Commit", Supported: true})
+				m.Capabilities = append(m.Capabilities, core.Capability{ID: "configure", Title: "配置管理", Supported: true})
 			}
 		case "proxy", "frpc":
 			if s.runtime != nil {

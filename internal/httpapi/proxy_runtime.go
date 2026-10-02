@@ -58,11 +58,15 @@ func (s *Server) proxyNodes(w http.ResponseWriter, r *http.Request) {
 	if p.loadFailed {
 		diagnostics = append(diagnostics, proxy.Diagnostic{Scope: "subscription", Index: -1, Code: "subscription_unavailable", Message: "持久订阅读取失败"})
 	}
+	selected := p.selected
+	if !s.recordedNodeMatchesAccepted(selected, p.subscription.Nodes) {
+		selected = ""
+	}
 	writeJSON(w, 200, struct {
 		Nodes       []proxy.PublicNode `json:"nodes"`
 		Diagnostics []proxy.Diagnostic `json:"diagnostics"`
 		Selected    string             `json:"selectedNodeId"`
-	}{p.subscription.PublicNodes(), diagnostics, p.selected})
+	}{p.subscription.PublicNodes(), diagnostics, selected})
 }
 func (s *Server) proxyImport(w http.ResponseWriter, r *http.Request) {
 	if !s.runtimeEnabled(w) {
@@ -101,7 +105,7 @@ func (s *Server) proxyImport(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "configuration_unavailable", "配置存储未启用")
 		return
 	}
-	if err = writePrivateFile(filepath.Join(s.dataDir, "subscription.yaml"), raw); err != nil {
+	if err = s.writePrivate(r.Context(), filepath.Join(s.dataDir, "subscription.yaml"), raw, false); err != nil {
 		fail(w, 500, "storage_failed", "订阅保存失败")
 		return
 	}
@@ -145,6 +149,9 @@ func fetchPrivateSubscription(ctx context.Context, source string) ([]byte, error
 	return raw, nil
 }
 func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
+	if !s.runtimeMutationAllowed(w) {
+		return
+	}
 	if !s.runtimeEnabled(w) {
 		return
 	}
@@ -223,19 +230,34 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 		}
 		out.SHA256 = fmt.Sprintf("%x", sha256.Sum256(out.Config))
 	}
-	state, err = s.runtime.Configure(r.Context(), managedruntime.SingBox, out.Config, state.Generation)
-	if err != nil {
-		s.runtimeError(w, err)
-		return
-	}
 	saved, _ := json.Marshal(struct {
 		NodeID    string         `json:"nodeId"`
 		IPv6      proxy.IPv6Mode `json:"ipv6"`
 		Ports     proxy.Ports    `json:"ports"`
 		Endpoints []string       `json:"endpoints"`
 	}{input.NodeID, input.IPv6, proxy.Ports{Mixed: input.Ports.Mixed, TProxy: input.Ports.TProxy, DNS: input.Ports.DNS}, endpoints})
+	if s.storageAdmission != nil {
+		release, admissionErr := s.storageAdmission(r.Context(), s.dataDir, int64(len(saved))+4096, false)
+		if admissionErr != nil {
+			fail(w, 409, "storage_insufficient", "存储空间不足，未切换节点；请先释放空间")
+			return
+		}
+		defer release()
+	}
+	state, err = s.runtime.Configure(r.Context(), managedruntime.SingBox, out.Config, state.Generation)
+	if err != nil {
+		s.runtimeResult(w, managedruntime.SingBox, "config_committed", state, err)
+		return
+	}
+	// Admission is held across Configure, so a later write uses the same reservation.
 	if err = writePrivateFile(filepath.Join(s.dataDir, "proxy-selection.json"), saved); err != nil {
-		fail(w, 500, "storage_failed", "节点配置记录失败")
+		p.mu.Lock()
+		p.selected = ""
+		p.mu.Unlock()
+		writeJSON(w, 500, struct {
+			Error  apiError              `json:"error"`
+			Status managedruntime.Status `json:"status"`
+		}{apiError{Code: "storage_failed", Message: "节点配置已接受，但选择记录未保存。当前节点标记未知，请刷新运行状态。"}, state})
 		return
 	}
 	p.mu.Lock()
