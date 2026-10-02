@@ -45,3 +45,11 @@ No commands in this plan connect to a router or use captured live documents.
 - [x] Test denied admission cannot modify live files, all releases run on success
   and failure, exact byte accounting, cancellation and recovery flags.
 - [x] Run package/full tests, race and vet; document contract and commit separately.
+
+## Batch 6: Atomic dependent draft bundles (final approved scope)
+
+- [x] Reproduce new network interface plus DHCP staging rejection without apply.
+- [x] Keep syntax/field/native/execution validation mandatory at Stage.
+- [x] Report reference-only dependency hints on otherwise valid drafts.
+- [x] Validate complete selected candidate references before journal/live writes.
+- [x] Run focused tests, race and vet; commit and stop.

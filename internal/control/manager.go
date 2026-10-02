@@ -247,17 +247,29 @@ func (m *Manager) Stage(ctx context.Context, r StageRequest) (Draft, error) {
 		return Draft{}, failure("storage_failed", "Cannot create a private draft identifier.")
 	}
 	_, issues := validate(r.Module, r.Content)
+	dependencies := []Issue{}
 	if len(issues) == 0 {
 		ctx, cancel := m.operationContext(ctx)
-		issues = m.validateNative(ctx, map[string]string{r.Module: r.Content}, live)
+		// A new interface and its DHCP/Wi-Fi/firewall references can be staged
+		// independently and committed as one bundle. Native invalidity is never
+		// deferred; only namespace references wait for the selected candidate set.
+		issues = m.validateNativeSet(ctx, map[string]string{r.Module: r.Content}, live, true)
 		cancel()
+		if len(issues) == 0 {
+			combined := make(map[string]string, len(modules))
+			for _, module := range modules {
+				combined[module] = live[module].Content
+			}
+			combined[r.Module] = r.Content
+			dependencies = validateReferences(map[string]string{r.Module: r.Content}, combined)
+		}
 	}
 	for _, diagnostic := range issues {
 		if diagnostic.Code == "storage_insufficient" || diagnostic.Code == "cancelled" {
 			return Draft{}, failure(diagnostic.Code, diagnostic.Message)
 		}
 	}
-	d := Draft{ID: id, Module: r.Module, Generation: r.Generation, Diff: diff(r.Module, live[r.Module].Content, r.Content), Risks: risk(r.Module, live[r.Module].Content, r.Content), Valid: len(issues) == 0, Errors: issues, CreatedAt: time.Now().UTC()}
+	d := Draft{ID: id, Module: r.Module, Generation: r.Generation, Diff: diff(r.Module, live[r.Module].Content, r.Content), Risks: risk(r.Module, live[r.Module].Content, r.Content), Valid: len(issues) == 0, Errors: issues, Dependencies: dependencies, CreatedAt: time.Now().UTC()}
 	old := m.disk.Drafts
 	m.disk.Drafts = append(m.disk.Drafts, storedDraft{Draft: d, Content: r.Content})
 	if err = m.saveState(); err != nil {
@@ -269,6 +281,7 @@ func (m *Manager) Stage(ctx context.Context, r StageRequest) (Draft, error) {
 func cloneDraft(d Draft) Draft {
 	d.Risks = append([]Issue{}, d.Risks...)
 	d.Errors = append([]Issue{}, d.Errors...)
+	d.Dependencies = append([]Issue{}, d.Dependencies...)
 	return d
 }
 func (m *Manager) Drafts(ctx context.Context) ([]Draft, error) {
@@ -306,6 +319,10 @@ func (m *Manager) DeleteDraft(ctx context.Context, id string) error {
 	return failure("draft_not_found", "Private draft does not exist.")
 }
 func (m *Manager) validateNative(ctx context.Context, candidates map[string]string, live map[string]snapshot) []Issue {
+	return m.validateNativeSet(ctx, candidates, live, false)
+}
+
+func (m *Manager) validateNativeSet(ctx context.Context, candidates map[string]string, live map[string]snapshot, deferReferences bool) []Issue {
 	dir, err := os.MkdirTemp(m.dataDir, "candidate-")
 	if err != nil {
 		return []Issue{issue("validation_unavailable", "Cannot create isolated UCI validation directory.")}
@@ -328,8 +345,10 @@ func (m *Manager) validateNative(ctx context.Context, candidates map[string]stri
 			return issues
 		}
 	}
-	if issues := validateReferences(candidates, combined); len(issues) > 0 {
-		return issues
+	if !deferReferences {
+		if issues := validateReferences(candidates, combined); len(issues) > 0 {
+			return issues
+		}
 	}
 	var candidateBytes int64
 	for _, text := range combined {

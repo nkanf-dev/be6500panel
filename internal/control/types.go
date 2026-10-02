@@ -50,14 +50,17 @@ type Issue struct {
 	Message string `json:"message"`
 }
 type Draft struct {
-	ID         string    `json:"id"`
-	Module     string    `json:"module"`
-	Generation uint64    `json:"generation"`
-	Diff       string    `json:"diff"`
-	Risks      []Issue   `json:"risks"`
-	Valid      bool      `json:"valid"`
-	Errors     []Issue   `json:"errors"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID         string  `json:"id"`
+	Module     string  `json:"module"`
+	Generation uint64  `json:"generation"`
+	Diff       string  `json:"diff"`
+	Risks      []Issue `json:"risks"`
+	Valid      bool    `json:"valid"`
+	Errors     []Issue `json:"errors"`
+	// Dependencies are reference-only checks deferred to the selected commit set.
+	// Valid still requires native syntax, field and execution validation.
+	Dependencies []Issue   `json:"dependencies,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 type StageRequest struct {
 	Module     string `json:"module"`

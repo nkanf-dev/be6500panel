@@ -558,8 +558,13 @@ func TestCrossDocumentReferencesUseCandidateSet(t *testing.T) {
 	f := newFixture(t)
 	m := openFixture(t, f)
 	d := stage(t, m, "wireless", testWireless+" option network 'missing-interface'\n")
-	if d.Valid || len(d.Errors) == 0 || d.Errors[0].Code != "invalid_reference" {
-		t.Fatal("unknown interface reference accepted")
+	if !d.Valid || len(d.Errors) != 0 || len(d.Dependencies) == 0 || d.Dependencies[0].Code != "invalid_reference" {
+		t.Fatalf("reference dependency was not deferred: %#v", d)
+	}
+	_, e := commit(t, m, d, true)
+	errorCode(t, e, "invalid_reference")
+	if len(f.reloads) != 0 || readFixture(t, f, "wireless") != testWireless {
+		t.Fatal("unresolved reference changed live configuration")
 	}
 	d = stage(t, m, "wireless", testWireless+" option network 'lan'\n")
 	if !d.Valid {

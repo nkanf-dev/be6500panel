@@ -26,12 +26,20 @@ defer manager.Close()
   current `uint64` source generation. Reading an external edit advances CAS.
 - `Stage(ctx, StageRequest{Module, Content, Generation}) (Draft, error)` persists
   a private candidate with full-document unified diff, risk codes and validation
-  results. Invalid candidates remain inspectable drafts, but cannot be committed.
+  results. Syntax, field, execution or native-invalid candidates remain
+  inspectable drafts, but cannot be committed. Reference-only `dependencies`
+  are deferred hints on otherwise valid drafts: select their new interface/radio
+  drafts in the same commit. A valid draft with dependencies is not yet proof
+  that a selected bundle is ready.
 - `Drafts(ctx) ([]Draft, error)` lists staged metadata, diffs and diagnostics.
 - `DeleteDraft(ctx, id) error` deletes exactly one private draft.
 - `Commit(ctx, CommitRequest{DraftIDs, Generation, AcknowledgeRisks}) (Operation, error)`
   validates again, journals prior documents, atomically replaces each changed
   document and reloads fixed services. Select exactly one draft per module.
+  All syntax/native/execution checks run again. References use the complete
+  selected candidate set before journal or live writes. New network plus
+  DHCP/Wi-Fi/firewall references therefore apply as one provisional bundle;
+  unresolved references reject the entire selection without intermediate apply.
 - `Confirm(ctx, id) (Operation, error)` accepts a provisional transaction. The
   HTTP owner must call it **only after receiving an authenticated real request
   through the new/current management address**. A local call alone is not proof
