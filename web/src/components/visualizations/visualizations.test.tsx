@@ -36,6 +36,10 @@ describe('visualization public contract', () => {
     fireEvent.change(screen.getByLabelText('指标'), { target: { value: 'latency' } });
     expect((screen.getByLabelText('指标') as HTMLSelectElement).value).toBe('latency');
   });
+  it('gives chart filters concise accessible names without option text', () => {
+    renderChart(ActivityHeatmap);
+    expect(screen.getByRole('combobox', { name: '终端' }).getAttribute('aria-label')).toBe('终端');
+  });
   it('filters heatmap by a neutral sample device', () => {
     renderChart(ActivityHeatmap);
     fireEvent.change(screen.getByLabelText('终端'), { target: { value: '终端 B' } });
