@@ -24,6 +24,7 @@ func FuzzObservationParsers(f *testing.F) {
 		_, _ = parseIPv4Routes(data)
 		_, _ = parseIPv6Routes(data)
 		_, _ = parseLeases(data, time.Unix(2000000000, 0))
+		_, _ = fixtureInterfaceAddresses(data)
 		_, _ = parseARP(data)
 		_, _ = parseResolvers(data)
 		_, _ = parseFirewall(data)

@@ -1,4 +1,4 @@
-// Package capture applies only internally compiled single-client network intent.
+// Package capture applies only internally compiled exact-client network intent.
 package capture
 
 import (
@@ -21,12 +21,16 @@ import (
 
 type Runner func(context.Context, []string) ([]byte, error)
 type Status struct {
-	Active         bool   `json:"active"`
-	ClientIPv4     string `json:"clientIPv4,omitempty"`
-	ClientIPv6     string `json:"clientIPv6,omitempty"`
-	Commands       int    `json:"commands"`
-	CleanupPending bool   `json:"cleanupPending"`
-	State          string `json:"state"`
+	Desired        bool           `json:"desired"`
+	Clients        []Client       `json:"clients"`
+	IPv6           proxy.IPv6Mode `json:"ipv6,omitempty"`
+	Error          string         `json:"error,omitempty"`
+	Active         bool           `json:"active"`
+	ClientIPv4     string         `json:"clientIPv4,omitempty"`
+	ClientIPv6     string         `json:"clientIPv6,omitempty"`
+	Commands       int            `json:"commands"`
+	CleanupPending bool           `json:"cleanupPending"`
+	State          string         `json:"state"`
 }
 
 // CommandError contains only internally compiled network argv and bounded kernel
@@ -54,13 +58,21 @@ type Controller struct {
 	plan           *proxy.OwnedRulesPlan
 	active         bool
 	cleanupPending bool
+	desiredPath    string
+	desired        Desired
+	clients        []Client
+	restoreError   string
+	builder        Builder
 }
 
 func New(dataDir string, runner Runner) (*Controller, error) {
 	if runner == nil {
 		runner = run
 	}
-	c := &Controller{path: filepath.Join(dataDir, "capture-journal.json"), runner: runner, tableNames: readTableNames}
+	c := &Controller{path: filepath.Join(dataDir, "capture-journal.json"), desiredPath: filepath.Join(dataDir, "capture-desired.json"), runner: runner, tableNames: readTableNames}
+	if err := c.loadDesired(); err != nil {
+		return nil, err
+	}
 	raw, err := os.ReadFile(c.path)
 	if err == nil {
 		var stored journal
@@ -80,15 +92,30 @@ func New(dataDir string, runner Runner) (*Controller, error) {
 }
 func (c *Controller) Status() Status { c.mu.Lock(); defer c.mu.Unlock(); return c.statusLocked() }
 func (c *Controller) statusLocked() Status {
-	state := Status{Active: c.active, CleanupPending: c.cleanupPending, State: "inactive"}
+	state := Status{Active: c.active, CleanupPending: c.cleanupPending, State: "inactive", Desired: c.desired.Enabled, Clients: slices.Clone(c.clients), IPv6: c.desired.IPv6, Error: c.restoreError}
+	if state.Clients == nil {
+		state.Clients = []Client{}
+	}
+	if state.Desired {
+		state.State = "suspended"
+	}
 	if c.plan != nil {
 		state.ClientIPv4 = c.plan.Ownership.ClientIPv4
 		state.ClientIPv6 = c.plan.Ownership.ClientIPv6
+		if state.ClientIPv4 == "" && len(c.plan.Ownership.ClientIPv4s) > 0 {
+			state.ClientIPv4 = c.plan.Ownership.ClientIPv4s[0]
+		}
+		if state.ClientIPv6 == "" && len(c.plan.Ownership.ClientIPv6s) > 0 {
+			state.ClientIPv6 = c.plan.Ownership.ClientIPv6s[0]
+		}
 		state.Commands = len(c.plan.Apply)
 		if c.cleanupPending {
 			state.State = "cleanup-pending"
 		} else if c.active {
 			state.State = "active"
+			if c.restoreError == "capture_devices_pending" {
+				state.State = "partial"
+			}
 		} else {
 			state.State = "staged"
 		}
@@ -100,9 +127,14 @@ func (c *Controller) statusLocked() Status {
 func (c *Controller) Apply(ctx context.Context, input proxy.RulesPlanInput) (Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.applyLocked(ctx, input)
+}
+func (c *Controller) applyLocked(ctx context.Context, input proxy.RulesPlanInput) (Status, error) {
 	if c.plan != nil {
 		return c.statusLocked(), errors.New("capture already staged; stop first")
 	}
+	input.ClientIPv4s = slices.Clone(input.ClientIPv4s)
+	input.ClientIPv6s = slices.Clone(input.ClientIPv6s)
 	input.EndpointIPs = slices.Clone(input.EndpointIPs)
 	input.ManagementIPs = slices.Clone(input.ManagementIPs)
 	input.RouterDNSAddresses = slices.Clone(input.RouterDNSAddresses)
@@ -133,6 +165,7 @@ func (c *Controller) Apply(ctx context.Context, input proxy.RulesPlanInput) (Sta
 	}
 	c.active = true
 	c.cleanupPending = false
+	c.restoreError = ""
 	return c.statusLocked(), nil
 }
 func (c *Controller) Cleanup(ctx context.Context) error {
@@ -243,7 +276,15 @@ func atomicSave(path string, raw []byte) error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(f.Name(), path)
+	if err := os.Rename(f.Name(), path); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 type boundedOutput struct{ bytes.Buffer }

@@ -514,44 +514,71 @@ func hasLocalRoute(out []byte, family int) bool {
 	}
 	return false
 }
+
+// hasOwnedRule proves every exact client policy rule for a routed family.
+// One observed source, duplicate lines or a broader prefix cannot stand in for
+// another client. Unknown selectors cannot prove the compiled unrestricted rule.
 func hasOwnedRule(out []byte, own proxy.RulesOwnership, family int, names map[string]int) bool {
-	client := own.ClientIPv4
+	clients := own.ClientIPv4s
+	singular := own.ClientIPv4
 	if family == 6 {
-		client = own.ClientIPv6
+		clients, singular = own.ClientIPv6s, own.ClientIPv6
+	}
+	remaining := make(map[string]bool, len(clients)+1)
+	for _, client := range clients {
+		remaining[client] = true
+	}
+	if singular != "" {
+		remaining[singular] = true
+	}
+	if len(remaining) == 0 {
+		return false
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
-		if len(f) == 0 || f[0] != strconv.Itoa(proxy.CapturePriority)+":" || slices.Contains(f, "not") {
+		if len(f) != 9 || f[0] != strconv.Itoa(proxy.CapturePriority)+":" {
 			continue
 		}
-		source, hasSource, _ := option(f, "from")
-		iface, hasIface, _ := option(f, "iif")
-		mark, hasMark, _ := option(f, "fwmark")
-		table, hasTable, _ := option(f, "lookup")
-		if !hasTable {
-			table, hasTable, _ = option(f, "table")
+		values := make(map[string]string, 4)
+		valid := true
+		for i := 1; i < len(f); i += 2 {
+			key := f[i]
+			if key == "table" {
+				key = "lookup"
+			}
+			if key != "from" && key != "iif" && key != "fwmark" && key != "lookup" {
+				valid = false
+				break
+			}
+			if _, duplicate := values[key]; duplicate {
+				valid = false
+				break
+			}
+			values[key] = f[i+1]
 		}
-		if !hasSource || !hasIface || !hasMark || !hasTable || iface != own.LANInterface {
+		if !valid || values["iif"] != own.LANInterface {
 			continue
 		}
-		sourceAddr := strings.SplitN(source, "/", 2)[0]
-		if sourceAddr != client {
-			continue
-		}
-		if strings.Contains(source, "/") {
-			p, e := netip.ParsePrefix(source)
-			if e != nil || p.Bits() != p.Addr().BitLen() {
+		source := values["from"]
+		addr, e := netip.ParseAddr(source)
+		if e != nil {
+			prefix, pe := netip.ParsePrefix(source)
+			if pe != nil || prefix.Bits() != prefix.Addr().BitLen() {
 				continue
 			}
+			addr = prefix.Addr()
 		}
-		value, mask, e := markMask(mark)
+		if addr.Zone() != "" || addr.Is4In6() || addr.Is4() != (family == 4) || !remaining[addr.String()] {
+			continue
+		}
+		value, mask, e := markMask(values["fwmark"])
 		if e != nil || value != proxy.CaptureMark || mask != proxy.CaptureMask {
 			continue
 		}
-		number, e := tableNumber(table, names)
+		number, e := tableNumber(values["lookup"], names)
 		if e == nil && number == proxy.CaptureTable {
-			return true
+			delete(remaining, addr.String())
 		}
 	}
-	return false
+	return len(remaining) == 0
 }

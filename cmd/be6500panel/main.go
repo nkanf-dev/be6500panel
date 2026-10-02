@@ -20,6 +20,7 @@ import (
 	"be6500panel/internal/core"
 	"be6500panel/internal/httpapi"
 	"be6500panel/internal/modules"
+	"be6500panel/internal/proxy"
 	"be6500panel/internal/router"
 	managedruntime "be6500panel/internal/runtime"
 	"be6500panel/internal/transport"
@@ -70,6 +71,7 @@ func run() error {
 	sampler := core.NewSampler(observation, 2*time.Second)
 	sampler.Start(ctx)
 	defer sampler.Close()
+	routerAdapter := router.New(*adapterRoot)
 	var runtimeManager *managedruntime.Manager
 	var controlManager *control.Manager
 	var captureManager *capture.Controller
@@ -88,7 +90,29 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, HTTPClient: artifactClient, MaxCompressedBytes: 20 << 20, DownloadTimeout: 6 * time.Minute, MaxUncompressedBytes: 40 << 20, ReadyHook: runtimeReadiness(func() *managedruntime.Manager { return runtimeManager }), ReadyTimeout: 15 * time.Second, CleanupHook: func(ctx context.Context, id string) error {
+		// A boot journal proves ownership, not a healthy core. Withdraw it even
+		// when no runtime is desired; the saved MAC scope stays separate.
+		withdrawCtx, cancelWithdraw := context.WithTimeout(ctx, 30*time.Second)
+		withdrawErr := captureManager.Cleanup(withdrawCtx)
+		cancelWithdraw()
+		if withdrawErr != nil {
+			logger.Warn("Boot capture cleanup pending", "code", "capture_cleanup_failed", "module", "proxy")
+		}
+		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, HTTPClient: artifactClient, MaxCompressedBytes: 20 << 20, DownloadTimeout: 6 * time.Minute, MaxUncompressedBytes: 40 << 20, ReadyHook: func(ctx context.Context, id string) error {
+			err := runtimeReadiness(func() *managedruntime.Manager { return runtimeManager })(ctx, id)
+			if err != nil && id == managedruntime.SingBox {
+				withdrawCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				return errors.Join(err, captureManager.Suspend(withdrawCtx, "capture_readiness_failed"))
+			}
+			return err
+		}, ReadyTimeout: 15 * time.Second, RestoreHook: func(ctx context.Context, id string) error {
+			if id != managedruntime.SingBox {
+				return nil
+			}
+			_, err := captureManager.Restore(ctx)
+			return err
+		}, CleanupHook: func(ctx context.Context, id string) error {
 			if id == managedruntime.SingBox {
 				return captureManager.Cleanup(ctx)
 			}
@@ -98,6 +122,21 @@ func run() error {
 			return err
 		}
 		defer runtimeManager.Close()
+		captureManager.SetBuilder(func(ctx context.Context, desired capture.Desired) (proxy.RulesPlanInput, []capture.Client, error) {
+			clients := make([]capture.Client, 0, len(desired.Devices))
+			for _, device := range desired.Devices {
+				clients = append(clients, capture.Client{MAC: device.MAC})
+			}
+			raw, _, err := runtimeManager.Config(managedruntime.SingBox)
+			if err != nil {
+				return proxy.RulesPlanInput{}, clients, errors.New("capture_configuration_unavailable")
+			}
+			observation, err := routerAdapter.CaptureObservation(ctx)
+			if err != nil {
+				return proxy.RulesPlanInput{}, clients, errors.New("capture_devices_unavailable")
+			}
+			return capture.BuildFromAccepted(ctx, desired, raw, observation, capture.ResolveEndpoints)
+		})
 	}
 	if *controlEnabled {
 		if *dataDir == "" || password == "" {
@@ -109,7 +148,6 @@ func run() error {
 		}
 		defer controlManager.Close()
 	}
-	routerAdapter := router.New(*adapterRoot)
 	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager})
 	if err != nil {
 		return err

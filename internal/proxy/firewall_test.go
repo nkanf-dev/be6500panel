@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"reflect"
@@ -809,5 +810,281 @@ func TestOwnedRulesRouterDNSRequiresExplicitRouterManagementSubset(t *testing.T)
 				t.Fatal("non-follow mode redirected router IPv6 DNS")
 			}
 		}
+	}
+}
+
+func TestOwnedRulesMultipleClientsSharePreparationAndKeepExactScope(t *testing.T) {
+	for _, mode := range []IPv6Mode{IPv6Direct, IPv6Follow, IPv6Block} {
+		t.Run(string(mode), func(t *testing.T) {
+			in := ownedTestInput()
+			in.ClientIPv4 = ""
+			in.ClientIPv4s = []string{"192.168.31.43", "192.168.31.42", "192.168.31.43"}
+			in.ClientIPv6s = []string{"2001:db8::43", "2001:0db8:0000::0042", "2001:db8::42"}
+			in.IPv6 = mode
+			plan := ownedTestPlan(t, in)
+			if plan.Ownership.ClientIPv4 != "" || plan.Ownership.ClientIPv6 != "" ||
+				!slices.Equal(plan.Ownership.ClientIPv4s, []string{"192.168.31.42", "192.168.31.43"}) ||
+				!slices.Equal(plan.Ownership.ClientIPv6s, []string{"2001:db8::42", "2001:db8::43"}) {
+				t.Fatalf("noncanonical plural ownership: %+v", plan.Ownership)
+			}
+			wantChains, wantRoutes, wantRules, wantHooks := 2, 1, 2, 4
+			if mode == IPv6Follow {
+				wantChains, wantRoutes, wantRules, wantHooks = 4, 2, 4, 8
+			} else if mode == IPv6Block {
+				wantChains, wantHooks = 3, 6
+			}
+			if len(plan.Ownership.Chains) != wantChains || len(plan.Ownership.RouteFamilies) != wantRoutes {
+				t.Fatalf("shared ownership: %+v", plan.Ownership)
+			}
+			countCommands := func(commands [][]string, operation string) (chains, routes, rules, hooks int) {
+				for _, command := range commands {
+					if command[0] == "ip" {
+						if command[3] != operation {
+							t.Fatalf("unexpected routing operation: %v", command)
+						}
+						if command[2] == "route" {
+							routes++
+						} else if command[2] == "rule" {
+							rules++
+							prefixes := []string{"192.168.31.42/32", "192.168.31.43/32"}
+							if command[1] == "-6" {
+								prefixes = []string{"2001:db8::42/128", "2001:db8::43/128"}
+							}
+							if !slices.Contains(prefixes, command[7]) || !ownedHasArgs(command, "iif", "br-lan", "fwmark", "0x4000/0x4000", "lookup", "16500") {
+								t.Fatalf("non-exact policy rule: %v", command)
+							}
+						}
+						continue
+					}
+					switch command[5] {
+					case "-N", "-X":
+						chains++
+					case "-I", "-D":
+						hooks++
+						prefixes := []string{"192.168.31.42/32", "192.168.31.43/32"}
+						if command[0] == "ip6tables" {
+							prefixes = []string{"2001:db8::42/128", "2001:db8::43/128"}
+						}
+						if !ownedHasArgs(command, "-i", "br-lan", "-s") || !slices.Contains(prefixes, command[len(command)-3]) {
+							t.Fatalf("non-exact hook: %v", command)
+						}
+					}
+				}
+				return
+			}
+			for _, commands := range []struct {
+				argv [][]string
+				op   string
+			}{{plan.Apply, "add"}, {plan.Cleanup, "del"}} {
+				chains, routes, rules, hooks := countCommands(commands.argv, commands.op)
+				if chains != wantChains || routes != wantRoutes || rules != wantRules || hooks != wantHooks {
+					t.Fatalf("%s counts chains/routes/rules/hooks=%d/%d/%d/%d", commands.op, chains, routes, rules, hooks)
+				}
+			}
+			countExact := func(want []string) int {
+				count := 0
+				for _, command := range plan.Apply {
+					if slices.Equal(command, want) {
+						count++
+					}
+				}
+				return count
+			}
+			for _, family := range []int{4, 6} {
+				clients := plan.Ownership.ClientIPv4s
+				tables := []string{"nat", "mangle"}
+				hook, names := "PREROUTING", []string{"B6P_V4_DNS", "B6P_V4_CAPTURE"}
+				if family == 6 {
+					if mode == IPv6Direct {
+						continue
+					}
+					clients = plan.Ownership.ClientIPv6s
+					names = []string{"B6P_V6_DNS", "B6P_V6_CAPTURE"}
+					if mode == IPv6Block {
+						tables, hook, names = []string{"filter"}, "FORWARD", []string{"B6P_V6_BLOCK"}
+					}
+				}
+				if family == 4 || mode == IPv6Follow {
+					if countExact(ownedLocalRoute(family, "add")) != 1 {
+						t.Fatalf("family %d must have exactly one shared route", family)
+					}
+				}
+				for _, raw := range clients {
+					client := netip.MustParseAddr(raw)
+					for i, table := range tables {
+						want := ownedIPTables(family, table, "-I", hook, "1", "-i", "br-lan", "-s", ownedHostPrefix(client), "-j", names[i])
+						if countExact(want) != 1 {
+							t.Fatalf("each client requires one exact hook per shared table: %v", want)
+						}
+					}
+					if family == 4 || mode == IPv6Follow {
+						want := []string{"ip", fmt.Sprintf("-%d", family), "rule", "add", "priority", "16500", "from", ownedHostPrefix(client), "iif", "br-lan", "fwmark", "0x4000/0x4000", "lookup", "16500"}
+						if countExact(want) != 1 {
+							t.Fatalf("each captured client requires exactly one policy rule: %v", want)
+						}
+					}
+				}
+			}
+			for i, command := range plan.Apply {
+				if (i >= len(plan.Apply)-wantHooks) != (command[5] == "-I") {
+					t.Fatalf("hooks precede complete shared preparation: %v", command)
+				}
+			}
+			for i := 0; i < wantHooks; i++ {
+				check := slices.Clone(plan.Apply[len(plan.Apply)-1-i])
+				check[5] = "-D"
+				check = append(check[:7], check[8:]...)
+				if !slices.Equal(plan.Cleanup[i], check) {
+					t.Fatalf("cleanup does not unhook every client first: %v", plan.Cleanup[i])
+				}
+			}
+			for _, command := range plan.Apply {
+				if slices.Contains(command, "OUTPUT") || slices.Contains(command, "POSTROUTING") || slices.Contains(command, "0.0.0.0/0") && command[2] != "route" {
+					t.Fatalf("multiple clients widened capture: %v", command)
+				}
+			}
+			// Increasing clients must not duplicate chain bodies or routing tables.
+			single := in
+			single.ClientIPv4s, single.ClientIPv6s = in.ClientIPv4s[1:2], in.ClientIPv6s[1:2]
+			one := ownedTestPlan(t, single)
+			chainBodies := func(commands [][]string) [][]string {
+				var out [][]string
+				for _, command := range commands {
+					if command[0] != "ip" && command[5] == "-A" {
+						out = append(out, command)
+					}
+				}
+				return out
+			}
+			if !reflect.DeepEqual(chainBodies(plan.Apply), chainBodies(one.Apply)) {
+				t.Fatal("shared chain bodies changed with the number of clients")
+			}
+		})
+	}
+}
+
+func TestOwnedRulesPluralClientsAreBoundedValidatedAndCanonical(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*RulesPlanInput)
+	}{
+		{"missing-all-v4", func(in *RulesPlanInput) { in.ClientIPv4 = "" }},
+		{"v4-prefix", func(in *RulesPlanInput) { in.ClientIPv4s = []string{"192.168.31.0/24"} }},
+		{"v4-hostname", func(in *RulesPlanInput) { in.ClientIPv4s = []string{"client.example"} }},
+		{"v4-family", func(in *RulesPlanInput) { in.ClientIPv4s = []string{"2001:db8::42"} }},
+		{"v4-loopback", func(in *RulesPlanInput) { in.ClientIPv4s = []string{"127.0.0.1"} }},
+		{"v4-empty-entry", func(in *RulesPlanInput) { in.ClientIPv4s = []string{""} }},
+		{"v6-prefix", func(in *RulesPlanInput) { in.ClientIPv6s = []string{"2001:db8::/64"} }},
+		{"v6-zone", func(in *RulesPlanInput) { in.ClientIPv6s = []string{"fe80::42%br-lan"} }},
+		{"v6-mapped", func(in *RulesPlanInput) { in.ClientIPv6s = []string{"::ffff:192.168.31.42"} }},
+		{"v6-family", func(in *RulesPlanInput) { in.ClientIPv6s = []string{"192.168.31.42"} }},
+		{"v6-multicast", func(in *RulesPlanInput) { in.ClientIPv6s = []string{"ff02::1"} }},
+		{"v6-command", func(in *RulesPlanInput) { in.ClientIPv6s = []string{"2001:db8::42; reboot"} }},
+		{"v4-over-limit", func(in *RulesPlanInput) {
+			in.ClientIPv4 = ""
+			in.ClientIPv4s = make([]string, MaxCaptureClientsPerFamily+1)
+		}},
+		{"v6-over-limit", func(in *RulesPlanInput) { in.ClientIPv6s = make([]string, MaxCaptureClientsPerFamily+1) }},
+		{"mixed-over-limit", func(in *RulesPlanInput) { in.ClientIPv4s = make([]string, MaxCaptureClientsPerFamily) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := ownedTestInput()
+			tc.edit(&in)
+			plan, err := PlanOwnedRules(in)
+			if err == nil || !reflect.DeepEqual(plan, OwnedRulesPlan{}) {
+				t.Fatalf("invalid plural input produced executable intent: %v %+v", err, plan)
+			}
+		})
+	}
+	in := ownedTestInput()
+	in.ClientIPv4s = []string{"192.168.31.43", in.ClientIPv4, "192.168.31.43"}
+	in.ClientIPv6, in.IPv6 = "2001:db8::42", IPv6Follow
+	in.ClientIPv6s = []string{"2001:db8::43", "2001:0db8:0000::0042"}
+	original4, original6 := slices.Clone(in.ClientIPv4s), slices.Clone(in.ClientIPv6s)
+	first := ownedTestPlan(t, in)
+	if !slices.Equal(in.ClientIPv4s, original4) || !slices.Equal(in.ClientIPv6s, original6) {
+		t.Fatal("compiler mutated input client lists")
+	}
+	slices.Reverse(in.ClientIPv4s)
+	slices.Reverse(in.ClientIPv6s)
+	second := ownedTestPlan(t, in)
+	if !reflect.DeepEqual(first, second) || len(first.Ownership.ClientIPv4s) != 2 || len(first.Ownership.ClientIPv6s) != 2 {
+		t.Fatal("mixed plural/singular input was not sorted and deduplicated")
+	}
+	in.ClientIPv4s[0], in.ClientIPv6s[0] = "192.168.31.99", "2001:db8::99"
+	if !reflect.DeepEqual(first, second) {
+		t.Fatal("plan aliases caller-owned clients")
+	}
+	for _, count := range []int{MaxCaptureClientsPerFamily, MaxCaptureClientsPerFamily + 1} {
+		bounded := ownedTestInput()
+		bounded.ClientIPv4 = ""
+		bounded.IPv6 = IPv6Follow
+		for i := 1; i <= count; i++ {
+			bounded.ClientIPv4s = append(bounded.ClientIPv4s, fmt.Sprintf("192.0.2.%d", i))
+			bounded.ClientIPv6s = append(bounded.ClientIPv6s, fmt.Sprintf("2001:db8::%x", i))
+		}
+		plan, err := PlanOwnedRules(bounded)
+		if (err == nil) != (count == MaxCaptureClientsPerFamily) {
+			t.Fatalf("bound %d err=%v", count, err)
+		}
+		if err == nil && (len(plan.Ownership.ClientIPv4s) != count || len(plan.Ownership.ClientIPv6s) != count || len(plan.Ownership.Chains) != 4) {
+			t.Fatal("maximum exact clients did not retain shared chains")
+		}
+	}
+}
+
+func TestOwnedRulesLegacyOwnershipJSONAndCleanupRemainExact(t *testing.T) {
+	for _, mode := range []IPv6Mode{IPv6Direct, IPv6Follow, IPv6Block} {
+		t.Run(string(mode), func(t *testing.T) {
+			in := ownedTestInput()
+			in.ClientIPv6, in.IPv6 = "2001:db8::42", mode
+			plan := ownedTestPlan(t, in)
+			if plan.Ownership.ClientIPv4s != nil || plan.Ownership.ClientIPv6s != nil {
+				t.Fatal("legacy singular plan gained plural ownership")
+			}
+			var expected [][]string
+			if mode == IPv6Follow {
+				expected = append(expected,
+					[]string{"ip6tables", "-w", "5", "-t", "mangle", "-D", "PREROUTING", "-i", "br-lan", "-s", "2001:db8::42/128", "-j", "B6P_V6_CAPTURE"},
+					[]string{"ip6tables", "-w", "5", "-t", "nat", "-D", "PREROUTING", "-i", "br-lan", "-s", "2001:db8::42/128", "-j", "B6P_V6_DNS"})
+			} else if mode == IPv6Block {
+				expected = append(expected, []string{"ip6tables", "-w", "5", "-t", "filter", "-D", "FORWARD", "-i", "br-lan", "-s", "2001:db8::42/128", "-j", "B6P_V6_BLOCK"})
+			}
+			expected = append(expected,
+				[]string{"iptables", "-w", "5", "-t", "mangle", "-D", "PREROUTING", "-i", "br-lan", "-s", "192.168.31.42/32", "-j", "B6P_V4_CAPTURE"},
+				[]string{"iptables", "-w", "5", "-t", "nat", "-D", "PREROUTING", "-i", "br-lan", "-s", "192.168.31.42/32", "-j", "B6P_V4_DNS"})
+			chains := []struct{ tool, table, chain string }{}
+			if mode == IPv6Follow {
+				chains = append(chains, struct{ tool, table, chain string }{"ip6tables", "nat", "B6P_V6_DNS"}, struct{ tool, table, chain string }{"ip6tables", "mangle", "B6P_V6_CAPTURE"})
+			} else if mode == IPv6Block {
+				chains = append(chains, struct{ tool, table, chain string }{"ip6tables", "filter", "B6P_V6_BLOCK"})
+			}
+			chains = append(chains, struct{ tool, table, chain string }{"iptables", "nat", "B6P_V4_DNS"}, struct{ tool, table, chain string }{"iptables", "mangle", "B6P_V4_CAPTURE"})
+			for _, chain := range chains {
+				for _, op := range []string{"-F", "-X"} {
+					expected = append(expected, []string{chain.tool, "-w", "5", "-t", chain.table, op, chain.chain})
+				}
+			}
+			if mode == IPv6Follow {
+				expected = append(expected,
+					[]string{"ip", "-6", "rule", "del", "priority", "16500", "from", "2001:db8::42/128", "iif", "br-lan", "fwmark", "0x4000/0x4000", "lookup", "16500"},
+					[]string{"ip", "-6", "route", "del", "local", "::/0", "dev", "lo", "table", "16500"})
+			}
+			expected = append(expected,
+				[]string{"ip", "-4", "rule", "del", "priority", "16500", "from", "192.168.31.42/32", "iif", "br-lan", "fwmark", "0x4000/0x4000", "lookup", "16500"},
+				[]string{"ip", "-4", "route", "del", "local", "0.0.0.0/0", "dev", "lo", "table", "16500"})
+			if !reflect.DeepEqual(plan.Cleanup, expected) {
+				t.Fatalf("legacy cleanup order/shape changed:\ngot  %v\nwant %v", plan.Cleanup, expected)
+			}
+			for _, value := range []any{in, plan.Ownership} {
+				raw, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(raw), "ClientIPv4s") || strings.Contains(string(raw), "ClientIPv6s") {
+					t.Fatalf("legacy JSON gained plural fields: %s", raw)
+				}
+			}
+		})
 	}
 }

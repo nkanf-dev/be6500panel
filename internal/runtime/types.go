@@ -59,15 +59,21 @@ type Options struct {
 	DownloadTimeout      time.Duration
 	CheckTimeout         time.Duration
 	ReadyTimeout         time.Duration
-	TermGrace            time.Duration
-	BackoffInitial       time.Duration
-	BackoffMax           time.Duration
-	StableAfter          time.Duration
-	MaxRestarts          int
-	CleanupHook          func(context.Context, string) error
+	// ResourceTimeout bounds owned network cleanup/restore independently of process TERM and listener readiness.
+	ResourceTimeout time.Duration
+	TermGrace       time.Duration
+	BackoffInitial  time.Duration
+	BackoffMax      time.Duration
+	StableAfter     time.Duration
+	MaxRestarts     int
+	CleanupHook     func(context.Context, string) error
 	// ReadyHook checks fixed local listeners, not remote connectivity. It must
 	// honor ctx and must not call manager mutations; Config/Status reads are safe.
-	ReadyHook        func(context.Context, string) error
+	ReadyHook func(context.Context, string) error
+	// RestoreHook rebuilds caller-owned resources after readiness. A failure
+	// keeps the core running but reports resources suspended through their owner.
+	// It runs in the mutation lane and may call Config/Status, not mutations.
+	RestoreHook      func(context.Context, string) error
 	syncDirectory    func(string) error // test seam; production always uses syncDir
 	waitExitedLeader func(int) bool     // test seam; production always uses waitid(WNOWAIT)
 }

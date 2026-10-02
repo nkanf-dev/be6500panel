@@ -8,12 +8,12 @@ import (
 func TestLeasesAndARP(t *testing.T) {
 	now := time.Unix(2000000000, 0)
 	leases, bad := parseLeases([]byte("2000000060 02:00:00:00:00:01 192.0.2.10 example-pc *\n0 02:00:00:00:00:02 192.0.2.11 * *\n1999999990 02:00:00:00:00:03 192.0.2.12 expired *\nnot-a-lease\n"), now)
-	if !bad || len(leases) != 2 || leases[0].Hostname != "example-pc" || leases[1].ExpiresAt != nil {
+	if !bad || len(leases) != 2 || leases[0].Hostname != "example-pc" || leases[1].ExpiresAt != nil || !leases[0].Lease || !leases[1].Lease {
 		t.Fatalf("%+v %v", leases, bad)
 	}
 	arp, bad := parseARP([]byte("IP address HW type Flags HW address Mask Device\n192.0.2.10 0x1 0x2 02:00:00:00:00:01 * br-lan\n192.0.2.20 0x1 0x2 02:00:00:00:00:20 * br-lan\n192.0.2.30 0x1 0x0 00:00:00:00:00:00 * br-lan\ninvalid\n"))
 	rows := mergeDevices(leases, arp)
-	if !bad || len(rows) != 3 || !rows[0].Online || rows[1].Online || !rows[2].Online || rows[2].Hostname != "" {
+	if !bad || len(rows) != 3 || !rows[0].Online || rows[1].Online || !rows[2].Online || rows[2].Hostname != "" || rows[0].Interface != "br-lan" || rows[2].Interface != "br-lan" || rows[2].Lease {
 		t.Fatalf("%+v %v", rows, bad)
 	}
 	if _, bad := parseARP([]byte("unsupported header\n")); !bad {

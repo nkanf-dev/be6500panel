@@ -8,6 +8,7 @@ import (
 type uciSection struct {
 	kind, name string
 	options    map[string]string
+	lists      map[string][]string
 }
 
 var wirelessFields = map[string]bool{"device": true, "ifname": true, "ssid": true, "band": true, "hwmode": true, "channel": true, "htmode": true, "bw": true, "disabled": true, "encryption": true}
@@ -42,18 +43,23 @@ func parseUCI(data []byte, allowed map[string]bool) ([]uciSection, bool) {
 				}
 				name = words[2]
 			}
-			sections = append(sections, uciSection{kind: words[1], name: name, options: map[string]string{}})
+			sections = append(sections, uciSection{kind: words[1], name: name, options: map[string]string{}, lists: map[string][]string{}})
 		case "option", "list":
 			if len(words) != 3 || len(sections) == 0 {
 				bad = true
 				continue
 			}
-			if words[0] == "option" && allowed[words[1]] {
+			if allowed[words[1]] {
 				if !safeString(words[2], 256) && words[2] != "" {
 					bad = true
 					continue
 				}
-				sections[len(sections)-1].options[words[1]] = words[2]
+				section := &sections[len(sections)-1]
+				if words[0] == "option" {
+					section.options[words[1]] = words[2]
+				} else {
+					section.lists[words[1]] = append(section.lists[words[1]], words[2])
+				}
 			}
 		default:
 			bad = true

@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"net/http"
+
+	"be6500panel/internal/router"
 )
 
 func (s *Server) routerSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -14,5 +16,8 @@ func (s *Server) routerSnapshot(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "observation_unavailable", "设备采样不可用")
 		return
 	}
-	writeJSON(w, 200, snapshot)
+	writeJSON(w, 200, struct {
+		router.Snapshot
+		CurrentClientIP string `json:"currentClientIP,omitempty"`
+	}{snapshot, peerIP(r)})
 }

@@ -32,6 +32,7 @@ func syntheticFixture(t *testing.T) string {
 	fixtureFile(t, root, "/proc/sys/kernel/osrelease", "5.4.123-test\n")
 	fixtureFile(t, root, "/tmp/dhcp.leases", "2000000600 02:00:00:00:00:01 192.0.2.10 test-pc *\n0 02:00:00:00:00:02 192.0.2.11 * *\n")
 	fixtureFile(t, root, "/proc/net/arp", "IP address HW type Flags HW address Mask Device\n192.0.2.10 0x1 0x2 02:00:00:00:00:01 * br-lan\n")
+	fixtureFile(t, root, "/etc/config/network", "config interface 'lan'\n option device 'br-lan'\n option ipaddr '192.0.2.1'\n option netmask '255.255.255.0'\n")
 	fixtureFile(t, root, "/etc/config/wireless", "config wifi-device 'wifi0'\n option hwmode '11beg'\n option channel '6'\n option bw '40'\nconfig wifi-iface\n option device 'wifi0'\n option ifname 'wl1'\n option ssid 'Synthetic Lab'\n option encryption 'psk2'\n option key 'SECRET-SYNTHETIC-KEY'\n option password 'SECRET-SYNTHETIC-PASSWORD'\n")
 	fixtureFile(t, root, "/tmp/resolv.conf.auto", "nameserver 192.0.2.53\nnameserver 2001:db8::53\n")
 	fixtureFile(t, root, "/etc/resolv.conf", "nameserver 127.0.0.1\n")

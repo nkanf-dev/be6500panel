@@ -16,16 +16,23 @@ const (
 	CaptureMask     uint32 = 0x4000
 	CaptureTable           = 16500
 	CapturePriority        = 16500
+	// MaxCaptureClientsPerFamily bounds raw client entries, including a legacy
+	// singular address when it is combined with a plural list.
+	MaxCaptureClientsPerFamily = 64
 )
 
-// RulesPlanInput selects exactly one IPv4 client, and optionally that client's
-// IPv6 address. It is not a LAN-wide policy. All IP fields are literal addresses,
-// never hostnames, prefixes, lists or interface-zone-qualified addresses.
+// RulesPlanInput selects a bounded set of exact IPv4 clients, and optionally
+// exact IPv6 clients. It is not a LAN-wide policy. Singular legacy fields remain
+// valid and are merged with plural fields when both are supplied. All client
+// entries are literal addresses, never hostnames, prefixes, comma-separated
+// lists or interface-zone-qualified addresses.
 // ManagementIPs and EndpointIPs bypass capture except for explicitly selected
 // RouterDNSAddresses on TCP/UDP port 53. RouterDNSAddresses must be a subset
 // of ManagementIPs sourced from actual router LAN addresses by the owner.
 // Other router-addressed DNS remains on the original dnsmasq path.
-// IPv6Follow and IPv6Block require ClientIPv6; IPv6Direct installs no IPv6 rules.
+// IPv6Follow and IPv6Block require at least one IPv6 client; IPv6Direct installs
+// no IPv6 rules. Each family has shared dedicated chains and one local route,
+// with exact per-client policy rules and interface-scoped hooks.
 // Empty policy fields default to direct; all-zero Ports uses native compiler
 // defaults (2080/7893/1053), but partially specified ports are invalid.
 // FakeIP must match the compiler; false preserves ordinary private destinations.
@@ -33,6 +40,8 @@ const (
 type RulesPlanInput struct {
 	ClientIPv4         string
 	ClientIPv6         string
+	ClientIPv4s        []string `json:",omitempty"`
+	ClientIPv6s        []string `json:",omitempty"`
 	LANInterface       string
 	Ports              Ports
 	IPv6               IPv6Mode
@@ -63,6 +72,8 @@ type RulesOwnership struct {
 	LANInterface  string
 	ClientIPv4    string
 	ClientIPv6    string
+	ClientIPv4s   []string `json:",omitempty"`
+	ClientIPv6s   []string `json:",omitempty"`
 	RouteFamilies []int
 	Chains        []OwnedChain
 }
@@ -83,7 +94,7 @@ type OwnedRulesPlan struct {
 
 var ownedLANInterface = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,14}$`)
 
-// PlanOwnedRules builds single-client transparent TCP/UDP capture, DNS REDIRECT
+// PlanOwnedRules builds exact-client transparent TCP/UDP capture, DNS REDIRECT
 // and optional IPv6 intent. No command is run and no router state is inspected.
 // TPROXY modifies only CaptureMask, preserving QoS/mwan/parent/UU mark bits.
 // Routes and complete dedicated chains are prepared before any hook is added.
@@ -103,16 +114,16 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	if len(input.EndpointIPs) > 256 || len(input.ManagementIPs) > 128 || len(input.RouterDNSAddresses) > 16 {
 		return OwnedRulesPlan{}, fmt.Errorf("firewall input limit exceeded: at most 256 EndpointIPs, 128 ManagementIPs and 16 RouterDNSAddresses")
 	}
-	v4, err := ownedClientAddress(input.ClientIPv4, 4)
+	v4, err := ownedClientAddresses(input.ClientIPv4, input.ClientIPv4s, 4)
 	if err != nil {
-		return OwnedRulesPlan{}, fmt.Errorf("ClientIPv4: %w", err)
+		return OwnedRulesPlan{}, fmt.Errorf("ClientIPv4/ClientIPv4s: %w", err)
 	}
-	var v6 netip.Addr
-	if input.ClientIPv6 != "" {
-		v6, err = ownedClientAddress(input.ClientIPv6, 6)
-		if err != nil {
-			return OwnedRulesPlan{}, fmt.Errorf("ClientIPv6: %w", err)
-		}
+	if len(v4) == 0 {
+		return OwnedRulesPlan{}, fmt.Errorf("at least one exact IPv4 client is required")
+	}
+	v6, err := ownedClientAddresses(input.ClientIPv6, input.ClientIPv6s, 6)
+	if err != nil {
+		return OwnedRulesPlan{}, fmt.Errorf("ClientIPv6/ClientIPv6s: %w", err)
 	}
 	if !ownedLANInterface.MatchString(input.LANInterface) {
 		return OwnedRulesPlan{}, fmt.Errorf("LANInterface must be a safe, exact interface name of 1 to 15 bytes (no wildcard)")
@@ -126,8 +137,8 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	switch input.IPv6 {
 	case IPv6Direct:
 	case IPv6Follow, IPv6Block:
-		if !v6.IsValid() {
-			return OwnedRulesPlan{}, fmt.Errorf("IPv6 %s requires one ClientIPv6 address; refusing broader capture", input.IPv6)
+		if len(v6) == 0 {
+			return OwnedRulesPlan{}, fmt.Errorf("IPv6 %s requires exact ClientIPv6 or ClientIPv6s addresses; refusing broader capture", input.IPv6)
 		}
 	default:
 		return OwnedRulesPlan{}, fmt.Errorf("invalid IPv6 mode")
@@ -164,7 +175,7 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	plan := OwnedRulesPlan{
 		Ownership: RulesOwnership{
 			Mark: CaptureMark, Mask: CaptureMask, RouteTable: CaptureTable, RulePriority: CapturePriority,
-			LANInterface: input.LANInterface, ClientIPv4: v4.String(),
+			LANInterface: input.LANInterface,
 		},
 		Warnings: []string{
 			"Intent only: verify unused mark 0x4000, chains, table 16500 and priority 16500; serialize generations before applying. No idempotence or rollback success is assumed.",
@@ -176,8 +187,20 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 			"Fail-direct cleanup removes owned rules, not existing DNS REDIRECT conntrack bindings. Coordinate scoped flow drain/expiry on stop or failure; no global conntrack flush is planned.",
 		},
 	}
-	if v6.IsValid() {
-		plan.Ownership.ClientIPv6 = v6.String()
+	// Keep legacy singular-only ownership and cleanup exactly reproducible.
+	// Plural intent uses only plural ownership for the matching family.
+	if len(input.ClientIPv4s) == 0 {
+		plan.Ownership.ClientIPv4 = v4[0].String()
+	} else {
+		plan.Ownership.ClientIPv4s = ownedClientStrings(v4)
+	}
+	if len(input.ClientIPv6s) != 0 {
+		plan.Ownership.ClientIPv6s = ownedClientStrings(v6)
+	} else if len(v6) != 0 {
+		plan.Ownership.ClientIPv6 = v6[0].String()
+	}
+	if len(v4) > 1 || len(v6) > 1 {
+		plan.Warnings[1] = "Exact-client TCP/UDP capture only; no OUTPUT or full-LAN hooks. Client address changes require a new coordinated plan."
 	}
 	if input.FakeIP {
 		plan.Warnings = append(plan.Warnings,
@@ -189,10 +212,18 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	switch input.IPv6 {
 	case IPv6Follow:
 		builder.captureFamily(6, v6)
-		plan.Warnings = append(plan.Warnings, "IPv6 follow requires ip6tables TPROXY/NAT support, local IPv6 routing and transparent listeners accepting ::1 and 127.0.0.1; verify dual-stack behavior. Only the selected IPv6 address is covered.")
+		warning := "IPv6 follow requires ip6tables TPROXY/NAT support, local IPv6 routing and transparent listeners accepting ::1 and 127.0.0.1; verify dual-stack behavior. Only the selected IPv6 address is covered."
+		if len(v6) > 1 {
+			warning = "IPv6 follow requires ip6tables TPROXY/NAT support, local IPv6 routing and transparent listeners accepting ::1 and 127.0.0.1; verify dual-stack behavior. Only the selected exact IPv6 addresses are covered."
+		}
+		plan.Warnings = append(plan.Warnings, warning)
 	case IPv6Block:
 		builder.blockIPv6(v6)
-		plan.Warnings = append(plan.Warnings, "IPv6 block rejects only the selected client's forwarded non-exempt IPv6 traffic, including public DNS and fake-IP identities when enabled. Router-local/private/management/endpoint traffic is preserved, including factory SSH management. Other client IPv6 addresses are not covered.")
+		warning := "IPv6 block rejects only the selected client's forwarded non-exempt IPv6 traffic, including public DNS and fake-IP identities when enabled. Router-local/private/management/endpoint traffic is preserved, including factory SSH management. Other client IPv6 addresses are not covered."
+		if len(v6) > 1 {
+			warning = "IPv6 block rejects only the selected exact clients' forwarded non-exempt IPv6 traffic, including public DNS and fake-IP identities when enabled. Router-local/private/management/endpoint traffic is preserved, including factory SSH management. Unselected IPv6 addresses are not covered."
+		}
+		plan.Warnings = append(plan.Warnings, warning)
 	case IPv6Direct:
 		plan.Warnings = append(plan.Warnings, "IPv6 direct deliberately installs no IPv6 capture, DNS redirect or block rules; it is not IPv6 split routing.")
 	}
@@ -215,10 +246,51 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	}
 	for i := len(builder.routes) - 1; i >= 0; i-- {
 		family := builder.routes[i]
-		plan.Cleanup = append(plan.Cleanup, builder.rule(family.family, family.client, "del"), ownedLocalRoute(family.family, "del"))
+		for j := len(family.clients) - 1; j >= 0; j-- {
+			plan.Cleanup = append(plan.Cleanup, builder.rule(family.family, family.clients[j], "del"))
+		}
+		plan.Cleanup = append(plan.Cleanup, ownedLocalRoute(family.family, "del"))
 	}
 	plan.OnFailure = ownedCloneCommands(plan.Cleanup)
 	return plan, nil
+}
+
+func ownedClientAddresses(singular string, plural []string, family int) ([]netip.Addr, error) {
+	count := len(plural)
+	if singular != "" {
+		count++
+	}
+	if count > MaxCaptureClientsPerFamily {
+		return nil, fmt.Errorf("at most %d exact clients per family", MaxCaptureClientsPerFamily)
+	}
+	raw := make([]string, 0, count)
+	if singular != "" {
+		raw = append(raw, singular)
+	}
+	raw = append(raw, plural...)
+	canonical := make([]string, 0, count)
+	for i, value := range raw {
+		addr, err := ownedClientAddress(value, family)
+		if err != nil {
+			return nil, fmt.Errorf("address %d: %w", i, err)
+		}
+		canonical = append(canonical, addr.String())
+	}
+	slices.Sort(canonical)
+	canonical = slices.Compact(canonical)
+	clients := make([]netip.Addr, 0, len(canonical))
+	for _, value := range canonical {
+		clients = append(clients, netip.MustParseAddr(value))
+	}
+	return clients, nil
+}
+
+func ownedClientStrings(clients []netip.Addr) []string {
+	out := make([]string, len(clients))
+	for i, client := range clients {
+		out[i] = client.String()
+	}
+	return out
 }
 
 func ownedClientAddress(raw string, family int) (netip.Addr, error) {
@@ -257,8 +329,8 @@ func ownedAddressList(raw []string) ([]string, error) {
 }
 
 type ownedFamilyRoute struct {
-	family int
-	client netip.Addr
+	family  int
+	clients []netip.Addr
 }
 
 type ownedRulesBuilder struct {
@@ -270,14 +342,17 @@ type ownedRulesBuilder struct {
 	routes    []ownedFamilyRoute
 }
 
-func (b *ownedRulesBuilder) captureFamily(family int, client netip.Addr) {
-	b.plan.Apply = append(b.plan.Apply, ownedLocalRoute(family, "add"), b.rule(family, client, "add"))
-	b.routes = append(b.routes, ownedFamilyRoute{family, client})
+func (b *ownedRulesBuilder) captureFamily(family int, clients []netip.Addr) {
+	b.plan.Apply = append(b.plan.Apply, ownedLocalRoute(family, "add"))
+	for _, client := range clients {
+		b.plan.Apply = append(b.plan.Apply, b.rule(family, client, "add"))
+	}
+	b.routes = append(b.routes, ownedFamilyRoute{family, clients})
 	b.plan.Ownership.RouteFamilies = append(b.plan.Ownership.RouteFamilies, family)
 	capture := "B6P_V" + strconv.Itoa(family) + "_CAPTURE"
 	dns := "B6P_V" + strconv.Itoa(family) + "_DNS"
-	b.chain(family, "mangle", capture, "PREROUTING", client)
-	b.chain(family, "nat", dns, "PREROUTING", client)
+	b.chain(family, "mangle", capture, "PREROUTING")
+	b.chain(family, "nat", dns, "PREROUTING")
 	b.prelude(family, "mangle", capture)
 	// This narrow opt-in must precede LOCAL and management bypass in NAT only.
 	// The chain hook already scopes source client/interface. No global dnsmasq
@@ -314,14 +389,19 @@ func (b *ownedRulesBuilder) captureFamily(family int, client netip.Addr) {
 	}
 	b.appendRule(family, "mangle", capture, "-j", "RETURN")
 	b.appendRule(family, "nat", dns, "-j", "RETURN")
-	// chain() records capture then DNS; swap only this family's two hooks.
-	n := len(b.hooks)
-	b.hooks[n-2], b.hooks[n-1] = b.hooks[n-1], b.hooks[n-2]
+	// Prepare one shared chain per table, then queue all exact DNS hooks before
+	// capture hooks. Hooks are installed only after every family is prepared.
+	for _, client := range clients {
+		b.hook(family, "nat", dns, "PREROUTING", client)
+	}
+	for _, client := range clients {
+		b.hook(family, "mangle", capture, "PREROUTING", client)
+	}
 }
 
-func (b *ownedRulesBuilder) blockIPv6(client netip.Addr) {
+func (b *ownedRulesBuilder) blockIPv6(clients []netip.Addr) {
 	const chain = "B6P_V6_BLOCK"
-	b.chain(6, "filter", chain, "FORWARD", client)
+	b.chain(6, "filter", chain, "FORWARD")
 	b.prelude(6, "filter", chain)
 	if b.input.FakeIP {
 		b.appendRule(6, "filter", chain, "-d", "fc00::/18", "-j", "REJECT", "--reject-with", "icmp6-adm-prohibited")
@@ -330,11 +410,17 @@ func (b *ownedRulesBuilder) blockIPv6(client netip.Addr) {
 		b.appendRule(6, "filter", chain, "-d", destination, "-j", "RETURN")
 	}
 	b.appendRule(6, "filter", chain, "-j", "REJECT", "--reject-with", "icmp6-adm-prohibited")
+	for _, client := range clients {
+		b.hook(6, "filter", chain, "FORWARD", client)
+	}
 }
 
-func (b *ownedRulesBuilder) chain(family int, table, name, hook string, client netip.Addr) {
+func (b *ownedRulesBuilder) chain(family int, table, name, hook string) {
 	b.plan.Ownership.Chains = append(b.plan.Ownership.Chains, OwnedChain{Family: family, Table: table, Name: name, Hook: hook})
 	b.plan.Apply = append(b.plan.Apply, ownedIPTables(family, table, "-N", name))
+}
+
+func (b *ownedRulesBuilder) hook(family int, table, name, hook string, client netip.Addr) {
 	b.hooks = append(b.hooks, ownedIPTables(family, table, "-I", hook, "1", "-i", b.input.LANInterface, "-s", ownedHostPrefix(client), "-j", name))
 }
 

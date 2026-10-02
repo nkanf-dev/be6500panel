@@ -152,6 +152,9 @@ func normalizeOptions(o *Options) error {
 	if o.ReadyTimeout == 0 {
 		o.ReadyTimeout = 10 * time.Second
 	}
+	if o.ResourceTimeout == 0 {
+		o.ResourceTimeout = 30 * time.Second
+	}
 	if o.TermGrace == 0 {
 		o.TermGrace = 2 * time.Second
 	}
@@ -170,7 +173,7 @@ func normalizeOptions(o *Options) error {
 	if o.MaxCompressedBytes < 1 || o.MaxCompressedBytes > 64<<20 || o.MaxUncompressedBytes < 1 || o.MaxUncompressedBytes > 128<<20 || o.MaxConfigBytes < 1 || o.MaxConfigBytes > 4<<20 || o.TailBytes < 1 || o.TailBytes > 16<<10 || o.MinFreeRunBytes < 0 || o.MaxRestarts < 1 || o.MaxRestarts > 20 {
 		return errors.New("invalid runtime resource limits")
 	}
-	if o.DownloadTimeout < time.Millisecond || o.DownloadTimeout > 10*time.Minute || o.CheckTimeout < time.Millisecond || o.CheckTimeout > time.Minute || o.ReadyTimeout < time.Millisecond || o.ReadyTimeout > time.Minute || o.TermGrace < time.Millisecond || o.TermGrace > 10*time.Second || o.BackoffInitial < time.Millisecond || o.BackoffMax < o.BackoffInitial || o.BackoffMax > 5*time.Minute || o.StableAfter < time.Millisecond {
+	if o.DownloadTimeout < time.Millisecond || o.DownloadTimeout > 10*time.Minute || o.CheckTimeout < time.Millisecond || o.CheckTimeout > time.Minute || o.ReadyTimeout < time.Millisecond || o.ReadyTimeout > time.Minute || o.ResourceTimeout < time.Millisecond || o.ResourceTimeout > 2*time.Minute || o.TermGrace < time.Millisecond || o.TermGrace > 10*time.Second || o.BackoffInitial < time.Millisecond || o.BackoffMax < o.BackoffInitial || o.BackoffMax > 5*time.Minute || o.StableAfter < time.Millisecond {
 		return errors.New("invalid runtime time limits")
 	}
 	return nil
@@ -536,6 +539,10 @@ func (m *Manager) Start(ctx context.Context, id string) (Status, error) {
 			exitedPrevious = true
 		default:
 			m.mu.Unlock()
+			if err := m.checkReady(ctx, id); err != nil {
+				return m.result(id, err)
+			}
+			m.restoreResources(ctx, id)
 			return m.result(id, nil)
 		}
 	}
@@ -660,6 +667,13 @@ func (m *Manager) startProcess(ctx context.Context, id string) error {
 		m.setState(id, Error, "readiness_failed")
 		return err
 	}
+	m.restoreResources(ctx, id)
+	if err := ctx.Err(); err != nil {
+		if cleanupErr := m.stopProcess(id, true); cleanupErr != nil {
+			return cleanupErr
+		}
+		return err
+	}
 	watchCtx, cancelWatch := context.WithCancel(m.ctx)
 	m.mu.Lock()
 	if s.cancelWatch != nil {
@@ -715,7 +729,7 @@ func (m *Manager) stopProcess(id string, disable bool) error {
 func (m *Manager) cleanup(id string) error {
 	var err error
 	if m.opts.CleanupHook != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), m.opts.TermGrace)
+		ctx, cancel := context.WithTimeout(context.Background(), m.opts.ResourceTimeout)
 		err = m.opts.CleanupHook(ctx, id)
 		cancel()
 	}
@@ -907,4 +921,108 @@ func (m *Manager) verifyAccepted(ctx context.Context, id, binary string, record 
 		return errors.New("verifier modified private candidate")
 	}
 	return nil
+}
+
+// ReadyOperation serializes a device-scope mutation with starts, stops and
+// configuration commits. It cannot activate resources against a starting core.
+func (m *Manager) ReadyOperation(ctx context.Context, id string, operation func(context.Context) error) error {
+	ctx, done, err := m.begin(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer done()
+	m.mu.Lock()
+	s := m.services[id]
+	ready := s.state == Running && s.proc != nil
+	if ready {
+		select {
+		case <-s.proc.done:
+			ready = false
+		default:
+		}
+	}
+	m.mu.Unlock()
+	if !ready {
+		return ErrReadiness
+	}
+	if err := m.checkReady(ctx, id); err != nil {
+		return err
+	}
+	err = operation(ctx)
+	m.mu.Lock()
+	process := m.services[id].proc
+	m.mu.Unlock()
+	if process != nil {
+		select {
+		case <-process.done:
+			err = errors.Join(err, ErrReadiness, m.cleanup(id))
+		default:
+		}
+	}
+	if err == nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+func (m *Manager) restoreResources(ctx context.Context, id string) {
+	if m.opts.RestoreHook == nil {
+		return
+	}
+	restoreCtx, cancel := context.WithTimeout(ctx, m.opts.ResourceTimeout)
+	defer cancel()
+	m.mu.Lock()
+	process := m.services[id].proc
+	m.mu.Unlock()
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		if process == nil {
+			cancel()
+			return
+		}
+		select {
+		case <-process.done:
+			cancel()
+		case <-restoreCtx.Done():
+		}
+	}()
+	defer func() { cancel(); <-monitorDone }()
+	if err := m.opts.RestoreHook(restoreCtx, id); err != nil {
+		m.opts.Logger.Warn("Owned resources suspended", "service", id, "code", "resource_restore_failed")
+	}
+}
+
+func (m *Manager) checkReady(ctx context.Context, id string) error {
+	if m.opts.ReadyHook == nil {
+		return nil
+	}
+	readyCtx, cancel := context.WithTimeout(ctx, m.opts.ReadyTimeout)
+	defer cancel()
+	if err := m.opts.ReadyHook(readyCtx, id); err != nil {
+		if cleanupErr := m.cleanup(id); cleanupErr != nil {
+			return cleanupErr
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return ErrReadiness
+	}
+	if readyCtx.Err() != nil {
+		if cleanupErr := m.cleanup(id); cleanupErr != nil {
+			return cleanupErr
+		}
+		return ErrReadiness
+	}
+	return nil
+}
+
+// ResourceOperation reserves the same lane for native network transactions.
+// Unlike ReadyOperation it also permits withdrawal while the core is stopped.
+func (m *Manager) ResourceOperation(ctx context.Context, id string, operation func(context.Context) error) error {
+	ctx, done, err := m.begin(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer done()
+	return operation(ctx)
 }

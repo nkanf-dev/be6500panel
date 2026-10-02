@@ -25,10 +25,26 @@ type Platform struct {
 	Architecture string `json:"architecture"`
 }
 
+// CaptureObservation is a fresh LAN identity observation for capture decisions.
+// Unlike Snapshot, it never uses cached data or reads firewall state.
+type CaptureObservation struct {
+	Devices     []Device `json:"devices"`
+	LANPrefixes []string `json:"lanPrefixes"`
+	// LANAddresses contains actual br-lan IPv4 and IPv6 addresses, not
+	// arbitrary addresses inside LANPrefixes. It can validate DNS binds.
+	LANAddresses  []string `json:"lanAddresses"`
+	ManagementIPs []string `json:"managementIPs"`
+}
+
 type Device struct {
-	IP       string `json:"ip"`
-	MAC      string `json:"mac"`
-	Hostname string `json:"hostname"`
+	IP        string `json:"ip"`
+	MAC       string `json:"mac"`
+	Hostname  string `json:"hostname"`
+	Eligible  bool   `json:"eligible"`
+	Interface string `json:"interface,omitempty"`
+	// Lease distinguishes current DHCP leases, including infinite leases,
+	// from ARP-only observations. It is internal identity provenance.
+	Lease bool `json:"-"`
 	// ExpiresAt is nil for an infinite lease or an ARP-only observation.
 	ExpiresAt *time.Time `json:"expiresAt"`
 	// Online means a complete entry is present in /proc/net/arp. It is not a

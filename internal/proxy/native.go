@@ -129,7 +129,9 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	if err != nil {
 		return out, err
 	}
-	bootstrap := append([]string{}, in.BootstrapDomains...)
+	// Keep resolver bootstrap identity direct even when the node uses a literal
+	// IP. Readiness queries for this identity must not depend on the proxy path.
+	bootstrap := append([]string{in.DirectDNS.ServerName}, in.BootstrapDomains...)
 	if _, err = netip.ParseAddr(in.Node.Server); err != nil {
 		bootstrap = append(bootstrap, in.Node.Server)
 	}

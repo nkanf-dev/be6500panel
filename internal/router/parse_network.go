@@ -46,7 +46,7 @@ func parseLeases(data []byte, now time.Time) ([]Device, bool) {
 		if expiry != 0 && expiry <= now.Unix() {
 			continue
 		}
-		d := Device{IP: ip.String(), MAC: mac, Hostname: f[3]}
+		d := Device{IP: ip.String(), MAC: mac, Hostname: f[3], Lease: true}
 		if d.Hostname == "*" {
 			d.Hostname = ""
 		}
@@ -100,7 +100,7 @@ func parseARP(data []byte) ([]Device, bool) {
 			bad = true
 			continue
 		}
-		out = append(out, Device{IP: ip.String(), MAC: mac, Online: true})
+		out = append(out, Device{IP: ip.String(), MAC: mac, Interface: f[5], Online: true})
 	}
 	return out, bad
 }
@@ -108,14 +108,17 @@ func parseARP(data []byte) ([]Device, bool) {
 func mergeDevices(leases, arp []Device) []Device {
 	out := append([]Device{}, leases...)
 	index := map[string]int{}
+	leasedMAC := map[string]bool{}
 	for i, d := range out {
 		index[d.IP+"/"+d.MAC] = i
+		leasedMAC[d.MAC] = true
 	}
 	for _, d := range arp {
 		key := d.IP + "/" + d.MAC
 		if i, ok := index[key]; ok {
 			out[i].Online = true
-		} else {
+			out[i].Interface = d.Interface
+		} else if !leasedMAC[d.MAC] {
 			index[key] = len(out)
 			out = append(out, d)
 		}

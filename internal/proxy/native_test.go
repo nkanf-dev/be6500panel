@@ -384,3 +384,51 @@ func TestUnsupportedRuleAcknowledgementAndUnreachableRules(t *testing.T) {
 		t.Fatal("missing unreachable rule diagnostic")
 	}
 }
+
+func TestLiteralNodeKeepsDirectDNSBootstrapAheadOfImportedPolicy(t *testing.T) {
+	node := testNode(t)
+	node.Server = "203.0.113.9"
+	output, err := CompileNative(CompileInput{Node: node, Rules: []Rule{{Kind: RuleDomain, Value: "dns.alidns.com", Target: TargetProxy}, {Kind: RuleMatch, Target: TargetProxy}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := decodeConfig(t, output)
+	routeRules := maps(config["route"].(map[string]any)["rules"])
+	firstRoute := -1
+	importedRoute := -1
+	for i, rule := range routeRules {
+		domains, ok := rule["domain"].([]any)
+		if !ok {
+			continue
+		}
+		for _, domain := range domains {
+			if domain == "dns.alidns.com" {
+				if firstRoute < 0 {
+					firstRoute = i
+				}
+				if rule["outbound"] == "proxy" {
+					importedRoute = i
+				}
+			}
+		}
+	}
+	if firstRoute < 0 || importedRoute <= firstRoute || routeRules[firstRoute]["outbound"] != "direct" {
+		t.Fatalf("bootstrap domain routing depends on proxy: %v", routeRules)
+	}
+	dnsRules := maps(config["dns"].(map[string]any)["rules"])
+	firstDNS := -1
+	for i, rule := range dnsRules {
+		domains, ok := rule["domain"].([]any)
+		if !ok {
+			continue
+		}
+		for _, domain := range domains {
+			if domain == "dns.alidns.com" && firstDNS < 0 {
+				firstDNS = i
+			}
+		}
+	}
+	if firstDNS < 0 || dnsRules[firstDNS]["server"] != "dns-direct" {
+		t.Fatalf("DNS bootstrap depends on proxy: %v", dnsRules)
+	}
+}

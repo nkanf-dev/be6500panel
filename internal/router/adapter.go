@@ -136,31 +136,12 @@ func cloneSnapshot(s Snapshot) Snapshot {
 func (a *Adapter) observeSources(ctx context.Context, now time.Time) Snapshot {
 	s := emptySnapshot(now)
 	a.observePlatform(&s)
-	leases := []Device{}
-	arp := []Device{}
-	data, err := a.firstFile([]string{"/tmp/dhcp.leases", "/tmp/dnsmasq.leases", "/var/lib/misc/dnsmasq.leases"}, fileLimit)
-	if err != nil {
-		s.Errors = append(s.Errors, moduleError("devices.leases", sourceCode(err)))
-	} else {
-		var bad bool
-		leases, bad = parseLeases(data, now)
-		if bad {
-			s.Errors = append(s.Errors, moduleError("devices.leases", "invalid"))
-		}
-	}
-	data, err = a.readFile("/proc/net/arp", procLimit)
-	if err != nil {
-		s.Errors = append(s.Errors, moduleError("devices.arp", sourceCode(err)))
-	} else {
-		var bad bool
-		arp, bad = parseARP(data)
-		if bad {
-			s.Errors = append(s.Errors, moduleError("devices.arp", "invalid"))
-		}
-	}
-	s.Devices = mergeDevices(leases, arp)
-	s.DNS.LeaseCount = len(leases)
-	data, err = a.readFile("/etc/config/wireless", fileLimit)
+	observation, leaseCount, ipv4Routes, identityErrors := a.observeCaptureSources(ctx, now)
+	s.Devices = observation.Devices
+	s.DNS.LeaseCount = leaseCount
+	s.Routes = append(s.Routes, ipv4Routes...)
+	s.Errors = append(s.Errors, identityErrors...)
+	data, err := a.readFile("/etc/config/wireless", fileLimit)
 	if err != nil {
 		s.Errors = append(s.Errors, moduleError("wifi", sourceCode(err)))
 	} else {
@@ -202,28 +183,14 @@ func (a *Adapter) observeSources(ctx context.Context, now time.Time) Snapshot {
 			}
 		}
 	}
-	for _, ipv6 := range []bool{false, true} {
-		path := "/proc/net/route"
-		module := "routes.ipv4"
-		if ipv6 {
-			path = "/proc/net/ipv6_route"
-			module = "routes.ipv6"
-		}
-		data, err = a.readFile(path, procLimit)
-		if err != nil {
-			s.Errors = append(s.Errors, moduleError(module, sourceCode(err)))
-		} else {
-			var rows []Route
-			var bad bool
-			if ipv6 {
-				rows, bad = parseIPv6Routes(data)
-			} else {
-				rows, bad = parseIPv4Routes(data)
-			}
-			s.Routes = append(s.Routes, rows...)
-			if bad {
-				s.Errors = append(s.Errors, moduleError(module, "invalid"))
-			}
+	data, err = a.readFile("/proc/net/ipv6_route", procLimit)
+	if err != nil {
+		s.Errors = append(s.Errors, moduleError("routes.ipv6", sourceCode(err)))
+	} else {
+		rows, bad := parseIPv6Routes(data)
+		s.Routes = append(s.Routes, rows...)
+		if bad {
+			s.Errors = append(s.Errors, moduleError("routes.ipv6", "invalid"))
 		}
 	}
 	sort.Slice(s.Routes, func(i, j int) bool {
