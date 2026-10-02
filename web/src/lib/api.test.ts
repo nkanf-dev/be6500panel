@@ -218,3 +218,125 @@ describe("production contract decoding", () => {
     timeout.mockRestore();
   });
 });
+
+describe("device capture contract", () => {
+  it("decodes current terminal, device eligibility and persisted suspended scope", async () => {
+    const capture = {
+      active: false,
+      desired: true,
+      clients: [{ mac: "02:00:00:00:00:20", ip: "", hostname: "saved-client" }],
+      ipv6: "direct",
+      state: "suspended",
+      cleanupPending: true,
+      error: "current address unavailable",
+      commands: 0,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        Promise.resolve(
+          jsonResponse(
+            url === "/api/router"
+              ? {
+                  ...routerSnapshot,
+                  currentClientIP: "192.0.2.20",
+                  devices: [{ ...routerSnapshot.devices[0], eligible: true }],
+                }
+              : capture,
+          ),
+        ),
+      ),
+    );
+    await expect(runRequest(api.router())).resolves.toMatchObject({
+      currentClientIP: "192.0.2.20",
+      devices: [{ eligible: true }],
+    });
+    await expect(runRequest(api.proxyCapture())).resolves.toEqual(capture);
+  });
+  it("accepts legacy capture status and router without current terminal or eligibility", async () => {
+    const capture = {
+      active: true,
+      clientIPv4: "192.0.2.20",
+      clientIPv6: "2001:db8::20",
+      commands: 8,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        Promise.resolve(
+          jsonResponse(url === "/api/router" ? routerSnapshot : capture),
+        ),
+      ),
+    );
+    await expect(runRequest(api.router())).resolves.toEqual(routerSnapshot);
+    await expect(runRequest(api.proxyCapture())).resolves.toEqual(capture);
+    await expect(
+      runRequest(
+        api.proxyCaptureApply({ clientIPv4: "192.0.2.20", ipv6: "direct" }),
+      ),
+    ).resolves.toEqual(capture);
+  });
+  it("posts only selected MACs and the explicit IPv6 policy", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ active: true, desired: true, clients: [], commands: 8 }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const input = {
+      devices: [{ mac: "02:00:00:00:00:20" }, { mac: "02:00:00:00:00:21" }],
+      ipv6: "direct",
+    } as const;
+    await runRequest(api.proxyCaptureApply(input));
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/proxy/capture",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(input) }),
+    );
+  });
+  it("disables saved scope using DELETE with no body and no mutation retry", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ active: false, desired: false, commands: 0 }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await runRequest(api.proxyCaptureDisable());
+    expect(timeout).toHaveBeenLastCalledWith(30_000);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/proxy/capture",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(fetch.mock.calls[0][1]).not.toHaveProperty("body");
+    fetch.mockResolvedValue(
+      jsonResponse(
+        { error: { code: "cleanup_failed", message: "withdraw failed" } },
+        500,
+      ),
+    );
+    await expect(runRequest(api.proxyCaptureDisable())).rejects.toMatchObject({
+      code: "cleanup_failed",
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    timeout.mockRestore();
+  });
+  it.each([
+    { desired: "true" },
+    { clients: [{ mac: "02:00:00:00:00:20", ip: null, hostname: "client" }] },
+    { cleanupPending: "false" },
+    { state: false },
+  ])("rejects malformed capture field types %j", async (fields) => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ active: false, commands: 0, ...fields }),
+        ),
+    );
+    await expect(runRequest(api.proxyCapture())).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+  });
+});

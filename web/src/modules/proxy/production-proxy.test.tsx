@@ -5,6 +5,7 @@ import { ProxyPage } from "../proxy";
 import {
   jsonResponse,
   proxyNodes,
+  routerSnapshot,
   runtimeStatus,
 } from "../production-fixtures.test-data";
 vi.mock("../../app/console-context", () => ({
@@ -128,7 +129,7 @@ describe("real proxy operations", () => {
     );
     expect(screen.getByLabelText("订阅 YAML")).toHaveValue("");
   });
-  it("captures only an explicit IP after a second confirmation", async () => {
+  it("captures only checked observed devices after a second confirmation", async () => {
     const fetch = setup();
     let active = false;
     fetch.mockImplementation((url: string, init: RequestInit) => {
@@ -139,15 +140,33 @@ describe("real proxy operations", () => {
             services: [{ ...runtimeStatus, state: "running", desired: true }],
           }),
         );
+      if (url === "/api/router")
+        return Promise.resolve(
+          jsonResponse({
+            ...routerSnapshot,
+            currentClientIP: "192.0.2.20",
+            devices: [{ ...routerSnapshot.devices[0], eligible: true }],
+          }),
+        );
       if (url === "/api/proxy/nodes")
         return Promise.resolve(jsonResponse(proxyNodes));
       if (url === "/api/proxy/capture" && init.method === "POST") active = true;
       return Promise.resolve(
-        jsonResponse(
-          active
-            ? { active: true, clientIPv4: "192.0.2.20", commands: 8 }
-            : { active: false, commands: 0 },
-        ),
+        jsonResponse({
+          active,
+          desired: active,
+          clients: active
+            ? [
+                {
+                  mac: "02:00:00:00:00:20",
+                  ip: "192.0.2.20",
+                  hostname: "test-client",
+                },
+              ]
+            : [],
+          ipv6: "direct",
+          commands: active ? 8 : 0,
+        }),
       );
     });
     const user = userEvent.setup();
@@ -158,7 +177,9 @@ describe("real proxy operations", () => {
         screen.getByRole("button", { name: "审阅客户端接管" }),
       ).toBeEnabled(),
     );
-    await user.type(screen.getByLabelText("客户端 IPv4"), "192.0.2.20");
+    expect(
+      screen.getByRole("checkbox", { name: /选择设备 test-client/ }),
+    ).toBeChecked();
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     expect(
       screen.getByRole("alertdialog", { name: "确认客户端接管" }),
@@ -174,7 +195,10 @@ describe("real proxy operations", () => {
       "/api/proxy/capture",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ clientIPv4: "192.0.2.20", ipv6: "direct" }),
+        body: JSON.stringify({
+          devices: [{ mac: "02:00:00:00:00:20" }],
+          ipv6: "direct",
+        }),
       }),
     );
   });

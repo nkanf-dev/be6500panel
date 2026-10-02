@@ -200,6 +200,11 @@ export const api = {
       body,
       timeoutMs: 90_000,
     }),
+  proxyCaptureDisable: () =>
+    request("/proxy/capture", ProxyCaptureSchema, {
+      method: "DELETE",
+      timeoutMs: 30_000,
+    }),
   network: () => request("/network", NetworkSchema),
   devices: () => request("/devices", DevicesSchema),
   logs: () => request("/logs?limit=100", LogsSchema),

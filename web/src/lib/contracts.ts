@@ -142,6 +142,7 @@ export const RouterSchema = Schema.Struct({
       hostname: Schema.String,
       expiresAt: Schema.NullOr(Schema.String),
       online: Schema.Boolean,
+      eligible: Schema.optional(Schema.Boolean),
     }),
   ),
   wifi: Schema.Array(
@@ -192,6 +193,7 @@ export const RouterSchema = Schema.Struct({
     }),
   ),
   sampledAt: Schema.String,
+  currentClientIP: Schema.optional(Schema.String),
   errors: Schema.Array(
     Schema.Struct({
       module: Schema.String,
@@ -257,6 +259,20 @@ export const ProxySelectSchema = Schema.Struct({
 });
 export const ProxyCaptureSchema = Schema.Struct({
   active: Schema.Boolean,
+  desired: Schema.optional(Schema.Boolean),
+  clients: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        mac: Schema.String,
+        ip: Schema.String,
+        hostname: Schema.String,
+      }),
+    ),
+  ),
+  ipv6: Schema.optional(Schema.Literal("follow", "direct", "block")),
+  error: Schema.optional(Schema.String),
+  state: Schema.optional(Schema.String),
+  cleanupPending: Schema.optional(Schema.Boolean),
   clientIPv4: Schema.optional(Schema.String),
   clientIPv6: Schema.optional(Schema.String),
   commands: Schema.Number,
@@ -294,8 +310,10 @@ export type ProxySelectInput = {
   failure: "direct";
   ports: { mixed: number; tproxy: number; dns: number };
 };
-export type ProxyCaptureInput = {
-  clientIPv4: string;
+export type ProxyCaptureInput = (
+  | { devices: readonly { mac: string }[]; clientIPv4?: never }
+  | { clientIPv4: string; devices?: never }
+) & {
   clientIPv6?: string;
   ipv6: IPv6Policy;
 };
