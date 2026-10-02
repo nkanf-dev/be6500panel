@@ -127,7 +127,7 @@ describe("production visualization entry points", () => {
     const devices = screen.getByRole("listitem", { name: "设备观察" });
     expect(within(devices).getByText("test-client")).toBeInTheDocument();
     expect(within(devices).getByText("192.0.2.20")).toBeInTheDocument();
-    expect(within(devices).getByText("ARP 已观测")).toBeInTheDocument();
+    expect(within(devices).getByText("已发现设备")).toBeInTheDocument();
     expect(
       screen.queryByRole("region", { name: "终端活跃度" }),
     ).not.toBeInTheDocument();

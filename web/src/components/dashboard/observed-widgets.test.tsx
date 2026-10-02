@@ -90,6 +90,13 @@ describe("observed homepage widgets", () => {
     expect(screen.getByText("linux / arm")).toBeInTheDocument();
     expect(screen.getByText("观察模式")).toBeInTheDocument();
   });
+  it("uses reviewed write-enabled language without internal Commit terminology", () => {
+    state.health = { mode: "host", readOnly: false, status: "ok" };
+    state.system = systemSample;
+    render(<EnvironmentWidget navigate={vi.fn()} />);
+    expect(screen.getByText("配置与运行管理")).toBeInTheDocument();
+    expect(screen.queryByText(/Commit/)).not.toBeInTheDocument();
+  });
   it("shows explicit loading, empty and failed device observations, never sample clients", async () => {
     const user = userEvent.setup();
     const first = render(<DevicesWidget navigate={vi.fn()} />);
@@ -123,7 +130,7 @@ describe("observed homepage widgets", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(5);
     expect(screen.getByText("observed-0")).toBeInTheDocument();
     expect(screen.queryByText("observed-5")).not.toBeInTheDocument();
-    expect(screen.getAllByText("ARP 已观测")).toHaveLength(2);
+    expect(screen.getAllByText("已发现设备")).toHaveLength(2);
     expect(screen.getAllByText("未见 ARP")).toHaveLength(3);
     expect(screen.queryByText("离线")).not.toBeInTheDocument();
     expect(screen.queryByText("演示数据")).not.toBeInTheDocument();

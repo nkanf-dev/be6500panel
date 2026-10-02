@@ -133,10 +133,11 @@ describe("custom homepage with real widget integration", () => {
         .filter((item) => item.hasAttribute("data-widget-id")),
     ).toHaveLength(6);
     expect(screen.getByText("observed-home-router")).toBeInTheDocument();
+    expect(screen.queryByText(/Commit/)).not.toBeInTheDocument();
     expect(screen.getByText("75.0")).toBeInTheDocument();
     const devices = screen.getByRole("listitem", { name: "设备观察" });
     expect(within(devices).getByText("test-client")).toBeInTheDocument();
-    expect(within(devices).getByText("ARP 已观测")).toBeInTheDocument();
+    expect(within(devices).getByText("已发现设备")).toBeInTheDocument();
     const traffic = screen.getByRole("region", { name: "WAN 流量历史" });
     expect(within(traffic).getByRole("img")).toBeInTheDocument();
     expect(

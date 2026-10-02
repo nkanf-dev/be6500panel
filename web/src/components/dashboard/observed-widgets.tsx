@@ -179,7 +179,7 @@ export function EnvironmentWidget({ navigate }: NavigationProps) {
             {health
               ? health.readOnly
                 ? "观察模式"
-                : "Commit 配置 / 运行管理"
+                : strings.dashboard.states.configuration
               : "—"}
           </dd>
         </div>
@@ -361,7 +361,7 @@ export function DevicesWidget({ navigate }: NavigationProps) {
                   </span>
                   <Badge tone={device.online ? "success" : "neutral"}>
                     {device.online
-                      ? "ARP 已观测"
+                      ? strings.dashboard.states.arpObserved
                       : arpIncomplete
                         ? "ARP 观察不完整"
                         : "未见 ARP"}
