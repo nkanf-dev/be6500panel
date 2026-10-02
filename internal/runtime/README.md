@@ -16,7 +16,7 @@ New(Options) (*Manager, error)
 (*Manager).Close() error
 ```
 
-Only `sing-box` (`SingBox`) and `frpc` (`FRPC`) are accepted. All mutations, including exit supervision, share one operation lane. An overlapping user mutation returns `ErrBusy`; it does not queue. `Status` and `Config` may be read during a download or verifier. A stale generation returns `ErrGeneration`. `Status` remains readable after Close; other operations reject closed managers.
+Only `sing-box` (`SingBox`) and `frpc` (`FRPC`) are accepted. All mutations, including exit supervision, share one operation lane. An overlapping user mutation returns `ErrBusy`; it does not queue. Unexpected core exit cancels the active download/check and reserves priority on that lane, so owned cleanup does not wait for another service's full download timeout. The interrupted call returns cancellation and must be retried explicitly. `Status` and `Config` may be read during a download or verifier. A stale generation returns `ErrGeneration`. `Status` remains readable after Close; other operations reject closed managers.
 
 `Config` is the private accepted config body, copied from a bounded 0600 file. The root API must authenticate and authorize access. Never forward this body into public views or logs. There is no generic redaction or content scanning. `Status`, manager errors and the supplied logger never include config bodies or core stdout/stderr. Core output is retained only in a private bounded 4 KiB RAM suffix; it is not exported, since even core verification errors can echo credentials.
 

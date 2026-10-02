@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,7 +53,7 @@ func testManager(t *testing.T, change func(*Options)) (*Manager, Options) {
 	if err := os.Mkdir(source, 0700); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{DataDir: filepath.Join(base, "data"), RunDir: filepath.Join(base, "run"), LocalSourceRoot: source, TermGrace: 40 * time.Millisecond, CheckTimeout: time.Second, BackoffInitial: 80 * time.Millisecond, BackoffMax: 150 * time.Millisecond, StableAfter: time.Second, MaxRestarts: 2}
+	opts := Options{DataDir: filepath.Join(base, "data"), RunDir: filepath.Join(base, "run"), LocalSourceRoot: source, TermGrace: 40 * time.Millisecond, CheckTimeout: 5 * time.Second, BackoffInitial: 80 * time.Millisecond, BackoffMax: 150 * time.Millisecond, StableAfter: time.Second, MaxRestarts: 2}
 	if change != nil {
 		change(&opts)
 	}
@@ -239,7 +241,7 @@ func TestStopCancelsBackoffAndBoundedCrashRetries(t *testing.T) {
 }
 
 func TestCheckTimeoutCancellationBusyAndClose(t *testing.T) {
-	m, opts := testManager(t, nil)
+	m, opts := testManager(t, func(o *Options) { o.CheckTimeout = time.Second })
 	acquireFixture(t, m, opts, SingBox, fixture)
 	accepted(t, m, SingBox, "good", 0)
 	result := make(chan error, 1)
@@ -730,5 +732,85 @@ func TestVerifierCannotChangeAcceptedCandidate(t *testing.T) {
 	status, err := m.Configure(context.Background(), SingBox, []byte("good"), 0)
 	if err == nil || status.Generation != 0 || status.Configured {
 		t.Fatalf("mutated config accepted: %+v %v", status, err)
+	}
+}
+
+func TestSuccessfulLiveConfigAndArtifactReplacement(t *testing.T) {
+	m, opts := testManager(t, nil)
+	acquireFixture(t, m, opts, SingBox, fixture)
+	accepted(t, m, SingBox, "good", 0)
+	first, err := m.Start(context.Background(), SingBox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := accepted(t, m, SingBox, "new-good", 1)
+	if next.State != Running || next.PID == 0 || next.PID == first.PID || next.Generation != 2 {
+		t.Fatalf("live replacement failed: %+v", next)
+	}
+	assertGone(t, first.PID)
+	acquireFixture(t, m, opts, SingBox, fixture+"\n# verified upgrade\n")
+	upgraded, _ := m.Status(SingBox)
+	if upgraded.State != Running || upgraded.PID == 0 || upgraded.PID == next.PID {
+		t.Fatalf("artifact live replacement failed: %+v", upgraded)
+	}
+	assertGone(t, next.PID)
+	if _, err := m.Stop(context.Background(), SingBox); err != nil {
+		t.Fatal(err)
+	}
+	assertGone(t, upgraded.PID)
+}
+
+func TestExitPreemptsOtherServiceSlowDownloadForCleanup(t *testing.T) {
+	var cleanupCalls atomic.Int32
+	m, opts := testManager(t, func(o *Options) {
+		o.AllowLoopbackHTTP = true
+		o.CleanupHook = func(ctx context.Context, id string) error {
+			if id == SingBox {
+				cleanupCalls.Add(1)
+			}
+			return nil
+		}
+	})
+	acquireFixture(t, m, opts, SingBox, fixture)
+	accepted(t, m, SingBox, "good", 0)
+	if _, err := m.Start(context.Background(), SingBox); err != nil {
+		t.Fatal(err)
+	}
+	initialCleanups := cleanupCalls.Load()
+	requestStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		close(requestStarted)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	acquired := make(chan error, 1)
+	go func() {
+		_, err := m.Acquire(context.Background(), FRPC, Artifact{URL: server.URL, SHA256: strings.Repeat("0", 64), Compression: "none"})
+		acquired <- err
+	}()
+	<-requestStarted
+	m.mu.Lock()
+	p := m.services[SingBox].proc
+	m.mu.Unlock()
+	before := time.Now()
+	p.signal(syscall.SIGKILL)
+	select {
+	case err := <-acquired:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("exit did not cancel slow download", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("download blocked exit cleanup")
+	}
+	waitStatus(t, m, SingBox, func(s Status) bool {
+		return cleanupCalls.Load() > initialCleanups && (s.State == Backoff || s.State == Running)
+	})
+	if cleanupCalls.Load() <= initialCleanups {
+		t.Fatal("crash cleanup did not run")
+	}
+	if time.Since(before) > time.Second {
+		t.Fatal("core exit cleanup waited for download timeout")
 	}
 }

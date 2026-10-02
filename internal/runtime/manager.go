@@ -33,18 +33,20 @@ type serviceRuntime struct {
 // Manager has a single non-blocking mutation lane. Status remains responsive
 // while checks and downloads run. Exit supervision uses that same lane.
 type Manager struct {
-	opts      Options
-	mu        sync.Mutex
-	services  map[string]*serviceRuntime
-	gate      chan struct{}
-	ctx       context.Context
-	cancel    context.CancelFunc
-	closed    bool
-	closeOnce sync.Once
-	closeDone chan struct{}
-	closeErr  error
-	wg        sync.WaitGroup
-	lock      *os.File
+	opts         Options
+	mu           sync.Mutex
+	services     map[string]*serviceRuntime
+	gate         chan struct{}
+	ctx          context.Context
+	cancel       context.CancelFunc
+	closed       bool
+	closeOnce    sync.Once
+	closeDone    chan struct{}
+	closeErr     error
+	activeCancel context.CancelFunc
+	waitingExits int
+	wg           sync.WaitGroup
+	lock         *os.File
 }
 
 func New(opts Options) (*Manager, error) {
@@ -202,16 +204,30 @@ func (m *Manager) begin(ctx context.Context, id string) (context.Context, func()
 	default:
 		return nil, nil, ErrBusy
 	}
-	m.mu.Lock()
-	closed := m.closed
-	m.mu.Unlock()
-	if closed {
-		<-m.gate
-		return nil, nil, ErrClosed
-	}
 	opctx, cancel := context.WithCancel(ctx)
+	m.mu.Lock()
+	closed, exitPending := m.closed, m.waitingExits > 0
+	if !closed && !exitPending {
+		m.activeCancel = cancel
+	}
+	m.mu.Unlock()
+	if closed || exitPending {
+		cancel()
+		<-m.gate
+		if closed {
+			return nil, nil, ErrClosed
+		}
+		return nil, nil, ErrBusy
+	}
 	detach := context.AfterFunc(m.ctx, cancel)
-	return opctx, func() { detach(); cancel(); <-m.gate }, nil
+	return opctx, func() {
+		detach()
+		cancel()
+		m.mu.Lock()
+		m.activeCancel = nil
+		m.mu.Unlock()
+		<-m.gate
+	}, nil
 }
 func (m *Manager) Status(id string) (Status, error) {
 	if !validService(id) {
@@ -294,6 +310,9 @@ func (m *Manager) Acquire(ctx context.Context, id string, artifact Artifact) (St
 	cancel()
 	if err != nil {
 		m.setState(id, previous, "artifact_acquire_failed")
+		if ctx.Err() != nil {
+			return m.result(id, ctx.Err())
+		}
 		return m.result(id, errors.New("artifact acquisition failed"))
 	}
 	activated := false
@@ -656,13 +675,30 @@ func (m *Manager) watch(ctx context.Context, id string, p *managedProcess, epoch
 	case <-ctx.Done():
 		return
 	}
+	// A core exit must not wait behind another service's slow download/check:
+	// cancel that bounded operation, then reserve priority on the same lane.
+	m.mu.Lock()
+	s := m.services[id]
+	if m.closed || s.proc != p || s.epoch != epoch || !s.desired {
+		m.mu.Unlock()
+		return
+	}
+	m.waitingExits++
+	cancelOperation := m.activeCancel
+	m.mu.Unlock()
+	if cancelOperation != nil {
+		cancelOperation()
+	}
 	select {
 	case m.gate <- struct{}{}:
 	case <-ctx.Done():
+		m.mu.Lock()
+		m.waitingExits--
+		m.mu.Unlock()
 		return
 	}
 	m.mu.Lock()
-	s := m.services[id]
+	m.waitingExits--
 	if m.closed || s.proc != p || s.epoch != epoch || !s.desired {
 		m.mu.Unlock()
 		<-m.gate
