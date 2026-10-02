@@ -22,11 +22,12 @@ body {
   background: var(--background);
   font-family: var(--font-sans);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -64,6 +65,13 @@ h2,
 h3,
 p {
   margin: 0;
+}
+pre {
+  max-width: 100%;
+  overflow: auto;
+}
+img {
+  max-width: 100%;
 }
 svg {
   flex-shrink: 0;
@@ -184,7 +192,7 @@ kbd {
   padding: 2px 7px;
   border: 1px solid var(--border);
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   line-height: 1.35;
   white-space: nowrap;
@@ -265,8 +273,12 @@ kbd {
   letter-spacing: 0.06em;
 }
 .sidebar-nav {
+  flex: 1;
+  min-height: 0;
   padding: 6px 11px;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .nav-group {
   margin-bottom: 25px;
@@ -283,12 +295,12 @@ kbd {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 9px 12px;
-  min-height: 38px;
+  padding: 10px 12px;
+  min-height: 40px;
   color: var(--muted-foreground);
   margin-bottom: 3px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
   transition:
     color var(--duration-fast),
     background var(--duration-fast);
@@ -317,6 +329,7 @@ kbd {
   margin-left: auto;
 }
 .sidebar-footer {
+  flex-shrink: 0;
   margin-top: auto;
   padding: 15px 18px 11px;
   border-top: 1px solid var(--border);
@@ -392,11 +405,13 @@ kbd {
   padding: 0 30px;
 }
 .topbar-left {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 12px;
 }
 .breadcrumbs {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -408,6 +423,8 @@ kbd {
   color: var(--muted-foreground);
 }
 .breadcrumbs strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
 }
 .global-search {
@@ -479,13 +496,13 @@ kbd {
   margin-bottom: 6px;
 }
 .page-heading h1 {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 650;
   letter-spacing: -0.6px;
   line-height: 1.4;
 }
 .page-heading p {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-foreground);
   margin-top: 5px;
 }
@@ -495,14 +512,18 @@ kbd {
   gap: 18px;
 }
 .page-toolbar {
+  min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   min-height: 32px;
 }
 .toolbar-left {
+  max-width: 100%;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   min-width: 0;
@@ -516,9 +537,10 @@ kbd {
 .panel {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   min-width: 0;
   overflow: hidden;
+  box-shadow: var(--shadow-panel);
 }
 .panel-header {
   display: flex;
@@ -530,14 +552,22 @@ kbd {
   border-bottom: 1px solid var(--border);
 }
 .panel-header h2 {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.1px;
 }
 .panel-header p {
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.6;
   color: var(--muted-foreground);
   margin-top: 4px;
+}
+.panel-header > div {
+  min-width: 0;
+}
+.panel-header h2,
+.panel-header p {
+  overflow-wrap: anywhere;
 }
 .panel-header > svg {
   color: var(--muted-foreground);
@@ -549,8 +579,9 @@ kbd {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--card);
+  box-shadow: var(--shadow-panel);
 }
 .stat {
   padding: 20px 23px 19px;
@@ -643,14 +674,21 @@ kbd {
   color: var(--muted-foreground);
 }
 .key-values dd {
+  overflow-wrap: anywhere;
   margin: 0;
   font-weight: 500;
   text-align: right;
   min-width: 0;
 }
 .table-scroll {
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   scrollbar-width: thin;
+}
+.table-scroll:focus-visible {
+  outline-offset: -3px;
 }
 .data-table {
   border-collapse: collapse;
@@ -660,7 +698,7 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 .data-table th {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--muted-foreground);
   padding: 11px 20px;
@@ -706,6 +744,8 @@ kbd {
 }
 .table-footer {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
   font-size: 10px;
@@ -761,12 +801,12 @@ kbd {
   margin-bottom: 17px;
 }
 .empty-state h3 {
-  font-weight: 500;
-  font-size: 13px;
+  font-weight: 600;
+  font-size: 14px;
 }
 .empty-state p {
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 12px;
   margin: 7px 0 13px;
   max-width: 360px;
 }
@@ -780,6 +820,7 @@ kbd {
   font-size: 12px;
 }
 .loading-state {
+  min-height: 120px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -789,6 +830,7 @@ kbd {
   font-size: 12px;
 }
 .error-state {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -802,6 +844,7 @@ kbd {
   overflow-wrap: anywhere;
 }
 .error-state span {
+  min-width: 0;
   flex: 1;
 }
 .page-content > .error-state {
@@ -809,12 +852,19 @@ kbd {
 }
 .segmented {
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
   background: var(--muted);
   padding: 3px;
   border: 1px solid var(--border);
   border-radius: 7px;
 }
 .segmented button {
+  flex-shrink: 0;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -826,6 +876,15 @@ kbd {
   color: var(--muted-foreground);
   font-size: 11px;
   border-radius: 4px;
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast);
+}
+.segmented button:hover:not(:disabled) {
+  color: var(--foreground);
+}
+.segmented button:focus-visible {
+  outline-offset: -2px;
 }
 .segmented button[aria-selected="true"],
 .segmented button[aria-pressed="true"] {
@@ -834,6 +893,7 @@ kbd {
   box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 6%, transparent);
 }
 .search-field {
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -975,11 +1035,12 @@ kbd {
   min-width: 0;
 }
 .field-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 .field-hint {
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.6;
   color: var(--muted-foreground);
 }
 .field > input,
@@ -997,7 +1058,8 @@ kbd {
 .field input::placeholder {
   color: var(--muted-foreground);
 }
-.field input:focus {
+.field input:focus,
+.field textarea:focus {
   border-color: var(--ring);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 12%, transparent);
 }
@@ -1015,6 +1077,12 @@ kbd {
   border-radius: var(--radius-sm);
   font-size: 12px;
 }
+.select-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .select-trigger svg {
   color: var(--muted-foreground);
 }
@@ -1027,6 +1095,10 @@ kbd {
   padding: 4px;
   z-index: 70;
   min-width: var(--radix-select-trigger-width);
+  max-width: calc(100vw - 24px);
+  max-height: var(--radix-select-content-available-height, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .select-item {
   display: flex;
@@ -1057,6 +1129,7 @@ kbd {
   margin-top: 2px;
 }
 .policy-path {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1216,10 +1289,13 @@ kbd {
   gap: 8px;
 }
 .proxy-editor-heading strong {
-  font-size: 11px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
   font-weight: 500;
 }
 .proxy-editor-heading button {
+  flex-shrink: 0;
   margin-left: auto;
 }
 .logs-toolbar {
@@ -1256,6 +1332,7 @@ kbd {
   font-size: 10px;
 }
 .console-footer {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -1423,6 +1500,7 @@ kbd {
   color: var(--muted-foreground);
 }
 .mobile-sidebar {
+  max-width: calc(100vw - 32px);
   position: fixed;
   z-index: 65;
   top: 0;
@@ -1608,9 +1686,6 @@ kbd {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
-  .environment-panel {
-    display: none;
-  }
   .overview-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1667,9 +1742,10 @@ kbd {
     font-size: 11px;
   }
   .global-search {
-    width: 32px;
-    min-width: 32px;
-    padding: 8px;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
     border: 0;
     background: transparent;
     justify-content: center;
@@ -1683,7 +1759,7 @@ kbd {
   }
   .topbar-status .badge {
     padding: 2px 5px;
-    font-size: 9px;
+    font-size: 10px;
   }
   .connection-indicator {
     display: none;
@@ -1698,7 +1774,7 @@ kbd {
     font-size: 22px;
   }
   .page-heading p {
-    font-size: 11px;
+    font-size: 12px;
   }
   .diagnostics-shortcut {
     font-size: 10px;
@@ -1725,7 +1801,8 @@ kbd {
     font-size: 17px;
   }
   .stat-context {
-    font-size: 9px;
+    font-size: 10px;
+    overflow-wrap: anywhere;
   }
   .dashboard-grid,
   .two-column,
@@ -1734,7 +1811,7 @@ kbd {
     gap: 15px;
   }
   .section-heading p {
-    font-size: 9px;
+    font-size: 11px;
   }
   .panel-header {
     padding: 15px 16px;
@@ -1755,6 +1832,10 @@ kbd {
   }
   .page-toolbar {
     align-items: start;
+    gap: 10px;
+  }
+  .page-toolbar > .segmented {
+    flex-basis: 100%;
   }
   .toolbar-left {
     flex-direction: column;
@@ -1830,6 +1911,59 @@ kbd {
   }
   .brand {
     font-size: 14px;
+  }
+}
+/* Keep the desktop console dense; touch controls need a larger hit area. */
+@media (pointer: coarse), (max-width: 760px) {
+  .button,
+  .mobile-close {
+    min-height: 44px;
+  }
+  .button-icon,
+  .mobile-close {
+    width: 44px;
+    height: 44px;
+  }
+  .segmented button {
+    min-height: 36px;
+  }
+  .field > input,
+  .field > textarea,
+  .select-trigger,
+  .search-field {
+    min-height: 44px;
+  }
+  .search-field input {
+    height: 40px;
+  }
+  .select-item,
+  .dropdown-item {
+    min-height: 40px;
+  }
+}
+@media (max-width: 480px) {
+  .field > input,
+  .field > textarea,
+  .select-trigger,
+  .search-field input,
+  .command-search input {
+    font-size: 16px;
+  }
+  .page-heading {
+    align-items: start;
+    gap: 12px;
+  }
+  .page-heading > div {
+    min-width: 0;
+  }
+  .diagnostics-shortcut {
+    flex-shrink: 0;
+  }
+  .panel-header {
+    flex-wrap: wrap;
+  }
+  .console-footer {
+    font-size: 10px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

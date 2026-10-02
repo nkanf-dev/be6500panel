@@ -4,13 +4,14 @@
   font-family: var(--font-sans); font-size: var(--text-sm);
 }
 .viz-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-5) var(--space-5) var(--space-3); }
-.viz-header h3 { margin: 0; font-size: var(--text-base); font-weight: 600; line-height: 1.5; letter-spacing: -.01em; }
-.viz-subtitle { margin: var(--space-1) 0 0; color: var(--muted-foreground); font-size: var(--text-xs); line-height: 1.5; }
+.viz-header > div { min-width: 0; }
+.viz-header h3 { margin: 0; font-size: var(--text-base); font-weight: 600; line-height: 1.5; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.viz-subtitle { margin: var(--space-1) 0 0; color: var(--muted-foreground); font-size: var(--text-xs); line-height: 1.6; overflow-wrap: anywhere; }
 .viz-source { flex-shrink: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px var(--space-2); color: var(--muted-foreground); font-size: var(--text-xs); line-height: 1.5; }
 .viz-source-demo { background: var(--accent); color: var(--accent-foreground); border-color: transparent; }
 .viz-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); padding: 0 var(--space-5) var(--space-3); }
-.viz-filter { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted-foreground); font-size: var(--text-xs); }
-.viz-filter select { min-height: 28px; max-width: 100%; font: inherit; padding: var(--space-1) var(--space-2); border: 1px solid var(--input); border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); cursor: pointer; }
+.viz-filter { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted-foreground); font-size: var(--text-xs); }
+.viz-filter select { min-height: 32px; max-width: 100%; font: inherit; padding: var(--space-1) var(--space-2); border: 1px solid var(--input); border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); cursor: pointer; }
 .viz-filter select:hover { background: var(--surface-hover); }
 .viz-filter select:focus-visible, .viz-table-details summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .viz-summary { margin: 0; padding: 0 var(--space-5) var(--space-2); color: var(--foreground); font-size: var(--text-xs); line-height: 1.7; font-variant-numeric: tabular-nums; }
@@ -25,7 +26,7 @@
 .viz-table-details summary { padding: var(--space-3) var(--space-5); color: var(--muted-foreground); font-size: var(--text-xs); cursor: pointer; user-select: none; }
 .viz-table-details summary:hover { color: var(--foreground); background: var(--surface-hover); }
 .viz-table-details summary span { margin-left: var(--space-2); font-variant-numeric: tabular-nums; }
-.viz-table-scroll { max-height: 280px; overflow: auto; border-top: 1px solid var(--border); }
+.viz-table-scroll { max-width: 100%; max-height: 280px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; border-top: 1px solid var(--border); }
 .viz-table-scroll table { border-collapse: collapse; width: 100%; text-align: left; font-size: var(--text-xs); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .viz-table-scroll caption { text-align: left; padding: var(--space-3) var(--space-5); color: var(--muted-foreground); }
 .viz-table-scroll th, .viz-table-scroll td { padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--border); }
@@ -33,7 +34,10 @@
 .viz-table-scroll tbody th { font-weight: 500; }
 .viz-table-scroll tbody tr:hover { background: var(--surface-hover); }
 @media (max-width: 480px) {
-  .viz-header { padding: var(--space-4); }
+  .viz-header { padding: var(--space-4); gap: var(--space-2); }
+  .viz-source { font-size: 11px; }
+  .viz-filter { flex-wrap: wrap; gap: var(--space-1); }
+  .viz-filter select { min-height: 44px; font-size: 16px; }
   .viz-controls, .viz-summary { padding-left: var(--space-4); padding-right: var(--space-4); }
   .viz-footer { padding-left: var(--space-4); padding-right: var(--space-4); }
 }
