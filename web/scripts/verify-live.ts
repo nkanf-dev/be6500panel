@@ -26,8 +26,13 @@ try {
   const body = await status.json();
   if (body.mode !== "host" || body.arch !== "arm")
     throw new Error("Live ARM host observation expected");
-  if (await page.locator("canvas").count())
-    throw new Error("Host mode must not show demo charts");
+  const routerResponse = await context.request.get(new URL("/api/router", url).toString());
+  if (!routerResponse.ok()) throw new Error(`router status ${routerResponse.status()}`);
+  const routerSnapshot = await routerResponse.json();
+  if (routerSnapshot.platform.model !== "RN02") throw new Error("RN02 identity expected");
+  await page.locator("canvas").first().waitFor({ timeout: 15_000 });
+  if (await page.getByText("演示数据 · 固定样本", { exact: true }).count()) throw new Error("Live page displayed demo samples");
+  await page.getByText("WAN · eth0.1", { exact: true }).waitFor();
   await fs.mkdir("test-results", { recursive: true });
   await page.screenshot({
     path: "test-results/live-router-overview.png",

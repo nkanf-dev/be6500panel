@@ -192,7 +192,7 @@ describe("production contract decoding", () => {
         },
       }),
     );
-    expect(timeout).toHaveBeenLastCalledWith(120_000);
+    expect(timeout).toHaveBeenLastCalledWith(420_000);
     await runRequest(
       api.runtimeConfigure({
         service: "sing-box",
