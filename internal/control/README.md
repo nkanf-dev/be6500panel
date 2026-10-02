@@ -16,6 +16,8 @@ manager, err := control.New(control.Options{
     Reload: func(ctx context.Context, module string) error { ... },
     Verify: func(ctx context.Context, changedModules []string) error { ... },
     ConfirmationTimeout: 120 * time.Second,
+    // Optional shared filesystem budget used by all persistent writers.
+    StorageAdmission: budget.Admit,
 })
 defer manager.Close()
 ```
@@ -119,6 +121,33 @@ Reload hooks own equivalent platform guards. A Verify hook can check concrete
 service state; browser reachability remains the authenticated Confirm boundary.
 The raw UCI namespace has no panel-specific port/auth settings. HTTP/main own
 those settings and must use their own safe transaction integration.
+
+
+## Shared filesystem admission
+
+`Options.StorageAdmission` is an optional callback:
+`func(context.Context, string, int64, bool) (func(), error)`. It receives the
+allocation path, full temporary bytes and a recovery flag. It returns a release
+callback. A nil hook preserves standalone behavior. The application must use
+one shared budget for control, runtime files and persistent traffic history.
+The callback owns filesystem measurement and any shared emergency reserve.
+
+Control reserves full file contents, 4-KiB block rounding and a metadata block
+per temporary file, not the final size difference. Candidate validation holds
+one reservation until its entire isolated directory is removed. A commit
+reserves serialized journal/state writes plus candidate and prior-document
+scratch before its first journal or live write. Data and live paths have
+separate holds so different filesystems are covered. A transaction skips nested
+per-write admission. All holds last through failed apply and immediate recovery.
+Standalone state writes use per-write admission until atomic temporary cleanup.
+
+Manual, deadline and restart recovery use `recovery=true`, including state and
+journal completion. Denied admission does not begin live writes. It reports
+`storage_insufficient` for normal work, or retains `rollback_failed` for recovery
+so automatic and manual retry remain available. Diagnostics never include the
+callback's error text or filesystem paths. Existing 128-KiB documents and
+3-MiB state/journal readers remain compatible; admission uses actual serialized
+sizes rather than a new fixed global quota.
 
 ## Limits and privacy
 

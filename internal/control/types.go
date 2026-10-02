@@ -25,6 +25,11 @@ type Options struct {
 	Verify              func(context.Context, []string) error
 	Reload              func(context.Context, string) error
 	ConfirmationTimeout time.Duration
+	// StorageAdmission reserves full temporary allocations on the target
+	// filesystem. recovery permits the shared owner to use its rollback reserve.
+	// The returned release is held until writes and temporary cleanup finish.
+	// Nil keeps the standalone control manager's existing bounded-file behavior.
+	StorageAdmission func(context.Context, string, int64, bool) (func(), error)
 }
 
 type Document struct {

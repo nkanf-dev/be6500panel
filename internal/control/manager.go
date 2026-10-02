@@ -18,23 +18,26 @@ import (
 
 // Manager serializes live mutations. A journal is retained for the last operation.
 type Manager struct {
-	mu            sync.Mutex
-	root, dataDir string
-	logger        *slog.Logger
-	runner        Runner
-	verify        func(context.Context, []string) error
-	reloadHook    func(context.Context, string) error
-	timeout       time.Duration
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	wake          chan struct{}
-	closed        bool
-	lockFile      *os.File
-	closeOnce     sync.Once
-	disk          diskState
-	journal       *journal
-	recoveryError string
+	mu               sync.Mutex
+	root, dataDir    string
+	logger           *slog.Logger
+	runner           Runner
+	verify           func(context.Context, []string) error
+	reloadHook       func(context.Context, string) error
+	timeout          time.Duration
+	ctx              context.Context
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
+	wake             chan struct{}
+	closed           bool
+	lockFile         *os.File
+	closeOnce        sync.Once
+	disk             diskState
+	journal          *journal
+	recoveryError    string
+	storageAdmission func(context.Context, string, int64, bool) (func(), error)
+	storageReserved  bool // Protected by mu; transaction writes share one reservation.
+	storageRecovery  bool // Includes recovery state and journal completion writes.
 }
 
 func New(o Options) (*Manager, error) {
@@ -86,7 +89,7 @@ func New(o Options) (*Manager, error) {
 		o.ConfirmationTimeout = 120 * time.Second
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{root: root, dataDir: data, runner: o.Runner, logger: o.Logger, verify: o.Verify, reloadHook: o.Reload, timeout: o.ConfirmationTimeout, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), lockFile: lock}
+	m := &Manager{root: root, dataDir: data, runner: o.Runner, logger: o.Logger, verify: o.Verify, reloadHook: o.Reload, timeout: o.ConfirmationTimeout, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), lockFile: lock, storageAdmission: o.StorageAdmission}
 	fail := func(e error) (*Manager, error) { cancel(); unlockStore(lock); return nil, e }
 	err = readJSON(filepath.Join(data, "state.json"), &m.disk)
 	if os.IsNotExist(err) {
@@ -97,6 +100,7 @@ func New(o Options) (*Manager, error) {
 	if err = validateStored(m.disk); err != nil {
 		return fail(failure("state_corrupt", "Private draft state is invalid."))
 	}
+	recovered := false
 	var j journal
 	err = readJSON(filepath.Join(data, "journal.json"), &j)
 	if err == nil {
@@ -109,6 +113,7 @@ func New(o Options) (*Manager, error) {
 			if _, err = m.rollbackLocked(ctx); err != nil {
 				return fail(err)
 			}
+			recovered = true
 		}
 	} else if !os.IsNotExist(err) {
 		return fail(failure("journal_corrupt", "Cannot load rollback journal; changes are disabled."))
@@ -116,9 +121,11 @@ func New(o Options) (*Manager, error) {
 	if _, err = m.syncGeneration(); err != nil {
 		return fail(err)
 	}
+	m.storageRecovery = recovered
 	if err = m.saveState(); err != nil {
 		return fail(err)
 	}
+	m.storageRecovery = false
 	m.wg.Add(1)
 	go m.deadlineLoop()
 	return m, nil
@@ -245,6 +252,11 @@ func (m *Manager) Stage(ctx context.Context, r StageRequest) (Draft, error) {
 		issues = m.validateNative(ctx, map[string]string{r.Module: r.Content}, live)
 		cancel()
 	}
+	for _, diagnostic := range issues {
+		if diagnostic.Code == "storage_insufficient" || diagnostic.Code == "cancelled" {
+			return Draft{}, failure(diagnostic.Code, diagnostic.Message)
+		}
+	}
 	d := Draft{ID: id, Module: r.Module, Generation: r.Generation, Diff: diff(r.Module, live[r.Module].Content, r.Content), Risks: risk(r.Module, live[r.Module].Content, r.Content), Valid: len(issues) == 0, Errors: issues, CreatedAt: time.Now().UTC()}
 	old := m.disk.Drafts
 	m.disk.Drafts = append(m.disk.Drafts, storedDraft{Draft: d, Content: r.Content})
@@ -298,7 +310,13 @@ func (m *Manager) validateNative(ctx context.Context, candidates map[string]stri
 	if err != nil {
 		return []Issue{issue("validation_unavailable", "Cannot create isolated UCI validation directory.")}
 	}
-	defer os.RemoveAll(dir)
+	var releaseStorage func()
+	defer func() {
+		os.RemoveAll(dir)
+		if releaseStorage != nil {
+			releaseStorage()
+		}
+	}()
 	// Validate cross-document references against the complete isolated candidate set.
 	combined := make(map[string]string, len(modules))
 	for _, module := range modules {
@@ -313,11 +331,19 @@ func (m *Manager) validateNative(ctx context.Context, candidates map[string]stri
 	if issues := validateReferences(candidates, combined); len(issues) > 0 {
 		return issues
 	}
-	for _, module := range modules {
-		text := live[module].Content
-		if candidate, ok := candidates[module]; ok {
-			text = candidate
+	var candidateBytes int64
+	for _, text := range combined {
+		candidateBytes += temporaryBytes(len(text))
+	}
+	if releaseStorage, err = m.admitStorage(ctx, dir, candidateBytes, false); err != nil {
+		var typed *Error
+		if errors.As(err, &typed) {
+			return []Issue{issue(typed.Code, typed.Message)}
 		}
+		return []Issue{issue("validation_unavailable", "Cannot reserve isolated native validation storage.")}
+	}
+	for _, module := range modules {
+		text := combined[module]
 		if err = atomicWrite(filepath.Join(dir, module), []byte(text), 0600); err != nil {
 			return []Issue{issue("validation_unavailable", "Cannot store isolated native configuration.")}
 		}
@@ -537,8 +563,14 @@ func (m *Manager) Commit(ctx context.Context, r CommitRequest) (Operation, error
 		op.State = "pending_confirmation"
 		op.Deadline = &deadline
 	}
+	nextJournal := journal{Operation: op, Phase: "applying", Before: before, BaseGeneration: m.disk.Generation}
+	releaseStorage, err := m.reserveCommitStorage(ctx, nextJournal, candidates)
+	if err != nil {
+		return Operation{}, err
+	}
+	defer m.finishStorageReservation(releaseStorage)
 	previousJournal := m.journal
-	m.journal = &journal{Operation: op, Phase: "applying", Before: before, BaseGeneration: m.disk.Generation}
+	m.journal = &nextJournal
 	if err = m.saveJournal(); err != nil {
 		m.journal = previousJournal
 		return Operation{}, err
@@ -557,7 +589,7 @@ func (m *Manager) Commit(ctx context.Context, r CommitRequest) (Operation, error
 		if ctx.Err() != nil {
 			return failApply(failure("cancelled", "Configuration commit was cancelled."))
 		}
-		if err = atomicWrite(m.livePath(module), []byte(candidates[module]), 0600); err != nil {
+		if err = m.writeDocument(ctx, m.livePath(module), []byte(candidates[module]), 0600); err != nil {
 			m.logFailure("write_live", module, err)
 			return failApply(failure("apply_failed", "Cannot replace a native configuration document."))
 		}
@@ -695,6 +727,19 @@ func (m *Manager) rollbackLocked(ctx context.Context) (Operation, error) {
 	if j.Phase == "rolled_back" {
 		return cloneOperation(j.Operation), nil
 	}
+	wasReserved := m.storageReserved
+	releaseStorage, err := m.reserveRollbackStorage(ctx, *j)
+	if err != nil {
+		j.Phase = "rolling_back"
+		m.recoveryError = "rollback_failed"
+		return cloneOperation(j.Operation), failure("rollback_failed", "Persistent storage must be available before configuration recovery can be retried.")
+	}
+	if !wasReserved {
+		defer m.finishStorageReservation(releaseStorage)
+	}
+	wasRecovery := m.storageRecovery
+	m.storageRecovery = true
+	defer func() { m.storageRecovery = wasRecovery }()
 	j.Phase = "rolling_back"
 	if err := m.saveJournal(); err != nil {
 		m.recoveryError = "rollback_failed"
@@ -705,7 +750,7 @@ func (m *Manager) rollbackLocked(ctx context.Context) (Operation, error) {
 		s := j.Before[module]
 		var err error
 		if s.Exists {
-			err = atomicWrite(m.livePath(module), []byte(s.Content), os.FileMode(s.Mode)&0777)
+			err = m.writeDocument(ctx, m.livePath(module), []byte(s.Content), os.FileMode(s.Mode)&0777)
 		} else {
 			err = os.Remove(m.livePath(module))
 			if os.IsNotExist(err) {

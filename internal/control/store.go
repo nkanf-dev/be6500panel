@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -103,15 +104,43 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	}
 	return syncDir(dir)
 }
-func writeJSON(path string, value any) error {
+func marshalStore(value any) ([]byte, error) {
 	b, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxStoreBytes {
+		return nil, fmt.Errorf("store limit")
+	}
+	return b, nil
+}
+func writeJSON(path string, value any) error {
+	b, err := marshalStore(value)
 	if err != nil {
 		return err
 	}
-	if len(b) > maxStoreBytes {
-		return fmt.Errorf("store limit")
-	}
 	return atomicWrite(path, b, 0600)
+}
+
+func (m *Manager) writeDocument(ctx context.Context, path string, data []byte, mode os.FileMode) error {
+	if m.storageReserved || m.storageAdmission == nil {
+		return atomicWrite(path, data, mode)
+	}
+	release, err := m.admitStorage(ctx, path, temporaryBytes(len(data)), m.storageRecovery)
+	if err != nil {
+		return err
+	}
+	defer release()
+	// atomicWrite removes any abandoned temporary before this release runs.
+	return atomicWrite(path, data, mode)
+}
+
+func (m *Manager) writeStore(path string, value any) error {
+	data, err := marshalStore(value)
+	if err != nil {
+		return err
+	}
+	return m.writeDocument(m.ctx, path, data, 0600)
 }
 func readJSON(path string, value any) error {
 	f, err := os.Open(path)
@@ -170,13 +199,19 @@ func (m *Manager) readLive() (map[string]snapshot, string, error) {
 	return live, hex.EncodeToString(h.Sum(nil)), nil
 }
 func (m *Manager) saveState() error {
-	if err := writeJSON(filepath.Join(m.dataDir, "state.json"), m.disk); err != nil {
+	if err := m.writeStore(filepath.Join(m.dataDir, "state.json"), m.disk); err != nil {
+		if isStorageAdmissionError(err) {
+			return err
+		}
 		return failure("storage_failed", "Cannot persist private configuration state.")
 	}
 	return nil
 }
 func (m *Manager) saveJournal() error {
-	if err := writeJSON(filepath.Join(m.dataDir, "journal.json"), m.journal); err != nil {
+	if err := m.writeStore(filepath.Join(m.dataDir, "journal.json"), m.journal); err != nil {
+		if isStorageAdmissionError(err) {
+			return err
+		}
 		return failure("storage_failed", "Cannot persist configuration rollback journal.")
 	}
 	return nil

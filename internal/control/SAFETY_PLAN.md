@@ -34,3 +34,14 @@ No commands in this plan connect to a router or use captured live documents.
   recovery; keep the journal and rollback_failed state on any mismatch.
 - [x] Test file recreation/mode changes and automatic retry after snapshot drift.
 - [x] Run focused and full tests, race and vet; commit the verification batch.
+
+## Batch 5: Shared storage admission (parent-approved scope extension)
+
+- [x] Add an optional context/path/byte/recovery admission callback to Options.
+- [x] Admit full temporary bytes before candidate, state, journal and live writes;
+  keep reservations until rename/temporary cleanup, without nested double counts.
+- [x] Mark restored snapshots and all recovery state/journal persistence as recovery
+  writes, including final rolled_back persistence and restart recovery.
+- [x] Test denied admission cannot modify live files, all releases run on success
+  and failure, exact byte accounting, cancellation and recovery flags.
+- [x] Run package/full tests, race and vet; document contract and commit separately.
