@@ -153,7 +153,7 @@ func run() error {
 	var history *traffic.Collector
 	historyError := ""
 	if *dataDir != "" {
-		history, err = traffic.New(traffic.Options{DataDir: filepath.Join(*dataDir, "traffic"), Source: routerAdapter})
+		history, err = traffic.New(traffic.Options{DataDir: filepath.Join(*dataDir, "traffic"), Source: router.NewWANSource(routerAdapter)})
 		if err != nil {
 			historyError = "历史存储未就绪；请检查持久存储空间和历史文件，实时状态仍可使用。"
 			logger.Warn("Persistent traffic history unavailable", "code", "history_storage_unavailable", "module", "network")
