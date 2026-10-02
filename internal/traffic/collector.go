@@ -1,12 +1,16 @@
 package traffic
 
 import (
+	"be6500panel/internal/storage"
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/bits"
 	"os"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"be6500panel/internal/router"
@@ -48,12 +52,61 @@ func New(opts Options) (*Collector, error) {
 	if err := os.MkdirAll(opts.DataDir, 0700); err != nil {
 		return nil, err
 	}
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Admit the full history allocation together. Denial cannot leave a partial
+	// subset of the retention tiers or spend configuration recovery headroom.
+	var growth int64
+	var created []string
+	for _, layout := range layouts {
+		path := filepath.Join(opts.DataDir, fmt.Sprintf("wan-%ds.ring", layout.seconds))
+		size := int64(headerSize + layout.capacity*recordSize*2)
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			growth += size + 4096
+			created = append(created, path)
+		} else if err != nil {
+			return nil, err
+		} else {
+			if !info.Mode().IsRegular() || info.Size() > size || info.Size() < headerSize {
+				return nil, errors.New("traffic ring has invalid size or file type")
+			}
+			if info.Size() < size {
+				growth += size - info.Size() + 4096
+			}
+		}
+	}
+	release := func() {}
+	if opts.StorageAdmission != nil {
+		var err error
+		release, err = opts.StorageAdmission(ctx, opts.DataDir, growth, false)
+		if err != nil {
+			return nil, fmt.Errorf("traffic history allocation denied: %w", err)
+		}
+	}
+	defer release()
+	complete := false
+	defer func() {
+		if !complete {
+			for _, path := range created {
+				_ = os.Remove(path)
+			}
+		}
+	}()
 	c := &Collector{source: opts.Source, now: time.Now}
 	for _, layout := range layouts {
-		r, recovered, err := openRing(opts.DataDir, layout.seconds, layout.capacity)
+		r, recovered, err := openRing(opts.DataDir, layout.seconds, layout.capacity, ctx, opts.writeAt)
 		if err != nil {
 			for _, opened := range c.rings {
 				_ = opened.file.Close()
+			}
+			if errors.Is(err, syscall.ENOSPC) {
+				return nil, fmt.Errorf("traffic history allocation denied: %w", storage.ErrInsufficientSpace)
 			}
 			return nil, err
 		}
@@ -68,6 +121,7 @@ func New(opts Options) (*Collector, error) {
 			}
 		}
 	}
+	complete = true
 	return c, nil
 }
 

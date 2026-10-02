@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"be6500panel/internal/router"
+	"be6500panel/internal/storage"
+	"os"
 )
 
 const (
@@ -49,6 +51,13 @@ type Options struct {
 	// DataDir is required. Failure never silently switches to volatile storage.
 	DataDir string
 	Source  Source
+	// StorageAdmission is shared with configuration stores on this volume.
+	// New admits only new rings and truncated tails; complete rings stay usable
+	// below the reserve and retain the full year of history.
+	StorageAdmission storage.Admission
+	Context          context.Context
+	writeAt          func(*os.File, []byte, int64) (int, error) // test seam
+
 }
 
 type Sample struct {

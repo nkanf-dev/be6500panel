@@ -1,6 +1,7 @@
 package traffic
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -40,11 +41,11 @@ var layouts = []struct {
 	{30, 5760}, {300, 8640}, {3600, 9600},
 }
 
-func openRing(dir string, seconds int64, capacity int) (*ring, bool, error) {
+func openRing(dir string, seconds int64, capacity int, ctx context.Context, writeAt func(*os.File, []byte, int64) (int, error)) (*ring, bool, error) {
 	path := filepath.Join(dir, fmt.Sprintf("wan-%ds.ring", seconds))
 	f, err := os.OpenFile(path, os.O_RDWR, 0600)
 	if errors.Is(err, os.ErrNotExist) {
-		if err = createRing(dir, path, seconds, capacity); err != nil {
+		if err = createRing(dir, path, seconds, capacity, ctx, writeAt); err != nil {
 			return nil, false, err
 		}
 		f, err = os.OpenFile(path, os.O_RDWR, 0600)
@@ -102,7 +103,7 @@ func openRing(dir string, seconds int64, capacity int) (*ring, bool, error) {
 	// Restore a truncated tail with real writes. ENOSPC must be visible, not
 	// hidden by sparse allocation. Valid earlier records have already survived.
 	if info.Size() < size {
-		if err = writeZeros(f, info.Size(), size-info.Size()); err != nil {
+		if err = writeZeros(ctx, f, info.Size(), size-info.Size(), writeAt); err != nil {
 			return nil, false, err
 		}
 		if err = f.Sync(); err != nil {
@@ -113,7 +114,7 @@ func openRing(dir string, seconds int64, capacity int) (*ring, bool, error) {
 	return r, recovered, nil
 }
 
-func createRing(dir, path string, seconds int64, capacity int) error {
+func createRing(dir, path string, seconds int64, capacity int, ctx context.Context, writeAt func(*os.File, []byte, int64) (int, error)) error {
 	f, err := os.CreateTemp(dir, ".wan-ring-")
 	if err != nil {
 		return err
@@ -126,7 +127,7 @@ func createRing(dir, path string, seconds int64, capacity int) error {
 	binary.LittleEndian.PutUint64(header[16:24], uint64(capacity))
 	binary.LittleEndian.PutUint32(header[60:64], crc32.ChecksumIEEE(header[:60]))
 	if _, err = f.Write(header[:]); err == nil {
-		err = writeZeros(f, headerSize, int64(capacity*recordSize*2))
+		err = writeZeros(ctx, f, headerSize, int64(capacity*recordSize*2), writeAt)
 	}
 	if err == nil {
 		err = f.Sync()
@@ -137,6 +138,9 @@ func createRing(dir, path string, seconds int64, capacity int) error {
 	}
 	if closeErr != nil {
 		return closeErr
+	}
+	if err = ctx.Err(); err != nil {
+		return err
 	}
 	if err = os.Rename(temporary, path); err != nil {
 		return err
@@ -149,14 +153,20 @@ func createRing(dir, path string, seconds int64, capacity int) error {
 	return directory.Sync()
 }
 
-func writeZeros(f *os.File, offset, length int64) error {
+func writeZeros(ctx context.Context, f *os.File, offset, length int64, writeAt func(*os.File, []byte, int64) (int, error)) error {
+	if writeAt == nil {
+		writeAt = func(f *os.File, p []byte, offset int64) (int, error) { return f.WriteAt(p, offset) }
+	}
 	zeros := make([]byte, 32<<10)
 	for length > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		n := int64(len(zeros))
 		if length < n {
 			n = length
 		}
-		wrote, err := f.WriteAt(zeros[:int(n)], offset)
+		wrote, err := writeAt(f, zeros[:int(n)], offset)
 		if err != nil {
 			return err
 		}
