@@ -26,6 +26,7 @@ var (
 	ErrNoArtifact                = errors.New("service artifact is unavailable")
 	ErrCheck                     = errors.New("candidate verification failed")
 	ErrReadiness                 = errors.New("managed process readiness failed")
+	ErrRecovery                  = errors.New("previous runtime recovery failed")
 	ErrArtifactCompressedLimit   = errors.New("artifact exceeds compressed byte limit")
 	ErrArtifactUncompressedLimit = errors.New("artifact exceeds uncompressed byte limit")
 	// ErrDurability means the atomic rename committed, but directory fsync failed.
@@ -118,5 +119,8 @@ type Status struct {
 	Restarts          int       `json:"restarts"`
 	RetryAt           time.Time `json:"retryAt,omitempty"`
 	ErrorCode         string    `json:"errorCode,omitempty"`
-	RecoveryPlan      []string  `json:"recoveryPlan,omitempty"`
+	// Restored means a failed live change resumed a proven-ready previous config.
+	Restored      bool     `json:"restored"`
+	NeedsRecovery bool     `json:"needsRecovery"`
+	RecoveryPlan  []string `json:"recoveryPlan,omitempty"`
 }

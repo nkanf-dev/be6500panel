@@ -25,6 +25,9 @@ type serviceRuntime struct {
 	restarts       int
 	retryAt        time.Time
 	errorCode      string
+	restored       bool
+	needsRecovery  bool
+	restorePending bool
 	cleanupPending bool
 	epoch          uint64
 	cancelWatch    context.CancelFunc
@@ -245,7 +248,7 @@ func (m *Manager) Status(id string) (Status, error) {
 }
 func (m *Manager) statusLocked(id string) Status {
 	s := m.services[id]
-	out := Status{Service: id, State: s.state, Generation: s.disk.Generation, Configured: s.disk.Current != nil, ArtifactAvailable: s.binary != "", Desired: s.desired, Restarts: s.restarts, RetryAt: s.retryAt, ErrorCode: s.errorCode}
+	out := Status{Service: id, State: s.state, Generation: s.disk.Generation, Configured: s.disk.Current != nil, ArtifactAvailable: s.binary != "", Desired: s.desired, Restarts: s.restarts, RetryAt: s.retryAt, ErrorCode: s.errorCode, Restored: s.restored, NeedsRecovery: s.needsRecovery || s.cleanupPending || s.restorePending}
 	if s.disk.Artifact != nil {
 		out.Version = s.disk.Artifact.Version
 	}
@@ -275,7 +278,13 @@ func (m *Manager) statusLocked(id string) Status {
 	if s.errorCode == "state_not_durable" {
 		out.RecoveryPlan = append(out.RecoveryPlan, "check_persistent_storage", "stop_then_start_to_apply_accepted_config")
 	}
-	if s.disk.LastGood != nil && (s.state == Error || s.errorCode != "") {
+	if s.restorePending {
+		out.RecoveryPlan = append(out.RecoveryPlan, "retry_owned_resource_restore")
+	}
+	if s.needsRecovery {
+		out.RecoveryPlan = append(out.RecoveryPlan, "inspect_runtime_and_start_explicitly")
+	}
+	if s.disk.LastGood != nil && !s.restored && (s.state == Error || s.errorCode != "") {
 		out.RecoveryPlan = append(out.RecoveryPlan, "restore_last_good_config")
 	}
 	return out
@@ -286,8 +295,195 @@ func (m *Manager) setState(id string, state State, code string) {
 	s := m.services[id]
 	s.state = state
 	s.errorCode = code
+	if state == Checking || state == Downloading || state == Starting {
+		s.restored = false
+	}
 	m.mu.Unlock()
 	m.opts.Logger.Debug("managed runtime transition", "service", id, "state", state, "code", code)
+}
+
+// liveSnapshot contains immutable checked records. Ready is set only after a
+// successful start, so a check-only candidate is never an automatic fallback.
+type liveSnapshot struct {
+	disk     diskState
+	binary   string
+	desired  bool
+	ready    *configRecord
+	admitted *Options // holds candidate + prior ready scratch for the entire change
+}
+
+// admitChange reserves recovery scratch before any candidate write. A smaller
+// new config cannot consume the space needed to copy a larger ready snapshot.
+func (m *Manager) admitChange(ctx context.Context, id string, raw []byte, rollback bool, live *liveSnapshot) (func(), Options, error) {
+	opts := m.opts
+	if rollback {
+		opts.MaxConfigBytes = storedConfigLimit(opts)
+	}
+	release, opts, err := admitConfig(opts, ctx, id, raw, rollback)
+	if err != nil {
+		return nil, opts, err
+	}
+	if opts.StorageAdmission != nil && live.desired && live.ready != nil {
+		info, err := os.Lstat(configPath(opts, id, live.ready))
+		if err != nil || !info.Mode().IsRegular() {
+			release()
+			return nil, opts, errors.New("previous ready config is unavailable")
+		}
+		// Normal reservation holds two candidate bodies; rollback holds one.
+		heldConfig := int64(len(raw))
+		if !rollback {
+			heldConfig *= 2
+		}
+		needed := int64(len(raw)) + info.Size()
+		if needed > heldConfig {
+			extraRelease, err := opts.StorageAdmission(ctx, filepath.Join(opts.DataDir, id), needed-heldConfig, rollback)
+			if err != nil {
+				release()
+				return nil, opts, err
+			}
+			firstRelease := release
+			release = func() { extraRelease(); firstRelease() }
+		}
+		live.admitted = &opts
+	}
+	return release, opts, nil
+}
+
+func snapshotRuntime(s *serviceRuntime) liveSnapshot {
+	previous := liveSnapshot{disk: s.disk, binary: s.binary, desired: s.desired}
+	if s.disk.Current != nil && s.disk.Current.Ready {
+		previous.ready = s.disk.Current
+	} else if s.disk.LastGood != nil && s.disk.LastGood.Ready {
+		previous.ready = s.disk.LastGood
+	}
+	return previous
+}
+
+// restartChange applies a live change, then restores a proven-ready snapshot if
+// activation fails. Recovery stays on the same lane and uses manager lifetime:
+// a canceled HTTP request must not strand an already accepted working service.
+func (m *Manager) restartChange(ctx context.Context, id string, previous liveSnapshot) error {
+	err := m.stopProcess(id, false)
+	if err == nil {
+		err = m.startProcess(ctx, id)
+	}
+	if err == nil {
+		return nil
+	}
+	m.mu.Lock()
+	s := m.services[id]
+	originalCode := s.errorCode
+	if originalCode == "" {
+		originalCode = "operation_cancelled"
+	}
+	s.needsRecovery = true
+	m.mu.Unlock()
+	if !previous.desired || previous.ready == nil || previous.binary == "" {
+		m.mu.Lock()
+		s.desired = false
+		s.errorCode = originalCode
+		m.mu.Unlock()
+		return err
+	}
+	recoveryCtx, cancel := context.WithTimeout(m.ctx, m.opts.CheckTimeout+m.opts.ReadyTimeout+2*m.opts.ResourceTimeout+2*m.opts.TermGrace)
+	defer cancel()
+	m.mu.Lock()
+	m.activeCancel = cancel // another core exit can still preempt owned recovery
+	m.mu.Unlock()
+	recoveryErr := m.recoverRuntime(recoveryCtx, id, previous)
+	m.mu.Lock()
+	s.errorCode = originalCode // never hide the failed candidate's safe diagnostic
+	s.needsRecovery = recoveryErr != nil
+	m.mu.Unlock()
+	if recoveryErr != nil {
+		return errors.Join(err, ErrRecovery, recoveryErr)
+	}
+	return err // automatic recovery is not success of the requested change
+}
+
+func (m *Manager) recoverRuntime(ctx context.Context, id string, previous liveSnapshot) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Read the immutable proven-ready bytes, not a newly checked LastGood alias.
+	opts := m.opts
+	opts.MaxConfigBytes = storedConfigLimit(opts)
+	raw, err := readBounded(configPath(opts, id, previous.ready), opts.MaxConfigBytes)
+	if err != nil {
+		return errors.New("previous ready config is unavailable")
+	}
+	if previous.admitted != nil {
+		opts = *previous.admitted
+		opts.MaxConfigBytes = storedConfigLimit(opts)
+		opts.storageContext = ctx
+		opts.storageRollback = true
+	} else {
+		release, admittedOpts, err := admitConfig(opts, ctx, id, raw, true)
+		if err != nil {
+			return err
+		}
+		defer release()
+		opts = admittedOpts
+	}
+	candidate, err := stageConfig(opts, id, raw)
+	if err != nil {
+		return errors.New("cannot stage previous ready config")
+	}
+	defer os.Remove(candidate)
+	if err := verify(ctx, previous.binary, id, candidate, opts); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	s := m.services[id]
+	disk := s.disk // rollback always advances the latest committed generation
+	cleanupPending := s.cleanupPending
+	processLive := s.proc != nil
+	m.mu.Unlock()
+	// Restore artifact metadata and config in the same manifest transaction.
+	// The candidate's artifact must not survive a successful executable rollback.
+	disk.Artifact = previous.disk.Artifact
+	next, persistErr := commitConfig(opts, id, disk, candidate, raw)
+	if persistErr != nil && !errors.Is(persistErr, ErrDurability) {
+		return errors.New("previous ready config persistence failed")
+	}
+	// A running candidate must stop before the executable/config identity changes.
+	// Failed cleanup is not retried or disguised as successful resource recovery.
+	if !cleanupPending && processLive {
+		if err := m.stopProcess(id, false); err != nil {
+			cleanupPending = true
+		}
+	}
+	m.mu.Lock()
+	s.disk = next
+	s.binary = previous.binary
+	if persistErr == nil {
+		pruneConfigs(opts, id, next)
+	}
+	m.mu.Unlock()
+	if persistErr != nil {
+		return persistErr
+	}
+	if cleanupPending {
+		return errors.New("owned resource cleanup failed")
+	}
+	m.mu.Lock()
+	s.desired = true
+	s.restarts = 0
+	m.mu.Unlock()
+	if err := m.startProcess(ctx, id); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	s.restored = true
+	resourcesFailed := s.restorePending
+	m.mu.Unlock()
+	if resourcesFailed {
+		return errors.New("owned resource restore failed")
+	}
+	return nil
 }
 
 // Acquire stages and verifies an artifact before committing metadata and
@@ -303,6 +499,7 @@ func (m *Manager) Acquire(ctx context.Context, id string, artifact Artifact) (St
 	s := m.services[id]
 	previous := s.state
 	disk := s.disk
+	live := snapshotRuntime(s)
 	m.mu.Unlock()
 	if len(artifact.Version) > 128 || strings.ContainsAny(artifact.Version, "\r\n\x00") {
 		return m.result(id, errors.New("invalid artifact version"))
@@ -349,6 +546,19 @@ func (m *Manager) Acquire(ctx context.Context, id string, artifact Artifact) (St
 		m.setState(id, previous, "operation_cancelled")
 		return m.result(id, err)
 	}
+	// Reserve rollback scratch before artifact activation can stop a working core.
+	if live.desired && live.ready != nil && m.opts.StorageAdmission != nil {
+		raw, err := readBounded(configPath(m.opts, id, live.ready), storedConfigLimit(m.opts))
+		if err != nil {
+			return m.result(id, errors.New("previous ready config is unavailable"))
+		}
+		release, _, err := m.admitChange(ctx, id, raw, false, &live)
+		if err != nil {
+			m.setState(id, previous, "storage_insufficient")
+			return m.result(id, err)
+		}
+		defer release()
+	}
 	// The executable has a unique private RunDir path. Persist metadata first;
 	// an I/O failure cannot overwrite the previous process's executable.
 	next := disk
@@ -365,18 +575,22 @@ func (m *Manager) Acquire(ctx context.Context, id string, artifact Artifact) (St
 	shouldRun := s.desired
 	m.mu.Unlock()
 	activated = true
-	if oldBinary != "" && oldBinary != staged {
-		defer os.Remove(oldBinary)
-	}
+	defer func() {
+		m.mu.Lock()
+		activeBinary := s.binary
+		m.mu.Unlock()
+		for _, binary := range []string{oldBinary, staged} {
+			if binary != "" && binary != activeBinary {
+				_ = os.Remove(binary)
+			}
+		}
+	}()
 	if persistErr != nil {
 		m.setState(id, previous, "state_not_durable")
 		return m.result(id, persistErr)
 	}
 	if shouldRun {
-		if err = m.stopProcess(id, false); err == nil {
-			err = m.startProcess(ctx, id)
-		}
-		return m.result(id, err)
+		return m.result(id, m.restartChange(ctx, id, live))
 	}
 	state := NotConfigured
 	if disk.Current != nil {
@@ -410,6 +624,7 @@ func (m *Manager) Configure(ctx context.Context, id string, raw []byte, expected
 	disk := s.disk
 	binary := s.binary
 	previous := s.state
+	live := snapshotRuntime(s)
 	m.mu.Unlock()
 	if disk.Generation != expectedGeneration {
 		return m.result(id, ErrGeneration)
@@ -417,7 +632,13 @@ func (m *Manager) Configure(ctx context.Context, id string, raw []byte, expected
 	if binary == "" {
 		return m.result(id, ErrNoArtifact)
 	}
-	candidate, err := stageConfig(m.opts, id, raw)
+	release, operationOpts, err := m.admitChange(ctx, id, raw, false, &live)
+	if err != nil {
+		m.setState(id, previous, "storage_insufficient")
+		return m.result(id, err)
+	}
+	defer release()
+	candidate, err := stageConfig(operationOpts, id, raw)
 	if err != nil {
 		return m.result(id, errors.New("cannot stage private config"))
 	}
@@ -431,7 +652,7 @@ func (m *Manager) Configure(ctx context.Context, id string, raw []byte, expected
 		m.setState(id, previous, "operation_cancelled")
 		return m.result(id, err)
 	}
-	next, err := commitConfig(m.opts, id, disk, candidate, raw)
+	next, err := commitConfig(operationOpts, id, disk, candidate, raw)
 	if err != nil && !errors.Is(err, ErrDurability) {
 		m.setState(id, previous, "config_commit_failed")
 		return m.result(id, errors.New("private config commit failed"))
@@ -448,10 +669,7 @@ func (m *Manager) Configure(ctx context.Context, id string, raw []byte, expected
 		return m.result(id, err)
 	}
 	if shouldRun {
-		if err = m.stopProcess(id, false); err == nil {
-			err = m.startProcess(ctx, id)
-		}
-		return m.result(id, err)
+		return m.result(id, m.restartChange(ctx, id, live))
 	}
 	m.setState(id, Stopped, "")
 	return m.result(id, nil)
@@ -470,6 +688,7 @@ func (m *Manager) Restore(ctx context.Context, id string, expectedGeneration uin
 	disk := s.disk
 	binary := s.binary
 	previous := s.state
+	live := snapshotRuntime(s)
 	m.mu.Unlock()
 	if disk.Generation != expectedGeneration {
 		return m.result(id, ErrGeneration)
@@ -480,11 +699,17 @@ func (m *Manager) Restore(ctx context.Context, id string, expectedGeneration uin
 	if binary == "" {
 		return m.result(id, ErrNoArtifact)
 	}
-	raw, err := readBounded(configPath(m.opts, id, disk.LastGood), m.opts.MaxConfigBytes)
+	raw, err := readBounded(configPath(m.opts, id, disk.LastGood), storedConfigLimit(m.opts))
 	if err != nil {
 		return m.result(id, errors.New("last-good config is unavailable"))
 	}
-	candidate, err := stageConfig(m.opts, id, raw)
+	release, operationOpts, err := m.admitChange(ctx, id, raw, true, &live)
+	if err != nil {
+		m.setState(id, previous, "storage_insufficient")
+		return m.result(id, err)
+	}
+	defer release()
+	candidate, err := stageConfig(operationOpts, id, raw)
 	if err != nil {
 		return m.result(id, err)
 	}
@@ -498,7 +723,7 @@ func (m *Manager) Restore(ctx context.Context, id string, expectedGeneration uin
 		m.setState(id, previous, "operation_cancelled")
 		return m.result(id, err)
 	}
-	next, err := commitConfig(m.opts, id, disk, candidate, raw)
+	next, err := commitConfig(operationOpts, id, disk, candidate, raw)
 	if err != nil && !errors.Is(err, ErrDurability) {
 		m.setState(id, previous, "config_commit_failed")
 		return m.result(id, errors.New("private config restore failed"))
@@ -515,10 +740,7 @@ func (m *Manager) Restore(ctx context.Context, id string, expectedGeneration uin
 		return m.result(id, err)
 	}
 	if shouldRun {
-		if err = m.stopProcess(id, false); err == nil {
-			err = m.startProcess(ctx, id)
-		}
-		return m.result(id, err)
+		return m.result(id, m.restartChange(ctx, id, live))
 	}
 	m.setState(id, Stopped, "")
 	return m.result(id, nil)
@@ -543,6 +765,9 @@ func (m *Manager) Start(ctx context.Context, id string) (Status, error) {
 				return m.result(id, err)
 			}
 			m.restoreResources(ctx, id)
+			m.mu.Lock()
+			s.needsRecovery = s.restorePending
+			m.mu.Unlock()
 			return m.result(id, nil)
 		}
 	}
@@ -593,6 +818,30 @@ func (m *Manager) Stop(ctx context.Context, id string) (Status, error) {
 	err = m.stopProcess(id, true)
 	return m.result(id, err)
 }
+
+// markReady persists copy-on-write proof. Checking a candidate is not proof of
+// local readiness, and record aliases retained in an old snapshot must not change.
+func (m *Manager) markReady(id string) error {
+	m.mu.Lock()
+	s := m.services[id]
+	next := s.disk
+	if next.Current.Ready {
+		m.mu.Unlock()
+		return nil
+	}
+	record := *next.Current
+	record.Ready = true
+	next.Current = &record
+	m.mu.Unlock()
+	err := saveState(m.opts, id, next)
+	if err == nil || errors.Is(err, ErrDurability) {
+		m.mu.Lock()
+		s.disk = next
+		m.mu.Unlock()
+	}
+	return err
+}
+
 func (m *Manager) startProcess(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -647,32 +896,41 @@ func (m *Manager) startProcess(ctx context.Context, id string) error {
 		exited := p.exited
 		p.signalMu.Unlock()
 		if hookErr != nil || readyErr != nil || exited {
-			cleanupErr := m.stopProcess(id, true)
-			if cleanupErr != nil {
-				return cleanupErr
-			}
-			m.setState(id, Error, "readiness_failed")
+			// Keep the readiness/cancellation error even when cleanup also fails.
+			// Never forward hook messages or configuration details.
+			var failed error = ErrReadiness
 			if ctx.Err() != nil {
-				return ctx.Err()
+				failed = ctx.Err()
 			}
-			return ErrReadiness // never forward hook messages or config details
+			cleanupErr := m.stopProcess(id, true)
+			if cleanupErr == nil {
+				m.setState(id, Error, "readiness_failed")
+			}
+			return errors.Join(failed, cleanupErr)
 		}
 	}
 	// Cancellation may arrive during exec even when no local readiness hook is
 	// configured (for example FRPC with no listener). Never leave that start live.
 	if err := ctx.Err(); err != nil {
-		if cleanupErr := m.stopProcess(id, true); cleanupErr != nil {
-			return cleanupErr
+		cleanupErr := m.stopProcess(id, true)
+		if cleanupErr == nil {
+			m.setState(id, Error, "readiness_failed")
 		}
-		m.setState(id, Error, "readiness_failed")
-		return err
+		return errors.Join(err, cleanupErr)
+	}
+	if err := m.markReady(id); err != nil {
+		cleanupErr := m.stopProcess(id, true)
+		if cleanupErr == nil {
+			m.setState(id, Error, "state_not_durable")
+		}
+		if errors.Is(err, ErrDurability) {
+			return errors.Join(ErrDurability, cleanupErr)
+		}
+		return errors.Join(errors.New("ready config proof persistence failed"), cleanupErr)
 	}
 	m.restoreResources(ctx, id)
 	if err := ctx.Err(); err != nil {
-		if cleanupErr := m.stopProcess(id, true); cleanupErr != nil {
-			return cleanupErr
-		}
-		return err
+		return errors.Join(err, m.stopProcess(id, true))
 	}
 	watchCtx, cancelWatch := context.WithCancel(m.ctx)
 	m.mu.Lock()
@@ -681,6 +939,7 @@ func (m *Manager) startProcess(ctx context.Context, id string) error {
 	}
 	s.cancelWatch = cancelWatch
 	s.state = Running
+	s.needsRecovery = false
 	m.mu.Unlock()
 	m.wg.Add(1)
 	go m.watch(watchCtx, id, p, epoch)
@@ -700,6 +959,7 @@ func (m *Manager) stopProcess(id string, disable bool) error {
 	if disable {
 		s.desired = false
 		s.restarts = 0
+		s.restored = false
 	}
 	m.mu.Unlock()
 	if p != nil {
@@ -723,6 +983,9 @@ func (m *Manager) stopProcess(id string, disable bool) error {
 	}
 	s.state = state
 	s.errorCode = ""
+	if disable {
+		s.needsRecovery = false
+	}
 	m.mu.Unlock()
 	return nil
 }
@@ -895,7 +1158,7 @@ func (m *Manager) Config(id string) ([]byte, uint64, error) {
 	if s.disk.Current == nil {
 		return nil, s.disk.Generation, ErrNotConfigured
 	}
-	raw, err := readBounded(configPath(m.opts, id, s.disk.Current), m.opts.MaxConfigBytes)
+	raw, err := readBounded(configPath(m.opts, id, s.disk.Current), storedConfigLimit(m.opts))
 	if err != nil {
 		return nil, s.disk.Generation, errors.New("accepted private config is unavailable")
 	}
@@ -904,11 +1167,14 @@ func (m *Manager) Config(id string) ([]byte, uint64, error) {
 
 // Check a copy so a checker cannot accidentally rewrite the accepted file.
 func (m *Manager) verifyAccepted(ctx context.Context, id, binary string, record *configRecord) error {
-	raw, err := readBounded(configPath(m.opts, id, record), m.opts.MaxConfigBytes)
+	raw, err := readBounded(configPath(m.opts, id, record), storedConfigLimit(m.opts))
 	if err != nil {
 		return errors.New("accepted private config is unavailable")
 	}
-	candidate, err := stageConfig(m.opts, id, raw)
+	checkOpts := m.opts
+	checkOpts.MaxConfigBytes = storedConfigLimit(checkOpts)
+	checkOpts.storageRollback = true
+	candidate, err := stageConfig(checkOpts, id, raw)
 	if err != nil {
 		return errors.New("cannot stage private verifier copy")
 	}
@@ -916,7 +1182,7 @@ func (m *Manager) verifyAccepted(ctx context.Context, id, binary string, record 
 	if err = verify(ctx, binary, id, candidate, m.opts); err != nil {
 		return err
 	}
-	checked, err := readBounded(candidate, m.opts.MaxConfigBytes)
+	checked, err := readBounded(candidate, storedConfigLimit(m.opts))
 	if err != nil || !bytes.Equal(checked, raw) {
 		return errors.New("verifier modified private candidate")
 	}
@@ -989,7 +1255,20 @@ func (m *Manager) restoreResources(ctx context.Context, id string) {
 		}
 	}()
 	defer func() { cancel(); <-monitorDone }()
-	if err := m.opts.RestoreHook(restoreCtx, id); err != nil {
+	err := m.opts.RestoreHook(restoreCtx, id)
+	if err == nil {
+		err = restoreCtx.Err()
+	}
+	m.mu.Lock()
+	s := m.services[id]
+	s.restorePending = err != nil
+	if err != nil {
+		s.errorCode = "resource_restore_failed"
+	} else if s.errorCode == "resource_restore_failed" {
+		s.errorCode = ""
+	}
+	m.mu.Unlock()
+	if err != nil {
 		m.opts.Logger.Warn("Owned resources suspended", "service", id, "code", "resource_restore_failed")
 	}
 }

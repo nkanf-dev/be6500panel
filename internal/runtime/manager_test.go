@@ -171,6 +171,12 @@ func TestStoreAtomicGenerationLastGoodAndRestart(t *testing.T) {
 	m, opts := testManager(t, nil)
 	acquireFixture(t, m, opts, FRPC, fixture)
 	accepted(t, m, FRPC, "first", 0)
+	if _, err := m.Start(context.Background(), FRPC); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Stop(context.Background(), FRPC); err != nil {
+		t.Fatal(err)
+	}
 	accepted(t, m, FRPC, "second", 1)
 	if _, err := m.Restore(context.Background(), FRPC, 2); err != nil {
 		t.Fatal(err)
@@ -571,6 +577,12 @@ func TestDirectorySyncWarningKeepsCommittedAndPreviousSnapshots(t *testing.T) {
 	m, opts := testManager(t, nil)
 	acquireFixture(t, m, opts, SingBox, fixture)
 	accepted(t, m, SingBox, "first", 0)
+	if _, err := m.Start(context.Background(), SingBox); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Stop(context.Background(), SingBox); err != nil {
+		t.Fatal(err)
+	}
 	accepted(t, m, SingBox, "second", 1)
 	// Fail only manifest's post-rename fsync, not candidate's pre-commit fsync.
 	calls := 0
