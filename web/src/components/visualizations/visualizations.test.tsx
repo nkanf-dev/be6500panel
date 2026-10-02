@@ -10,15 +10,15 @@ const renderChart = (Component: typeof TrafficTrend, demo = true) => render(<The
 describe('visualization public contract', () => {
   it.each(components)('never replaces unavailable telemetry with samples (%s)', Component => {
     renderChart(Component, false);
-    expect(screen.getByText('未接入')).toBeTruthy();
+    expect(screen.getByText(Component === TrafficTrend ? '未采样' : '未接入', { selector: '.viz-source' })).toBeTruthy();
     expect(screen.queryByText('演示数据')).toBeNull();
     expect(screen.queryByRole('img')).toBeNull();
     expect(screen.queryByRole('table')).toBeNull();
-    expect(screen.getByRole('status').textContent).toContain('未接入');
+    expect(screen.getByRole('status').textContent).toContain(Component === TrafficTrend ? '未采样' : '未接入');
   });
   it('defaults to an honest empty state', () => {
     render(<ThemeProvider><TrafficTrend /></ThemeProvider>);
-    expect(screen.getByRole('status').textContent).toBe('—未接入流量遥测');
+    expect(screen.getByRole('status').textContent).toBe('—未采样');
   });
   it.each(components)('labels demo samples with a readable table alternative (%s)', Component => {
     renderChart(Component);
