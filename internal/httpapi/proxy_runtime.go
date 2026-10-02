@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -207,6 +209,19 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.runtimeError(w, err)
 		return
+	}
+	if state.Configured {
+		accepted, _, readErr := s.runtime.Config(managedruntime.SingBox)
+		if readErr != nil {
+			s.runtimeError(w, readErr)
+			return
+		}
+		out.Config, err = preserveLocalTelemetry(out.Config, accepted)
+		if err != nil {
+			fail(w, 409, "telemetry_configuration_invalid", "本机观测配置无效，请检查高级设置")
+			return
+		}
+		out.SHA256 = fmt.Sprintf("%x", sha256.Sum256(out.Config))
 	}
 	state, err = s.runtime.Configure(r.Context(), managedruntime.SingBox, out.Config, state.Generation)
 	if err != nil {

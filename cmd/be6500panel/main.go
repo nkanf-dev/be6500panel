@@ -23,6 +23,8 @@ import (
 	"be6500panel/internal/proxy"
 	"be6500panel/internal/router"
 	managedruntime "be6500panel/internal/runtime"
+	"be6500panel/internal/telemetry"
+	"be6500panel/internal/traffic"
 	"be6500panel/internal/transport"
 	"path/filepath"
 )
@@ -148,7 +150,47 @@ func run() error {
 		}
 		defer controlManager.Close()
 	}
-	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager})
+	var history *traffic.Collector
+	historyError := ""
+	if *dataDir != "" {
+		history, err = traffic.New(traffic.Options{DataDir: filepath.Join(*dataDir, "traffic"), Source: routerAdapter})
+		if err != nil {
+			historyError = "历史存储未就绪；请检查持久存储空间和历史文件，实时状态仍可使用。"
+			logger.Warn("Persistent traffic history unavailable", "code", "history_storage_unavailable", "module", "network")
+		} else {
+			history.Start(ctx)
+			defer func() {
+				if err := history.Close(); err != nil {
+					logger.Warn("Traffic history final sync failed", "code", "history_sync_failed", "module", "network")
+				}
+			}()
+		}
+	}
+	var metrics *telemetry.Collector
+	if runtimeManager != nil {
+		metrics, err = telemetry.New(telemetry.Options{Config: func(ctx context.Context) (telemetry.CoreConfig, error) {
+			if err := ctx.Err(); err != nil {
+				return telemetry.CoreConfig{}, err
+			}
+			state, err := runtimeManager.Status(managedruntime.SingBox)
+			if err != nil || state.State != managedruntime.Running {
+				return telemetry.CoreConfig{}, telemetry.ErrUnavailable
+			}
+			raw, generation, err := runtimeManager.Config(managedruntime.SingBox)
+			if err != nil {
+				return telemetry.CoreConfig{}, telemetry.ErrUnavailable
+			}
+			config, err := telemetry.FromNativeConfig(raw)
+			config.Epoch = fmt.Sprintf("%d:%d", generation, state.PID)
+			return config, err
+		}})
+		if err != nil {
+			return err
+		}
+		metrics.Start(ctx)
+		defer metrics.Close()
+	}
+	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager, Traffic: history, TrafficError: historyError, Telemetry: metrics})
 	if err != nil {
 		return err
 	}
