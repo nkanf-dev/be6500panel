@@ -125,3 +125,177 @@ export type FrpcPlanInput = {
   transport: "tcp" | "quic";
   proxies: FrpcProxy[];
 };
+
+// Authenticated production observations. No device identities or private configs
+// are persisted by the browser.
+export const RouterSchema = Schema.Struct({
+  platform: Schema.Struct({
+    model: Schema.String,
+    firmware: Schema.String,
+    kernel: Schema.String,
+    architecture: Schema.String,
+  }),
+  devices: Schema.Array(
+    Schema.Struct({
+      ip: Schema.String,
+      mac: Schema.String,
+      hostname: Schema.String,
+      expiresAt: Schema.NullOr(Schema.String),
+      online: Schema.Boolean,
+    }),
+  ),
+  wifi: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      ssid: Schema.String,
+      band: Schema.String,
+      channel: Schema.Number,
+      bandwidth: Schema.String,
+      disabled: Schema.Boolean,
+      encryption: Schema.String,
+    }),
+  ),
+  dns: Schema.Struct({
+    resolvers: Schema.Array(Schema.String),
+    leaseCount: Schema.Number,
+  }),
+  firewall: Schema.Struct({
+    ipv4: Schema.Struct({
+      input: Schema.String,
+      forward: Schema.String,
+      output: Schema.String,
+      rules: Schema.Number,
+    }),
+    ipv6: Schema.Struct({
+      input: Schema.String,
+      forward: Schema.String,
+      output: Schema.String,
+      rules: Schema.Number,
+    }),
+  }),
+  traffic: Schema.Array(
+    Schema.Struct({
+      interface: Schema.String,
+      rxBytes: Schema.Number,
+      txBytes: Schema.Number,
+      rxBytesPerSecond: Schema.Number,
+      txBytesPerSecond: Schema.Number,
+    }),
+  ),
+  routes: Schema.Array(
+    Schema.Struct({
+      family: Schema.String,
+      destination: Schema.String,
+      gateway: Schema.String,
+      interface: Schema.String,
+      metric: Schema.Number,
+    }),
+  ),
+  sampledAt: Schema.String,
+  errors: Schema.Array(
+    Schema.Struct({
+      module: Schema.String,
+      code: Schema.String,
+      message: Schema.String,
+    }),
+  ),
+});
+export const RuntimeServiceSchema = Schema.Literal("sing-box", "frpc");
+export const RuntimeStatusSchema = Schema.Struct({
+  service: RuntimeServiceSchema,
+  state: Schema.String,
+  generation: Schema.Number,
+  configured: Schema.Boolean,
+  artifactAvailable: Schema.Boolean,
+  version: Schema.optional(Schema.String),
+  pid: Schema.optional(Schema.Number),
+  rssBytes: Schema.Number,
+  rssAvailable: Schema.Boolean,
+  desired: Schema.Boolean,
+  restarts: Schema.Number,
+  retryAt: Schema.optional(Schema.String),
+  errorCode: Schema.optional(Schema.String),
+  recoveryPlan: Schema.optional(Schema.Array(Schema.String)),
+});
+export const RuntimeSchema = Schema.Struct({
+  enabled: Schema.Boolean,
+  services: Schema.Array(RuntimeStatusSchema),
+});
+export const RuntimeConfigSchema = Schema.Struct({
+  service: RuntimeServiceSchema,
+  config: Schema.String,
+  generation: Schema.Number,
+});
+export const ProxyDiagnosticSchema = Schema.Struct({
+  scope: Schema.String,
+  index: Schema.Number,
+  code: Schema.String,
+  message: Schema.String,
+});
+export const ProxyNodesSchema = Schema.Struct({
+  nodes: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      label: Schema.String,
+      server: Schema.String,
+      port: Schema.Number,
+      protocol: Schema.String,
+      transport: Schema.String,
+      reality: Schema.Boolean,
+      vision: Schema.Boolean,
+      utls: Schema.Boolean,
+      udp: Schema.Boolean,
+    }),
+  ),
+  diagnostics: Schema.Array(ProxyDiagnosticSchema),
+  selectedNodeId: Schema.String,
+});
+export const ProxySelectSchema = Schema.Struct({
+  status: RuntimeStatusSchema,
+  configSHA256: Schema.String,
+  diagnostics: Schema.Array(ProxyDiagnosticSchema),
+});
+export const ProxyCaptureSchema = Schema.Struct({
+  active: Schema.Boolean,
+  clientIPv4: Schema.optional(Schema.String),
+  clientIPv6: Schema.optional(Schema.String),
+  commands: Schema.Number,
+});
+
+export type RouterSnapshot = typeof RouterSchema.Type;
+export type RuntimeService = typeof RuntimeServiceSchema.Type;
+export type RuntimeStatus = typeof RuntimeStatusSchema.Type;
+export type RuntimeInfo = typeof RuntimeSchema.Type;
+export type RuntimeConfig = typeof RuntimeConfigSchema.Type;
+export type ProxyNodes = typeof ProxyNodesSchema.Type;
+export type ProxyCapture = typeof ProxyCaptureSchema.Type;
+export type IPv6Policy = "follow" | "direct" | "block";
+export type RuntimeArtifactInput = {
+  url: string;
+  sha256: string;
+  compression: "none" | "gzip";
+  version: string;
+};
+export type RuntimeAcquireInput = {
+  service: RuntimeService;
+  artifact: RuntimeArtifactInput;
+};
+export type RuntimeConfigureInput = {
+  service: RuntimeService;
+  config: string;
+  generation: number;
+};
+export type ProxyImportInput =
+  | { url: string; content?: never }
+  | { content: string; url?: never };
+export type ProxySelectInput = {
+  nodeId: string;
+  ipv6: IPv6Policy;
+  failure: "direct";
+  ports: { mixed: number; tproxy: number; dns: number };
+};
+export type ProxyCaptureInput = {
+  clientIPv4: string;
+  clientIPv6?: string;
+  ipv6: IPv6Policy;
+};

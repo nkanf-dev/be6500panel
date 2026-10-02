@@ -1,5 +1,18 @@
 import { Data, Effect, Either, Schedule, Schema } from "effect";
 import {
+  RouterSchema,
+  RuntimeSchema,
+  RuntimeStatusSchema,
+  RuntimeConfigSchema,
+  ProxyNodesSchema,
+  ProxySelectSchema,
+  ProxyCaptureSchema,
+  type RuntimeService,
+  type RuntimeAcquireInput,
+  type RuntimeConfigureInput,
+  type ProxyImportInput,
+  type ProxySelectInput,
+  type ProxyCaptureInput,
   DevicesSchema,
   FrpcSchema,
   HealthSchema,
@@ -30,12 +43,16 @@ const failure = (cause: unknown) =>
 export function request<A, I>(
   path: string,
   schema: Schema.Schema<A, I>,
-  options: { method?: "GET" | "POST"; body?: unknown } = {},
+  options: {
+    method?: "GET" | "POST" | "DELETE";
+    body?: unknown;
+    timeoutMs?: number;
+  } = {},
 ): Effect.Effect<A, ApiError> {
   const method = options.method ?? "GET";
   const response = Effect.tryPromise({
     try: async (signal) => {
-      const timeout = AbortSignal.timeout(10_000);
+      const timeout = AbortSignal.timeout(options.timeoutMs ?? 10_000);
       const res = await fetch(`/api${path}`, {
         method,
         credentials: "same-origin",
@@ -63,7 +80,9 @@ export function request<A, I>(
       if (!res.ok) {
         if (res.status === 401)
           window.dispatchEvent(new Event("be6500panel:unauthorized"));
-        const envelope = json as {
+        const envelope = (
+          typeof json === "object" && json !== null ? json : {}
+        ) as {
           error?: { code?: unknown; message?: unknown };
         };
         throw new ApiError({
@@ -130,6 +149,51 @@ export const api = {
   health: () => request("/health", HealthSchema),
   modules: () => request("/modules", ModulesSchema),
   system: () => request("/system", SystemSchema),
+  router: () => request("/router", RouterSchema),
+  runtime: () => request("/runtime", RuntimeSchema),
+  runtimeAcquire: (body: RuntimeAcquireInput) =>
+    request("/runtime/acquire", RuntimeStatusSchema, {
+      method: "POST",
+      body,
+      timeoutMs: 120_000,
+    }),
+  runtimeConfigure: (body: RuntimeConfigureInput) =>
+    request("/runtime/configure", RuntimeStatusSchema, {
+      method: "POST",
+      body,
+      timeoutMs: 90_000,
+    }),
+  runtimeConfig: (service: RuntimeService) =>
+    request(
+      `/runtime/config?service=${encodeURIComponent(service)}`,
+      RuntimeConfigSchema,
+    ),
+  runtimeStart: (service: RuntimeService) =>
+    request("/runtime/start", RuntimeStatusSchema, {
+      method: "POST",
+      body: { service },
+    }),
+  runtimeStop: (service: RuntimeService) =>
+    request("/runtime/stop", RuntimeStatusSchema, {
+      method: "POST",
+      body: { service },
+    }),
+  proxyNodes: () => request("/proxy/nodes", ProxyNodesSchema),
+  proxyImport: (body: ProxyImportInput) =>
+    request("/proxy/import", ProxyNodesSchema, {
+      method: "POST",
+      body,
+      timeoutMs: 60_000,
+    }),
+  proxySelect: (body: ProxySelectInput) =>
+    request("/proxy/select", ProxySelectSchema, {
+      method: "POST",
+      body,
+      timeoutMs: 90_000,
+    }),
+  proxyCapture: () => request("/proxy/capture", ProxyCaptureSchema),
+  proxyCaptureApply: (body: ProxyCaptureInput) =>
+    request("/proxy/capture", ProxyCaptureSchema, { method: "POST", body }),
   network: () => request("/network", NetworkSchema),
   devices: () => request("/devices", DevicesSchema),
   logs: () => request("/logs?limit=100", LogsSchema),

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, runRequest } from "./api";
+import { Schema } from "effect";
+import {
+  routerSnapshot,
+  runtimeStatus,
+  jsonResponse,
+  proxyNodes,
+} from "../modules/production-fixtures.test-data";
+import { api, ApiError, request, runRequest } from "./api";
 const health = { status: "ok", mode: "demo", readOnly: true };
 const respond = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -121,5 +128,93 @@ describe("typed Effect HTTP boundary", () => {
     const result = pending.catch((error: unknown) => error);
     controller.abort();
     expect(await result).toBeDefined();
+  });
+});
+
+describe("production contract decoding", () => {
+  it("decodes router nullable expiry, numeric channel, boolean runtime desired, public uTLS and recovery steps", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        Promise.resolve(
+          jsonResponse(
+            url === "/api/router"
+              ? routerSnapshot
+              : url === "/api/runtime"
+                ? {
+                    enabled: true,
+                    services: [{ ...runtimeStatus, recoveryPlan: ["acquire"] }],
+                  }
+                : proxyNodes,
+          ),
+        ),
+      ),
+    );
+    await expect(runRequest(api.router())).resolves.toMatchObject({
+      wifi: [{ channel: 36 }],
+      devices: [{ expiresAt: null }],
+    });
+    await expect(runRequest(api.runtime())).resolves.toMatchObject({
+      services: [{ desired: false, recoveryPlan: ["acquire"] }],
+    });
+    await expect(runRequest(api.proxyNodes())).resolves.toMatchObject({
+      nodes: [{ utls: true }],
+    });
+  });
+  it("rejects wrong production field types instead of weakening schema", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          ...routerSnapshot,
+          wifi: [{ ...routerSnapshot.wifi[0], channel: "36" }],
+        }),
+      ),
+    );
+    await expect(runRequest(api.router())).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+  });
+  it("uses bounded operation timeout options and never retries DELETE", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const fetch = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(jsonResponse(runtimeStatus)));
+    vi.stubGlobal("fetch", fetch);
+    await runRequest(
+      api.runtimeAcquire({
+        service: "sing-box",
+        artifact: {
+          url: "https://example.test/core.gz",
+          sha256: "a".repeat(64),
+          compression: "gzip",
+          version: "test",
+        },
+      }),
+    );
+    expect(timeout).toHaveBeenLastCalledWith(120_000);
+    await runRequest(
+      api.runtimeConfigure({
+        service: "sing-box",
+        config: "{}",
+        generation: 4,
+      }),
+    );
+    expect(timeout).toHaveBeenLastCalledWith(90_000);
+    fetch.mockResolvedValue(
+      jsonResponse(
+        { error: { code: "draft_not_found", message: "missing" } },
+        404,
+      ),
+    );
+    await expect(
+      runRequest(
+        request("/configuration/drafts?id=test", Schema.Unknown, {
+          method: "DELETE",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "draft_not_found" });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    timeout.mockRestore();
   });
 });
