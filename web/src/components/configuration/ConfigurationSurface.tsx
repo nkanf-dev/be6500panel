@@ -29,16 +29,21 @@ export function ConfigurationSurface({
       <header className="configuration-surface-header">
         <div>
           <h2>{title}</h2>
-          <p>编辑 → 暂存 / 差异 → Commit</p>
+          <p>编辑配置 → 检查更改 → 应用更改</p>
         </div>
         <div className="configuration-actions">
           {controller.status?.enabled && (
             <>
-              <Badge>g{controller.status.generation}</Badge>
               {unsaved > 0 && (
-                <Badge tone="warning">{unsaved} 个文档未暂存</Badge>
+                <Badge tone="warning">{unsaved} 个文档有未检查更改</Badge>
               )}
-              <Badge>{controller.drafts.length} 个草稿</Badge>
+              <Badge>{controller.drafts.length} 个检查结果</Badge>
+              <details className="configuration-advanced-details">
+                <summary>高级详情</summary>
+                <p>
+                  配置版本：<code>{controller.status.generation}</code>
+                </p>
+              </details>
             </>
           )}
           <Button
@@ -78,7 +83,7 @@ export function ConfigurationSurface({
       ) : controller.status ? (
         <EmptyState
           title="配置服务未启用"
-          detail="当前主机未接入原生配置事务。"
+          detail="当前主机不支持在此编辑和应用配置。"
         />
       ) : null}
     </section>
