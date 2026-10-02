@@ -9,7 +9,11 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ConfigurationEditor, ConfigurationWorkspace } from "./index";
+import {
+  clearConfigurationSession,
+  ConfigurationEditor,
+  ConfigurationWorkspace,
+} from "./index";
 import type { ConfigurationDraft } from "./contracts";
 
 const source = "config interface 'lan'\n\toption ipaddr '192.0.2.1'\n";
@@ -31,14 +35,16 @@ const respond = (body: unknown, status = 200) =>
   });
 function mockApi(
   options: {
+    generation?: number;
     drafts?: readonly ConfigurationDraft[];
+    documents?: readonly { module: string; content: string }[];
     risky?: boolean;
     enabled?: boolean;
     stageConflict?: boolean;
     pending?: { id: string; deadline: string };
   } = {},
 ) {
-  let generation = 7;
+  let generation = options.generation ?? 7;
   let drafts = [...(options.drafts ?? [])];
   let pending = options.pending;
   const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
@@ -51,7 +57,7 @@ function mockApi(
     if (url === "/api/configuration")
       return respond({
         generation,
-        documents: [
+        documents: options.documents ?? [
           {
             module: "network",
             content:
@@ -129,18 +135,26 @@ function posts(fetchMock: ReturnType<typeof mockApi>, endpoint: string) {
   );
 }
 afterEach(() => {
+  clearConfigurationSession();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe("FullControl configuration", () => {
-  it("edits native fields and Ctrl+Enter stages a diff without committing or changing saved generation", async () => {
+  it("defaults to editable fields and Ctrl+Enter stages their changed buffer without committing or changing saved generation", async () => {
     const fetchMock = mockApi();
     render(<ConfigurationEditor module="network" />);
     const input = await screen.findByRole("textbox", {
-      name: "network 原生配置",
+      name: /\(ipaddr\)/,
     });
-    fireEvent.change(input, { target: { value: edited } });
+    expect(screen.getByRole("tab", { name: "字段编辑" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "network 原生配置" }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "192.0.2.2" } });
     expect(screen.getByText("未暂存")).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
     await screen.findByText("已暂存");
@@ -158,12 +172,12 @@ describe("FullControl configuration", () => {
     const fetchMock = mockApi({ stageConflict: true });
     render(<ConfigurationEditor module="network" />);
     const input = await screen.findByRole("textbox", {
-      name: "network 原生配置",
+      name: /\(ipaddr\)/,
     });
-    fireEvent.change(input, { target: { value: edited } });
+    fireEvent.change(input, { target: { value: "192.0.2.2" } });
     fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
     await screen.findByText(/generation_conflict/);
-    expect(input).toHaveValue(edited);
+    expect(input).toHaveValue("192.0.2.2");
     expect(posts(fetchMock, "stage")).toHaveLength(1);
     await screen.findByText("编辑基线 g7 · 当前 g8");
     expect(screen.getByRole("button", { name: "暂存并校验" })).toBeDisabled();
@@ -234,37 +248,322 @@ describe("FullControl configuration", () => {
       fetchMock.mock.calls.some(([url]) => url === "/api/configuration"),
     ).toBe(false);
   });
-  it("expert editing exposes native fields without masking admin-visible values", async () => {
-    mockApi();
+  it("masks editable passwords by default and shares changes with advanced native editing", async () => {
+    const fetchMock = mockApi();
     render(<ConfigurationEditor module="wireless" />);
-    await screen.findByRole("textbox", { name: "wireless 原生配置" });
+    const key = await screen.findByLabelText(/\(key\)/);
+    expect(key).toHaveAttribute("type", "password");
+    expect(key).toHaveValue("synthetic-test-key");
     expect(
-      (
-        screen.getByRole("textbox", {
-          name: "wireless 原生配置",
-        }) as HTMLTextAreaElement
-      ).value,
-    ).toContain("synthetic-test-key");
-    fireEvent.click(screen.getByRole("tab", { name: "字段视图" }));
-    expect(screen.getByText("synthetic-test-key")).toBeInTheDocument();
+      screen.queryByRole("textbox", { name: "wireless 原生配置" }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(key, { target: { value: "edited-test-key" } });
+    fireEvent.click(screen.getByRole("tab", { name: "高级：原生编辑" }));
+    const raw = screen.getByRole("textbox", { name: "wireless 原生配置" });
+    expect(raw).toHaveValue(
+      "config wifi-iface 'synthetic'\n option key 'edited-test-key'\n",
+    );
+    fireEvent.change(raw, {
+      target: {
+        value:
+          "config wifi-iface 'synthetic'\n option key \"raw-test-key\" # retain comment\n",
+      },
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "字段编辑" }));
+    expect(screen.getByLabelText(/\(key\)/)).toHaveValue("raw-test-key");
+    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
+    await screen.findByText("已暂存");
+    expect(JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string)).toEqual(
+      {
+        module: "wireless",
+        generation: 7,
+        content:
+          "config wifi-iface 'synthetic'\n option key \"raw-test-key\" # retain comment\n",
+      },
+    );
   });
+  it("edits booleans, selects, numeric and unknown fields while retaining vendor enum values until changed", async () => {
+    const content =
+      "# synthetic\nconfig interface 'lan'\n option proto 'vendor-auto' # preserve until edited\n option delegate 'yes'\n option mtu 1500 # numeric\n option vendor_flag 'router-value'\nconfig interface 'wan'\n option proto 'dhcp'\n";
+    const fetchMock = mockApi({ documents: [{ module: "network", content }] });
+    render(<ConfigurationEditor module="network" />);
+    const proto = await screen.findByRole("combobox", { name: /\(proto\)/ });
+    expect(proto).toHaveValue("vendor-auto");
+    expect(
+      screen.getByRole("option", { name: /vendor-auto.*当前值/ }),
+    ).toBeInTheDocument();
+    const boolean = screen.getByRole("checkbox", { name: /\(delegate\)/ });
+    expect(boolean).toBeChecked();
+    fireEvent.click(boolean);
+    const mtu = screen.getByRole("spinbutton", { name: /\(mtu\)/ });
+    fireEvent.change(mtu, { target: { value: "1400" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /\(vendor_flag\)/ }), {
+      target: { value: "Alice's # router" },
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "高级：原生编辑" }));
+    expect(
+      screen.getByRole("textbox", { name: "network 原生配置" }),
+    ).toHaveValue(
+      content
+        .replace("'yes'", "'no'")
+        .replace("1500", "1400")
+        .replace("'router-value'", "'Alice'\\''s # router'"),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "字段编辑" }));
+    expect(
+      screen.getByRole("textbox", { name: /\(vendor_flag\)/ }),
+    ).toHaveValue("Alice's # router");
+    fireEvent.change(screen.getByRole("combobox", { name: /\(proto\)/ }), {
+      target: { value: "static" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
+    await screen.findByText("已暂存");
+    expect(
+      JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string).content,
+    ).toBe(
+      content
+        .replace("'vendor-auto'", "'static'")
+        .replace("'yes'", "'no'")
+        .replace("1500", "1400")
+        .replace("'router-value'", "'Alice'\\''s # router'"),
+    );
+    expect(posts(fetchMock, "commit")).toHaveLength(0);
+  });
+  it("adds, edits and removes list entries, including removing the final entry and adding it again", async () => {
+    const content =
+      "config interface 'lan'\n list dns '192.0.2.53' # resolver comment\n option ipaddr '192.0.2.1'\n list dns \"192.0.2.54\"\nconfig interface 'wan'\n option proto 'dhcp'\n";
+    const fetchMock = mockApi({ documents: [{ module: "network", content }] });
+    render(<ConfigurationEditor module="network" />);
+    await screen.findByRole("textbox", { name: /\(dns\) 1/ });
+    fireEvent.click(screen.getByRole("button", { name: "移除 dns 1" }));
+    expect(screen.getByRole("textbox", { name: /\(dns\) 1/ })).toHaveValue(
+      "192.0.2.54",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "移除 dns 1" }));
+    expect(
+      screen.queryByRole("textbox", { name: /\(dns\)/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "添加 dns 值" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /\(dns\) 1/ }), {
+      target: { value: "198.51.100.53" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加 dns 值" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /\(dns\) 2/ }), {
+      target: { value: "198.51.100.54" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
+    await screen.findByText("已暂存");
+    const staged = JSON.parse(
+      posts(fetchMock, "stage")[0][1]!.body as string,
+    ).content;
+    expect(staged).toBe(
+      "config interface 'lan'\n # resolver comment\n option ipaddr '192.0.2.1'\n list dns '198.51.100.53'\n list dns '198.51.100.54'\nconfig interface 'wan'\n option proto 'dhcp'\n",
+    );
+  });
+  it("adds standard and unknown settings without requiring native editing", async () => {
+    const fetchMock = mockApi();
+    render(<ConfigurationEditor module="network" />);
+    const name = await screen.findByRole("combobox", { name: "新字段名称" });
+    fireEvent.change(name, { target: { value: "proto" } });
+    fireEvent.click(screen.getByRole("button", { name: "添加字段" }));
+    fireEvent.change(screen.getByRole("combobox", { name: /\(proto\)/ }), {
+      target: { value: "static" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "新字段名称" }), {
+      target: { value: "__custom" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "新字段名称" }), {
+      target: { value: "vendor_note" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加字段" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /\(vendor_note\)/ }), {
+      target: { value: "editable unknown" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
+    await screen.findByText("已暂存");
+    expect(
+      JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string).content,
+    ).toBe(
+      source +
+        "\toption proto 'static'\n\toption vendor_note 'editable unknown'\n",
+    );
+  });
+  it("keeps nonstandard boolean and numeric values editable without coercing them on render", async () => {
+    const content =
+      "config interface 'lan'\n option delegate 'vendor-auto'\n option mtu 'auto'\n";
+    const fetchMock = mockApi({ documents: [{ module: "network", content }] });
+    render(<ConfigurationEditor module="network" />);
+    expect(
+      await screen.findByRole("textbox", { name: /\(delegate\)/ }),
+    ).toHaveValue("vendor-auto");
+    expect(screen.getByRole("textbox", { name: /\(mtu\)/ })).toHaveValue(
+      "auto",
+    );
+    expect(screen.getByRole("button", { name: "暂存并校验" })).toBeDisabled();
+    expect(posts(fetchMock, "stage")).toHaveLength(0);
+    fireEvent.change(screen.getByRole("textbox", { name: /\(mtu\)/ }), {
+      target: { value: "1400" },
+    });
+    expect(screen.getByRole("spinbutton", { name: /\(mtu\)/ })).toHaveValue(
+      1400,
+    );
+  });
+  it("shows multiline vendor values as editable text without losing line breaks", async () => {
+    const content =
+      "config interface 'lan'\n option vendor_note \"First\nSecond\" # multiline\n option mtu '1.'\n";
+    const fetchMock = mockApi({ documents: [{ module: "network", content }] });
+    render(<ConfigurationEditor module="network" />);
+    const input = await screen.findByRole("textbox", {
+      name: /\(vendor_note\)/,
+    });
+    expect(input.tagName).toBe("TEXTAREA");
+    expect(input).toHaveValue("First\nSecond");
+    expect(screen.getByRole("textbox", { name: /\(mtu\)/ })).toHaveValue("1.");
+    fireEvent.change(input, { target: { value: "Next\nLine" } });
+    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
+    await screen.findByText("已暂存");
+    expect(
+      JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string).content,
+    ).toBe(content.replace("First\nSecond", "Next\nLine"));
+  });
+  it.each([
+    {
+      module: "dhcp",
+      content: "config dnsmasq\n option port '53' # DNS port\n",
+      role: "spinbutton",
+      field: "port",
+      value: "5353",
+      expected: "'5353'",
+    },
+    {
+      module: "firewall",
+      content: "config defaults\n option input 'REJECT' # default policy\n",
+      role: "combobox",
+      field: "input",
+      value: "DROP",
+      expected: "'DROP'",
+    },
+    {
+      module: "system",
+      content: "config system\n option hostname 'synthetic' # device name\n",
+      role: "textbox",
+      field: "hostname",
+      value: "edited-host",
+      expected: "'edited-host'",
+    },
+    {
+      module: "dropbear",
+      content: "config dropbear\n option Port '22' # SSH port\n",
+      role: "spinbutton",
+      field: "Port",
+      value: "2222",
+      expected: "'2222'",
+    },
+  ] as const)(
+    "stages $module field edits using section-specific controls",
+    async ({ module, content, role, field, value, expected }) => {
+      const fetchMock = mockApi({ documents: [{ module, content }] });
+      render(<ConfigurationEditor module={module} />);
+      const input = await screen.findByRole(role, {
+        name: new RegExp(`\\(${field}\\)`),
+      });
+      fireEvent.change(input, { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
+      await screen.findByText("已暂存");
+      expect(
+        JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string),
+      ).toEqual({
+        module,
+        generation: 7,
+        content: content.replace(/'[^']*'(?= #)/, expected),
+      });
+    },
+  );
   it("retains local edits when switching documents and refreshing", async () => {
     mockApi();
     render(<ConfigurationWorkspace />);
     const input = await screen.findByRole("textbox", {
-      name: "network 原生配置",
+      name: /\(ipaddr\)/,
     });
-    fireEvent.change(input, { target: { value: edited } });
+    fireEvent.change(input, { target: { value: "192.0.2.2" } });
     fireEvent.click(screen.getByRole("button", { name: "编辑 wireless" }));
-    await screen.findByRole("textbox", { name: "wireless 原生配置" });
+    await screen.findByLabelText(/\(key\)/);
     fireEvent.click(screen.getByRole("button", { name: "刷新配置" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "刷新配置" })).toBeEnabled(),
     );
     fireEvent.click(screen.getByRole("button", { name: "编辑 network" }));
+    expect(screen.getByRole("textbox", { name: /\(ipaddr\)/ })).toHaveValue(
+      "192.0.2.2",
+    );
+  });
+  it("retains real field edits through page unmount/remount and stages the retained buffer", async () => {
+    const fetchMock = mockApi();
+    const page = render(<ConfigurationEditor module="network" />);
+    const input = await screen.findByRole("textbox", { name: /\(ipaddr\)/ });
+    fireEvent.change(input, { target: { value: "192.0.2.2" } });
+    page.unmount();
+    const otherPage = render(<ConfigurationEditor module="wireless" />);
+    await screen.findByLabelText(/\(key\)/);
+    otherPage.unmount();
+    render(<ConfigurationWorkspace />);
+    await screen.findByRole("textbox", { name: /\(ipaddr\)/ });
+    expect(screen.getByRole("textbox", { name: /\(ipaddr\)/ })).toHaveValue(
+      "192.0.2.2",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
+    await screen.findAllByText("已暂存");
+    expect(JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string)).toEqual(
+      { module: "network", content: edited, generation: 7 },
+    );
+  });
+  it("keeps a retained edit stale when saved content changed between page visits", async () => {
+    mockApi();
+    const page = render(<ConfigurationEditor module="network" />);
+    const input = await screen.findByRole("textbox", { name: /\(ipaddr\)/ });
+    fireEvent.change(input, { target: { value: "192.0.2.2" } });
+    page.unmount();
+    mockApi({
+      generation: 8,
+      documents: [
+        {
+          module: "network",
+          content: source.replace("192.0.2.1", "192.0.2.9"),
+        },
+      ],
+    });
+    render(<ConfigurationEditor module="network" />);
+    await screen.findByRole("textbox", { name: /\(ipaddr\)/ });
+    await screen.findByText("编辑基线 g7 · 当前 g8");
+    expect(screen.getByRole("button", { name: "暂存并校验" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: /\(ipaddr\)/ })).toHaveValue(
+      "192.0.2.2",
+    );
+  });
+  it("warns before closing a tab with private unsaved edits, but not after discarding them", async () => {
+    mockApi();
+    render(<ConfigurationEditor module="network" />);
+    const input = await screen.findByRole("textbox", { name: /\(ipaddr\)/ });
+    fireEvent.change(input, { target: { value: "192.0.2.2" } });
+    const dirtyClose = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyClose);
+    expect(dirtyClose.defaultPrevented).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "丢弃本地编辑" }));
+    const cleanClose = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanClose);
+    expect(cleanClose.defaultPrevented).toBe(false);
+  });
+  it("clears private retained buffers on session expiration", async () => {
+    mockApi();
+    const page = render(<ConfigurationEditor module="network" />);
+    const input = await screen.findByRole("textbox", { name: /\(ipaddr\)/ });
+    fireEvent.change(input, { target: { value: "192.0.2.2" } });
+    page.unmount();
+    window.dispatchEvent(new Event("be6500panel:unauthorized"));
+    render(<ConfigurationEditor module="network" />);
     expect(
-      screen.getByRole("textbox", { name: "network 原生配置" }),
-    ).toHaveValue(edited);
+      await screen.findByRole("textbox", { name: /\(ipaddr\)/ }),
+    ).toHaveValue("192.0.2.1");
   });
   it("does not select invalid or stale drafts and shows their diagnostics and diff", async () => {
     const invalid = {
@@ -389,7 +688,7 @@ describe("FullControl configuration", () => {
         <ConfigurationEditor module="network" />
       </StrictMode>,
     );
-    await screen.findByRole("textbox", { name: "network 原生配置" });
+    await screen.findByRole("textbox", { name: /\(ipaddr\)/ });
     expect(screen.getByRole("button", { name: "刷新配置" })).toBeEnabled();
   });
   it("aborts in-flight authenticated reads on unmount", async () => {

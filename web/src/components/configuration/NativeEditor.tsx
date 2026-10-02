@@ -10,6 +10,8 @@ import {
 } from "../ui/primitives";
 import { configurationModules, type ConfigurationModule } from "./contracts";
 import { nativeSections } from "./native-document";
+import { NativeFields } from "./NativeFields";
+import { sectionSchema } from "./field-schema";
 import { isDirty, type ConfigurationController } from "./use-configuration";
 
 export function NativeEditor({
@@ -20,7 +22,7 @@ export function NativeEditor({
   controller: ConfigurationController;
 }) {
   const buffer = controller.buffers[module];
-  const [view, setView] = useState<"editor" | "fields">("editor");
+  const [view, setView] = useState<"editor" | "fields">("fields");
   const [sectionId, setSectionId] = useState<string>();
   const input = useRef<HTMLTextAreaElement>(null);
   const gutter = useRef<HTMLPreElement>(null);
@@ -60,7 +62,15 @@ export function NativeEditor({
     stale ||
     !dirty;
   return (
-    <Panel className="configuration-native">
+    <Panel
+      className="configuration-native"
+      onKeyDown={(event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+          if (!stageDisabled) void controller.stage(module);
+        }
+      }}
+    >
       <PanelHeader
         title={`${info.label}配置`}
         subtitle={`/etc/config/${module} · ${info.description}`}
@@ -88,17 +98,6 @@ export function NativeEditor({
         >
           <button
             type="button"
-            id={`${tabId}-editor`}
-            role="tab"
-            aria-selected={view === "editor"}
-            aria-controls={`${tabId}-panel`}
-            onClick={() => setView("editor")}
-          >
-            <FileCode2 size={14} />
-            原生编辑
-          </button>
-          <button
-            type="button"
             id={`${tabId}-fields`}
             role="tab"
             aria-selected={view === "fields"}
@@ -106,7 +105,18 @@ export function NativeEditor({
             onClick={() => setView("fields")}
           >
             <Layers size={14} />
-            字段视图
+            字段编辑
+          </button>
+          <button
+            type="button"
+            id={`${tabId}-editor`}
+            role="tab"
+            aria-selected={view === "editor"}
+            aria-controls={`${tabId}-panel`}
+            onClick={() => setView("editor")}
+          >
+            <FileCode2 size={14} />
+            高级：原生编辑
           </button>
         </div>
         <span className="configuration-generation">
@@ -156,7 +166,7 @@ export function NativeEditor({
             >
               <strong>{item.name}</strong>
               <span>
-                {item.type} · L{item.line}
+                {sectionSchema(module, item.type).label} · L{item.line}
               </span>
             </button>
           ))}
@@ -171,73 +181,48 @@ export function NativeEditor({
           className="configuration-editor-view"
         >
           {view === "editor" ? (
-            <div className="configuration-code-editor">
-              <pre
-                ref={gutter}
-                aria-hidden="true"
-                className="configuration-line-numbers"
-              >
-                {buffer.content
-                  .split("\n")
-                  .map((_, index) => index + 1)
-                  .join("\n")}
-              </pre>
-              <textarea
-                ref={input}
-                aria-label={`${module} 原生配置`}
-                value={buffer.content}
-                spellCheck={false}
-                autoCorrect="off"
-                autoCapitalize="off"
-                wrap="off"
-                onChange={(event) =>
-                  controller.edit(module, event.target.value)
-                }
-                onScroll={(event) => {
-                  if (gutter.current)
-                    gutter.current.scrollTop = event.currentTarget.scrollTop;
-                }}
-                onKeyDown={(event) => {
-                  if (
-                    (event.ctrlKey || event.metaKey) &&
-                    event.key === "Enter"
-                  ) {
-                    event.preventDefault();
-                    if (!stageDisabled) void controller.stage(module);
+            <>
+              <p className="configuration-advanced-note">
+                高级编辑可直接修改完整 UCI
+                文本（包含密码）。一般设置请使用字段编辑；两种视图共享本地草稿。
+              </p>
+              <div className="configuration-code-editor">
+                <pre
+                  ref={gutter}
+                  aria-hidden="true"
+                  className="configuration-line-numbers"
+                >
+                  {buffer.content
+                    .split("\n")
+                    .map((_, index) => index + 1)
+                    .join("\n")}
+                </pre>
+                <textarea
+                  ref={input}
+                  aria-label={`${module} 原生配置`}
+                  value={buffer.content}
+                  spellCheck={false}
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  wrap="off"
+                  onChange={(event) =>
+                    controller.edit(module, event.target.value)
                   }
-                }}
-              />
-            </div>
+                  onScroll={(event) => {
+                    if (gutter.current)
+                      gutter.current.scrollTop = event.currentTarget.scrollTop;
+                  }}
+                />
+              </div>
+            </>
           ) : section ? (
-            <div className="table-scroll configuration-field-table">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>字段</th>
-                    <th>类型</th>
-                    <th>值</th>
-                    <th>行</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {section.fields.map((field) => (
-                    <tr key={field.line}>
-                      <td>
-                        <code>{field.name}</code>
-                      </td>
-                      <td>
-                        <code>{field.kind}</code>
-                      </td>
-                      <td className="configuration-native-value">
-                        <code>{field.value}</code>
-                      </td>
-                      <td className="mono">{field.line}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!section.fields.length && <EmptyState title="此章节暂无字段" />}
-            </div>
+            <NativeFields
+              key={section.id}
+              module={module}
+              section={section}
+              content={buffer.content}
+              onChange={(content) => controller.edit(module, content)}
+            />
           ) : (
             <EmptyState title="暂无原生章节" />
           )}

@@ -5,6 +5,13 @@ export interface NativeField {
   name: string;
   value: string;
   line: number;
+  /** Source spans let forms patch one token without serializing the document. */
+  valueStart: number;
+  valueEnd: number;
+  statementStart: number;
+  statementEnd: number;
+  fullEnd: number;
+  commentStart?: number;
 }
 export interface NativeSection {
   id: string;
@@ -12,44 +19,230 @@ export interface NativeSection {
   name: string;
   line: number;
   offset: number;
+  end: number;
   fields: NativeField[];
 }
-const unquote = (value: string) => {
-  const trimmed = value.trim();
-  return /^(['"])[\s\S]*\1$/.test(trimmed) ? trimmed.slice(1, -1) : trimmed;
-};
+interface Token {
+  value: string;
+  start: number;
+  end: number;
+}
+interface Statement {
+  tokens: Token[];
+  start: number;
+  end: number;
+  fullEnd: number;
+  line: number;
+  commentStart?: number;
+  valid: boolean;
+}
 
-/** Navigation only. The server's isolated UCI parser owns actual validation. */
+/** UCI quoting is data, not shell evaluation. Adjacent quoted/unquoted pieces
+ * form one token. Single quotes are literal; backslashes escape outside them.
+ * Keep source spans, comments, CRLF, and continued/quoted lines intact.
+ * The server's isolated UCI parser still owns validation at Stage.
+ */
+function statements(content: string): Statement[] {
+  const result: Statement[] = [];
+  let start = 0;
+  let line = 1;
+  let statementLine = 1;
+  let tokens: Token[] = [];
+  let tokenStart: number | undefined;
+  let value = "";
+  let quote = "";
+  let commentStart: number | undefined;
+  let valid = true;
+  const finishToken = (end: number) => {
+    if (tokenStart === undefined) return;
+    tokens.push({ value, start: tokenStart, end });
+    tokenStart = undefined;
+    value = "";
+  };
+  const finishStatement = (end: number, fullEnd: number) => {
+    finishToken(end);
+    result.push({
+      tokens,
+      start,
+      end,
+      fullEnd,
+      line: statementLine,
+      commentStart,
+      valid: valid && !quote,
+    });
+    start = fullEnd;
+    statementLine = line + 1;
+    tokens = [];
+    commentStart = undefined;
+    valid = true;
+  };
+  for (let index = 0; index < content.length; index++) {
+    const char = content[index];
+    if (commentStart !== undefined) {
+      if (char === "\n") {
+        finishStatement(
+          content[index - 1] === "\r" ? index - 1 : index,
+          index + 1,
+        );
+        line++;
+      }
+      continue;
+    }
+    if (quote && char === quote) {
+      quote = "";
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      if (index + 1 === content.length) {
+        valid = false;
+        continue;
+      }
+      let next = content[++index];
+      if (next === "\r" && content[index + 1] === "\n") next = content[++index];
+      if (next === "\n") {
+        line++;
+      } else {
+        tokenStart ??= index - 1;
+        value += next;
+      }
+      continue;
+    }
+    if (quote) {
+      value += char;
+      if (char === "\n") line++;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      tokenStart ??= index;
+      quote = char;
+      continue;
+    }
+    if (char === "#") {
+      finishToken(index);
+      commentStart = index;
+      continue;
+    }
+    if (char === "\n") {
+      finishStatement(
+        content[index - 1] === "\r" ? index - 1 : index,
+        index + 1,
+      );
+      line++;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      finishToken(index);
+      continue;
+    }
+    tokenStart ??= index;
+    value += char;
+  }
+  if (start < content.length) finishStatement(content.length, content.length);
+  return result;
+}
+
 export function nativeSections(content: string): NativeSection[] {
   const sections: NativeSection[] = [];
-  let offset = 0;
-  content.split("\n").forEach((line, index) => {
-    const section = line.match(
-      /^\s*config\s+(\S+)(?:\s+((?:'[^']*'|"[^"]*"|[^#\s]+)))?/,
-    );
-    if (section) {
+  for (const statement of statements(content)) {
+    const { tokens } = statement;
+    if (tokens[0]?.value === "config") {
+      const previous = sections.at(-1);
+      if (previous) previous.end = statement.start;
+      // A malformed section must not attach its fields to the preceding one.
       sections.push({
-        id: `section-${index}`,
-        type: unquote(section[1]),
-        name: section[2] ? unquote(section[2]) : `匿名 ${sections.length + 1}`,
-        line: index + 1,
-        offset,
+        id: `section-${sections.length}`,
+        type: tokens[1]?.value ?? "未知",
+        name: tokens[2]?.value ?? `匿名 ${sections.length + 1}`,
+        line: statement.line,
+        offset: statement.start,
+        end: content.length,
         fields: [],
       });
-    } else {
-      const field = line.match(/^\s*(option|list)\s+(\S+)\s+(.+)$/);
-      const current = sections.at(-1);
-      if (field && current)
-        current.fields.push({
-          kind: field[1] as NativeField["kind"],
-          name: unquote(field[2]),
-          value: unquote(field[3]),
-          line: index + 1,
-        });
+    } else if (
+      statement.valid &&
+      tokens.length === 3 &&
+      (tokens[0].value === "option" || tokens[0].value === "list")
+    ) {
+      sections.at(-1)?.fields.push({
+        kind: tokens[0].value,
+        name: tokens[1].value,
+        value: tokens[2].value,
+        line: statement.line,
+        valueStart: tokens[2].start,
+        valueEnd: tokens[2].end,
+        statementStart: statement.start,
+        statementEnd: statement.end,
+        fullEnd: statement.fullEnd,
+        commentStart: statement.commentStart,
+      });
     }
-    offset += line.length + 1;
-  });
+  }
   return sections;
+}
+
+/** Prefer the original quote style. Never interpolate or execute UCI values. */
+function quoteValue(value: string, original = "''"): string {
+  if (original.startsWith('"') && original.endsWith('"'))
+    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  if (!/[\s#;'"`\\]/.test(value) && value && !/^["']/.test(original))
+    return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+export function editNativeField(
+  content: string,
+  field: NativeField,
+  value: string,
+): string {
+  if (field.value === value) return content;
+  return (
+    content.slice(0, field.valueStart) +
+    quoteValue(value, content.slice(field.valueStart, field.valueEnd)) +
+    content.slice(field.valueEnd)
+  );
+}
+
+/** Remove only this list item; retain its inline comment as a standalone line. */
+export function removeNativeField(content: string, field: NativeField): string {
+  const comment =
+    field.commentStart === undefined
+      ? ""
+      : (content
+          .slice(field.statementStart, field.valueStart)
+          .match(/^[\t ]*/)?.[0] ?? "") +
+        content.slice(field.commentStart, field.fullEnd);
+  return (
+    content.slice(0, field.statementStart) +
+    comment +
+    content.slice(field.fullEnd)
+  );
+}
+
+export function addNativeField(
+  content: string,
+  section: NativeSection,
+  name: string,
+  kind: NativeField["kind"],
+  value = "",
+): string {
+  if (!/^[A-Za-z0-9_]+$/.test(name)) return content;
+  const peers = section.fields.filter(
+    (field) => field.name === name && field.kind === kind,
+  );
+  const previous = peers.at(-1) ?? section.fields.at(-1);
+  const position = peers.at(-1)?.fullEnd ?? section.end;
+  const indent = previous
+    ? (content
+        .slice(previous.statementStart, previous.valueStart)
+        .match(/^[\t ]*/)?.[0] ?? "\t")
+    : "\t";
+  const newline = content.includes("\r\n") ? "\r\n" : "\n";
+  const original = peers[0]
+    ? content.slice(peers[0].valueStart, peers[0].valueEnd)
+    : "''";
+  const prefix = position > 0 && content[position - 1] !== "\n" ? newline : "";
+  const added = `${prefix}${indent}${kind} ${name} ${quoteValue(value, original)}${newline}`;
+  return content.slice(0, position) + added + content.slice(position);
 }
 
 /** Summarize changed field names, never values, in the risk acknowledgment.

@@ -28,23 +28,57 @@ interface ConfigurationState {
   error?: unknown;
   operation?: ConfigurationCommit;
 }
+export const isDirty = (buffer: EditorBuffer) =>
+  buffer.content !== buffer.savedContent;
+
 const initialState: ConfigurationState = {
   drafts: [],
   buffers: {},
   selectedIds: [],
   loading: true,
 };
-export const isDirty = (buffer: EditorBuffer) =>
-  buffer.content !== buffer.savedContent;
+// Navigation may unmount every editor. Keep only dirty buffers in tab memory,
+// never browser storage. API status, drafts and requests remain page-scoped.
+let sessionBuffers: ConfigurationState["buffers"] = {};
+let sessionEpoch = 0;
+export function clearConfigurationSession() {
+  sessionBuffers = {};
+  sessionEpoch++;
+}
+if (typeof window !== "undefined") {
+  window.addEventListener(
+    "be6500panel:unauthorized",
+    clearConfigurationSession,
+  );
+  window.addEventListener("beforeunload", (event) => {
+    if (!Object.values(sessionBuffers).some(isDirty)) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+}
 
-/** Each page owns its requests and timers. Private documents stay in memory. */
+/** Each page owns its requests and timers. Private edits survive page navigation. */
 export function useConfiguration() {
-  const [state, setState] = useState<ConfigurationState>(initialState);
+  const [state, setState] = useState<ConfigurationState>(() => ({
+    ...initialState,
+    buffers: sessionBuffers,
+  }));
+  const epoch = useRef(sessionEpoch);
   const current = useRef(state);
   const lifetime = useRef<AbortController | undefined>(undefined);
   const update = useCallback(
     (change: (state: ConfigurationState) => ConfigurationState) => {
+      const previousBuffers = current.current.buffers;
       current.current = change(current.current);
+      if (
+        epoch.current === sessionEpoch &&
+        previousBuffers !== current.current.buffers
+      )
+        sessionBuffers = Object.fromEntries(
+          Object.entries(current.current.buffers).filter(([, buffer]) =>
+            isDirty(buffer),
+          ),
+        );
       setState(current.current);
     },
     [],

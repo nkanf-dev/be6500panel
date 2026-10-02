@@ -5,3 +5,4 @@ export type {
   ConfigurationDraft,
   ConfigurationCommit,
 } from "./contracts";
+export { clearConfigurationSession } from "./use-configuration";
