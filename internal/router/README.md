@@ -23,7 +23,7 @@ snapshot, err := adapter.Snapshot(ctx)
 
 | Module | Source |
 | --- | --- |
-| Platform | `/etc/config/version` (`HARDWARE`, `ROM`), optional `/etc/miwifi_version` or `/etc/xiaoqiang_version` assignments, `/tmp/sysinfo/model`, `/etc/openwrt_release`, `/proc/sys/kernel/osrelease` |
+| Platform | First existing `/usr/share/xiaoqiang/xiaoqiang_version`, `/etc/config/version` UCI (`HARDWARE`, `ROM`), optional `/etc/miwifi_version` or `/etc/xiaoqiang_version` assignments, `/tmp/sysinfo/model`, `/etc/openwrt_release`, `/proc/sys/kernel/osrelease` |
 | Devices | First existing `/tmp/dhcp.leases`, `/tmp/dnsmasq.leases`, `/var/lib/misc/dnsmasq.leases`; `/proc/net/arp` |
 | WiFi | `/etc/config/wireless`; only safe fields are retained |
 | DNS | First existing `/tmp/resolv.conf.d/resolv.conf.auto`, `/tmp/resolv.conf.auto`, `/etc/resolv.conf` |

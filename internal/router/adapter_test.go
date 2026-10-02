@@ -240,3 +240,25 @@ func TestVersionFileFallback(t *testing.T) {
 		t.Fatalf("%+v %v", s, err)
 	}
 }
+
+func TestCanonicalRN02VersionPathTakesPriority(t *testing.T) {
+	root := syntheticFixture(t)
+	fixtureFile(t, root, "/usr/share/xiaoqiang/xiaoqiang_version", "config core 'version'\n option HARDWARE 'RN02'\n option ROM '9.9.9-canonical-test'\n")
+	fixtureFile(t, root, "/tmp/sysinfo/model", "Synthetic Generic Board\n")
+	a := New(root)
+	a.now = func() time.Time { return time.Unix(2000000000, 0) }
+	s, err := a.Snapshot(context.Background())
+	if err != nil || len(s.Errors) != 0 || s.Platform.Model != "RN02" || s.Platform.Firmware != "9.9.9-canonical-test" {
+		t.Fatalf("canonical version did not override fallback: platform=%+v errors=%+v err=%v", s.Platform, s.Errors, err)
+	}
+	// The canonical RN02 file also works when /etc/config/version is absent.
+	if err := os.Remove(filepath.Join(root, "etc/config/version")); err != nil {
+		t.Fatal(err)
+	}
+	a = New(root)
+	a.now = func() time.Time { return time.Unix(2000000000, 0) }
+	s, err = a.Snapshot(context.Background())
+	if err != nil || len(s.Errors) != 0 || s.Platform.Model != "RN02" || s.Platform.Firmware != "9.9.9-canonical-test" {
+		t.Fatalf("canonical-only version failed: platform=%+v errors=%+v err=%v", s.Platform, s.Errors, err)
+	}
+}

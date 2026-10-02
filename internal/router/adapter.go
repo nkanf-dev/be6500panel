@@ -243,7 +243,7 @@ func (a *Adapter) observeSources(ctx context.Context, now time.Time) Snapshot {
 }
 
 func (a *Adapter) observePlatform(s *Snapshot) {
-	data, err := a.readFile("/etc/config/version", fileLimit)
+	data, err := a.firstFile([]string{"/usr/share/xiaoqiang/xiaoqiang_version", "/etc/config/version"}, fileLimit)
 	var versionErr error
 	if err == nil {
 		sections, bad := parseUCI(data, versionFields)
