@@ -57,8 +57,11 @@ Only native `config`, `option`, and `list` statements are accepted. Quoted UCI
 strings, escaped quotes, lists and anonymous sections are supported. Validation
 checks IP/CIDR/netmask, MAC, ports, booleans, hostnames, primary Wi-Fi fields and
 cross-document interface/radio references. Expert unknown native fields remain
-available. New/changed firewall script includes and new unregistered network
-protocols are rejected; unchanged vendor includes/protocols remain supported.
+available. Firewall include sections are factory-owned: transactions must
+preserve their complete parsed names, fields, values and duplicate counts.
+Formatting and section/option reordering are allowed, but adding, changing or
+removing includes is rejected. New unregistered network protocols are rejected;
+unchanged vendor protocols remain supported.
 
 A process lock and one manager mutation gate serialize transactions. SHA-256 of
 bounded live documents detects edits outside this manager. The generation is
@@ -83,6 +86,17 @@ Manual Rollback can retry immediately; successful recovery clears the error and
 keeps later provisional commits protected. Close cancels retry work and retains
 the journal for restart recovery. No new commit may run while pending.
 Known guest interface changes need not require primary-Wi-Fi confirmation.
+
+Firewall risks cover zone input/forward/output policies and network/device
+membership. Active local INPUT DROP/REJECT rules require acknowledgment even
+when both source and destination IP filters are present. Changes to active
+local INPUT ACCEPT exceptions also require acknowledgment because deleting or
+narrowing an exception can remove management access. The native document does
+not identify the browser's route or panel bind address, so this classification
+is conservative and does not assume WAN input is safe. These fields remain
+editable with provisional rollback; they are not prohibited. Disabled rules,
+constrained forwarding rules with explicit destination zones, and unrelated
+expert fields remain available without management-risk acknowledgment.
 
 Fixed reload argv:
 

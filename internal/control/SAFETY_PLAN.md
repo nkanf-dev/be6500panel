@@ -19,10 +19,10 @@ Tech stack: Go standard library; synthetic root files and injected hooks only.
 ## Batch 2: Firewall connectivity and factory preservation
 
 - [x] Test management input deny rules with both source and destination filters.
-- [ ] Test zone network/device membership and input-policy risk classification.
-- [ ] Preserve editable forwarding and disabled-rule fields when not risky.
-- [ ] Test preservation, reordering, deletion, mutation and duplicate includes.
-- [ ] Compare existing and candidate include multisets in both directions.
-- [ ] Document rules and include ownership; run test, race and vet, then commit.
+- [x] Test zone network/device membership and input-policy risk classification.
+- [x] Preserve editable forwarding and disabled-rule fields when not risky.
+- [x] Test preservation, reordering, deletion, mutation and duplicate includes.
+- [x] Compare existing and candidate include multisets in both directions.
+- [x] Document rules and include ownership; run test, race and vet, then commit.
 
 No commands in this plan connect to a router or use captured live documents.

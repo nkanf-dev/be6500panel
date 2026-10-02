@@ -372,7 +372,7 @@ func risk(module, before, after string) []Issue {
 		}
 	case "firewall":
 		if firewallFields(a) != firewallFields(b) {
-			add("firewall_policy", "Default or broad firewall policies can block management or forwarding.")
+			add("firewall_policy", "Firewall input, zone membership or broad policies can block management or forwarding.")
 		}
 	case "wireless":
 		if primaryWiFiFields(a) != primaryWiFiFields(b) {
@@ -411,12 +411,50 @@ func firewallFields(p parsed) string {
 	for _, s := range p {
 		if s.kind == "defaults" || s.kind == "zone" {
 			fmt.Fprintf(&out, "%s:%s:%s:%s:%s:%s;", s.kind, s.name, one(s, "name"), one(s, "input"), one(s, "forward"), one(s, "output"))
+			if s.kind == "zone" {
+				for _, key := range []string{"network", "device"} {
+					fmt.Fprintf(&out, "%s=%q;", key, s.values[key])
+				}
+			}
 		}
-		if s.kind == "rule" && (one(s, "target") == "DROP" || one(s, "target") == "REJECT") && (one(s, "dest_ip") == "" || one(s, "src_ip") == "") {
-			fmt.Fprintf(&out, "deny:%v;", s.values)
+		if s.kind != "rule" || disabled(s) || firewallRuleDisabled(s) {
+			continue
+		}
+		switch one(s, "target") {
+		case "DROP", "REJECT":
+			// An INPUT rule can deny this panel even when both IP filters are
+			// present. Only a concrete destination zone scopes a rule to forwarding.
+			if firewallInputRule(s) || one(s, "dest_ip") == "" || one(s, "src_ip") == "" {
+				fmt.Fprintf(&out, "deny:%q;", s.values)
+			}
+		case "ACCEPT":
+			// Removing or narrowing an INPUT exception can also block access
+			// beneath an unchanged DROP/REJECT zone or default input policy.
+			if firewallInputRule(s) {
+				fmt.Fprintf(&out, "allow:%q;", s.values)
+			}
 		}
 	}
 	return out.String()
+}
+func firewallRuleDisabled(s section) bool {
+	switch strings.ToLower(one(s, "enabled")) {
+	case "0", "false", "off", "no":
+		return true
+	}
+	return false
+}
+func firewallInputRule(s section) bool {
+	destination := false
+	for _, value := range s.values["dest"] {
+		for _, zone := range strings.Fields(value) {
+			if zone == "*" {
+				return true
+			}
+			destination = true
+		}
+	}
+	return !destination
 }
 func primaryWiFiFields(p parsed) string {
 	var out strings.Builder
@@ -560,16 +598,21 @@ func validateExecutionChanges(module, before, after string) []Issue {
 		existing := map[string]int{}
 		for _, s := range a {
 			if s.kind == "include" {
-				existing[fmt.Sprintf("%s:%v", s.name, s.values)]++
+				existing[fmt.Sprintf("%q:%q", s.name, s.values)]++
 			}
 		}
 		for _, s := range b {
 			if s.kind == "include" {
-				key := fmt.Sprintf("%s:%v", s.name, s.values)
+				key := fmt.Sprintf("%q:%q", s.name, s.values)
 				if existing[key] == 0 {
 					return []Issue{issue("execution_hook_not_allowed", "User-selected firewall script includes are not supported by configuration transactions.")}
 				}
 				existing[key]--
+			}
+		}
+		for _, remaining := range existing {
+			if remaining > 0 {
+				return []Issue{issue("factory_include_removed", "Factory-owned firewall includes must be preserved by configuration transactions.")}
 			}
 		}
 	}
