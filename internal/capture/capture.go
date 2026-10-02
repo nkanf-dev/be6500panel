@@ -6,10 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,36 +21,58 @@ import (
 
 type Runner func(context.Context, []string) ([]byte, error)
 type Status struct {
-	Active     bool   `json:"active"`
-	ClientIPv4 string `json:"clientIPv4,omitempty"`
-	ClientIPv6 string `json:"clientIPv6,omitempty"`
-	Commands   int    `json:"commands"`
+	Active         bool   `json:"active"`
+	ClientIPv4     string `json:"clientIPv4,omitempty"`
+	ClientIPv6     string `json:"clientIPv6,omitempty"`
+	Commands       int    `json:"commands"`
+	CleanupPending bool   `json:"cleanupPending"`
+	State          string `json:"state"`
 }
+
+// CommandError contains only internally compiled network argv and bounded kernel
+// diagnostics. It preserves the original error for errors.Is/errors.As.
+type CommandError struct {
+	Argv   []string
+	Output string
+	Err    error
+}
+
+func (e *CommandError) Error() string {
+	message := fmt.Sprintf("capture command %q failed: %v", e.Argv, e.Err)
+	if e.Output != "" {
+		message += fmt.Sprintf(" (output=%q)", e.Output)
+	}
+	return message
+}
+func (e *CommandError) Unwrap() error { return e.Err }
+
 type Controller struct {
-	mu     sync.Mutex
-	path   string
-	runner Runner
-	plan   *proxy.OwnedRulesPlan
-	active bool
+	mu             sync.Mutex
+	path           string
+	runner         Runner
+	tableNames     func() (map[string]int, error)
+	plan           *proxy.OwnedRulesPlan
+	active         bool
+	cleanupPending bool
 }
 
 func New(dataDir string, runner Runner) (*Controller, error) {
 	if runner == nil {
 		runner = run
 	}
-	c := &Controller{path: filepath.Join(dataDir, "capture-journal.json"), runner: runner}
+	c := &Controller{path: filepath.Join(dataDir, "capture-journal.json"), runner: runner, tableNames: readTableNames}
 	raw, err := os.ReadFile(c.path)
 	if err == nil {
-		var plan proxy.OwnedRulesPlan
-		if json.Unmarshal(raw, &plan) != nil {
+		var stored journal
+		if json.Unmarshal(raw, &stored) != nil {
 			return nil, errors.New("capture journal invalid")
 		}
-		for _, argv := range plan.Cleanup {
-			if err = validate(argv); err != nil {
-				return nil, err
-			}
+		plan, err := recoveredPlan(stored)
+		if err != nil {
+			return nil, err
 		}
 		c.plan = &plan
+		c.cleanupPending = true // Presence on disk does not prove live hooks.
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -57,29 +80,41 @@ func New(dataDir string, runner Runner) (*Controller, error) {
 }
 func (c *Controller) Status() Status { c.mu.Lock(); defer c.mu.Unlock(); return c.statusLocked() }
 func (c *Controller) statusLocked() Status {
-	state := Status{Active: c.active}
+	state := Status{Active: c.active, CleanupPending: c.cleanupPending, State: "inactive"}
 	if c.plan != nil {
 		state.ClientIPv4 = c.plan.Ownership.ClientIPv4
 		state.ClientIPv6 = c.plan.Ownership.ClientIPv6
 		state.Commands = len(c.plan.Apply)
+		if c.cleanupPending {
+			state.State = "cleanup-pending"
+		} else if c.active {
+			state.State = "active"
+		} else {
+			state.State = "staged"
+		}
 	}
 	return state
 }
-func (c *Controller) Apply(ctx context.Context, plan proxy.OwnedRulesPlan) (Status, error) {
+
+// Apply accepts compiler input, never caller-supplied command arrays.
+func (c *Controller) Apply(ctx context.Context, input proxy.RulesPlanInput) (Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.plan != nil {
 		return c.statusLocked(), errors.New("capture already staged; stop first")
 	}
-	for _, argv := range append(append([][]string{}, plan.Apply...), plan.Cleanup...) {
-		if err := validate(argv); err != nil {
-			return c.statusLocked(), err
-		}
-	}
-	if err := c.preflight(ctx, plan); err != nil {
+	input.EndpointIPs = slices.Clone(input.EndpointIPs)
+	input.ManagementIPs = slices.Clone(input.ManagementIPs)
+	input.RouterDNSAddresses = slices.Clone(input.RouterDNSAddresses)
+	plan, err := proxy.PlanOwnedRules(input)
+	if err != nil {
 		return c.statusLocked(), err
 	}
-	raw, err := json.Marshal(plan)
+	plan = clonePlan(plan)
+	if err = c.preflight(ctx, plan); err != nil {
+		return c.statusLocked(), err
+	}
+	raw, err := json.Marshal(journal{OwnedRulesPlan: plan, Input: &input})
 	if err != nil {
 		return c.statusLocked(), err
 	}
@@ -87,15 +122,17 @@ func (c *Controller) Apply(ctx context.Context, plan proxy.OwnedRulesPlan) (Stat
 		return c.statusLocked(), err
 	}
 	c.plan = &plan
+	c.cleanupPending = true
 	for _, argv := range plan.Apply {
 		if _, err = c.execute(ctx, argv); err != nil {
 			rollbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			cleanupErr := c.cleanupLocked(rollbackCtx)
 			cancel()
-			return c.statusLocked(), errors.Join(errors.New("capture application failed"), cleanupErr)
+			return c.statusLocked(), errors.Join(fmt.Errorf("capture application failed: %w", err), cleanupErr)
 		}
 	}
 	c.active = true
+	c.cleanupPending = false
 	return c.statusLocked(), nil
 }
 func (c *Controller) Cleanup(ctx context.Context) error {
@@ -107,84 +144,83 @@ func (c *Controller) cleanupLocked(ctx context.Context) error {
 	if c.plan == nil {
 		return nil
 	}
+	c.cleanupPending = true
 	var pending error
 	for _, argv := range c.plan.Cleanup {
 		out, err := c.execute(ctx, argv)
-		if err != nil && !absent(out) {
-			pending = errors.Join(pending, errors.New("owned capture cleanup failed"))
+		if err != nil && !resourceAbsent(argv, out, err) {
+			pending = errors.Join(pending, err)
 		}
 	}
+	if pending != nil {
+		return pending
+	} // Live hooks may remain. Never report clean inactivity.
+	if err := os.Remove(c.path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("capture journal removal failed: %w", err)
+	}
+	c.plan = nil
 	c.active = false
-	if pending == nil {
-		if err := os.Remove(c.path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		c.plan = nil
-	}
-	return pending
+	c.cleanupPending = false
+	return nil
 }
-func absent(out []byte) bool {
-	text := string(out)
-	return strings.Contains(text, "No chain/target/match by that name") || strings.Contains(text, "Bad rule") || strings.Contains(text, "No such file") || strings.Contains(text, "does a matching rule exist") || strings.Contains(text, "Cannot find device")
+func resourceAbsent(a []string, out []byte, err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	text := strings.TrimSpace(string(out))
+	if len(a) > 3 && a[0] == "ip" && a[3] == "del" {
+		if a[2] == "route" {
+			return text == "RTNETLINK answers: No such process"
+		}
+		if a[2] == "rule" {
+			return text == "RTNETLINK answers: No such file or directory" || text == "RTNETLINK answers: No such process"
+		}
+	}
+	if len(a) <= 6 || (a[0] != "iptables" && a[0] != "ip6tables") {
+		return false
+	}
+	op := a[5]
+	if op != "-D" && op != "-F" && op != "-X" && op != "-S" && op != "-C" {
+		return false
+	}
+	// These exact diagnostics differ from executable/table/match-load failures.
+	noChain := text == a[0]+": No chain/target/match by that name." || text == "No chain/target/match by that name."
+	if noChain {
+		if (op == "-S" || op == "-F" || op == "-X") && len(a) == 7 {
+			return true
+		}
+		// Owned system-chain hooks use only built-in source/interface matches.
+		// A -C check of TPROXY/addrtype rules can instead fail because the
+		// extension is unavailable, so its ambiguous diagnostic is NOT absence.
+		return (op == "-D" || op == "-C") && (a[6] == "PREROUTING" || a[6] == "FORWARD")
+	}
+	badRule := a[0] + ": Bad rule (does a matching rule exist in that chain?)."
+	return (op == "-D" || op == "-C") && (text == badRule || text == "Bad rule (does a matching rule exist in that chain?).")
 }
 func (c *Controller) execute(ctx context.Context, argv []string) ([]byte, error) {
+	if err := c.approvedCommand(argv); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	return c.runner(ctx, argv)
-}
-func (c *Controller) preflight(ctx context.Context, plan proxy.OwnedRulesPlan) error {
-	for _, family := range plan.Ownership.RouteFamilies {
-		prefix := "-" + strconv.Itoa(family)
-		for _, args := range [][]string{{"ip", prefix, "route", "show", "table", strconv.Itoa(proxy.CaptureTable)}, {"ip", prefix, "rule", "show"}} {
-			out, err := c.execute(ctx, args)
-			if err != nil {
-				return errors.New("capture preflight failed")
-			}
-			if args[2] == "route" && len(bytes.TrimSpace(out)) != 0 {
-				return errors.New("capture table occupied")
-			}
-			if args[2] == "rule" {
-				for _, line := range strings.Split(string(out), "\n") {
-					if strings.HasPrefix(strings.TrimSpace(line), strconv.Itoa(proxy.CapturePriority)+":") {
-						return errors.New("capture rule priority occupied")
-					}
-				}
-			}
-		}
+	if err := ctx.Err(); err != nil {
+		return nil, &CommandError{Argv: slices.Clone(argv), Err: err}
 	}
-	for _, chain := range plan.Ownership.Chains {
-		tool := "iptables"
-		if chain.Family == 6 {
-			tool = "ip6tables"
-		}
-		_, err := c.execute(ctx, []string{tool, "-w", "5", "-t", chain.Table, "-S", chain.Name})
-		if err == nil {
-			return errors.New("capture chain occupied")
-		}
+	out, err := c.runner(ctx, slices.Clone(argv))
+	if ctx.Err() != nil {
+		err = errors.Join(err, ctx.Err())
 	}
-	return nil
-}
-func validate(argv []string) error {
-	if len(argv) < 2 {
-		return errors.New("invalid owned command")
+	if len(out) >= 64<<10 && isReadCommand(argv) {
+		err = errors.Join(err, errors.New("capture inspection output reached limit"))
 	}
-	if argv[0] != "ip" && argv[0] != "iptables" && argv[0] != "ip6tables" {
-		return errors.New("unapproved capture executable")
+	if len(out) > 64<<10 {
+		out = out[:64<<10]
 	}
-	for _, arg := range argv {
-		if strings.ContainsAny(arg, "\x00\r\n") || len(arg) > 256 {
-			return errors.New("invalid capture argument")
-		}
+	out = bytes.Clone(out)
+	if err != nil {
+		return out, &CommandError{Argv: slices.Clone(argv), Output: strings.TrimSpace(string(out)), Err: err}
 	}
-	// Stored cleanup must reference this module's fixed ownership, never global flush.
-	if argv[0] != "ip" {
-		for i, arg := range argv {
-			if (arg == "-F" || arg == "-X" || arg == "-N") && (i+1 >= len(argv) || !strings.HasPrefix(argv[i+1], "B6P_")) {
-				return errors.New("unowned chain")
-			}
-		}
-	}
-	return nil
+	return out, nil
 }
 func atomicSave(path string, raw []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -224,7 +260,8 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 	return n, nil
 }
 func run(ctx context.Context, argv []string) ([]byte, error) {
-	if err := validate(argv); err != nil {
+	// execute already matched argv against fixed inspection or compiled intent.
+	if err := validateArgs(argv); err != nil {
 		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
