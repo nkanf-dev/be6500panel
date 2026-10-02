@@ -19,7 +19,8 @@ func (s *Server) proxyCapture(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		var status capture.Status
 		var err error
-		if s.capture.Desired().Enabled {
+		desired := s.capture.Desired()
+		if desired.Enabled || len(desired.Devices) > 0 {
 			status, err = s.capture.ReconcileDesired(r.Context())
 		} else {
 			status, err = s.capture.Reconcile(r.Context())

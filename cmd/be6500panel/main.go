@@ -155,6 +155,7 @@ func run() error {
 	defer api.Close()
 	if runtimeManager != nil {
 		go restoreDesiredRuntimes(ctx, runtimeManager, *dataDir, logger)
+		go refreshDesiredCapture(ctx, runtimeManager, captureManager, controlManager, logger)
 	}
 	registry, err := modules.Builtins(observer, modules.Network{})
 	if err != nil {

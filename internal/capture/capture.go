@@ -63,6 +63,7 @@ type Controller struct {
 	clients        []Client
 	restoreError   string
 	builder        Builder
+	failedPlan     *proxy.OwnedRulesPlan
 }
 
 func New(dataDir string, runner Runner) (*Controller, error) {

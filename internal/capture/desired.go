@@ -176,6 +176,7 @@ func (c *Controller) Select(ctx context.Context, d Desired) (Status, error) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.failedPlan = nil
 	if err = c.saveDesiredLocked(normalized); err != nil {
 		return c.statusLocked(), errors.Join(err, c.cleanupLocked(ctx))
 	}
@@ -201,6 +202,7 @@ func (c *Controller) Disable(ctx context.Context) error {
 func (c *Controller) Restore(ctx context.Context) (Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.failedPlan = nil
 	return c.restoreLocked(ctx)
 }
 func (c *Controller) restoreLocked(ctx context.Context) (Status, error) {
@@ -227,27 +229,35 @@ func (c *Controller) restoreLocked(ctx context.Context) (Status, error) {
 	}
 	_, err = c.applyLocked(ctx, input)
 	if err != nil {
+		if expected, compileErr := proxy.PlanOwnedRules(input); compileErr == nil {
+			failed := clonePlan(expected)
+			c.failedPlan = &failed
+		}
 		c.restoreError = "capture_activation_failed"
 		return c.statusLocked(), err
 	}
+	c.failedPlan = nil
 	if pendingDevices {
 		c.restoreError = partial.Error()
 	}
 	return c.statusLocked(), nil
 }
 
-// ReconcileDesired never activates capture. Identity/config drift withdraws the
-// old scope; an explicit core Start or Apply retries after readiness.
+// ReconcileDesired only observes. The server-owned readiness-gated refresh loop
+// performs any rule changes; an HTTP GET never creates or deletes resources.
 func (c *Controller) ReconcileDesired(ctx context.Context) (Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.desired.Enabled || c.builder == nil {
+	if c.builder == nil || (!c.desired.Enabled && len(c.desired.Devices) == 0) {
 		return c.statusLocked(), nil
 	}
 	d := c.desired
 	d.Devices = slices.Clone(d.Devices)
 	input, clients, err := c.builder(ctx, d)
 	c.clients = slices.Clone(clients)
+	if !c.desired.Enabled {
+		return c.statusLocked(), nil
+	}
 	var partial *PartialScopeError
 	pendingDevices := errors.As(err, &partial)
 	if c.plan == nil {
@@ -268,14 +278,15 @@ func (c *Controller) ReconcileDesired(ctx context.Context) (Status, error) {
 	}
 	if err != nil {
 		c.restoreError = err.Error()
-		cleanupErr := c.cleanupLocked(ctx)
-		return c.statusLocked(), errors.Join(err, cleanupErr)
+		c.active = false
+		c.cleanupPending = true
+		return c.statusLocked(), err
 	}
 	if err = c.observeLocked(ctx); err != nil {
 		c.active = false
 		c.restoreError = "capture_observation_failed"
-		cleanupErr := c.cleanupLocked(ctx)
-		return c.statusLocked(), errors.Join(err, cleanupErr)
+		c.cleanupPending = true
+		return c.statusLocked(), err
 	}
 	c.active = true
 	c.cleanupPending = false
@@ -314,4 +325,63 @@ func (c *Controller) DisableRetainingSelection(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// Refresh runs in the runtime mutation lane after current listener readiness.
+// It rebuilds only changed or missing scope. An identical failed apply is not
+// retried by the timer; explicit Apply/Start or changed accepted intent retries.
+func (c *Controller) Refresh(ctx context.Context) (Status, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.desired.Enabled {
+		return c.statusLocked(), nil
+	}
+	if c.builder == nil {
+		c.restoreError = "capture_configuration_unavailable"
+		return c.statusLocked(), errors.New(c.restoreError)
+	}
+	desired := c.desired
+	desired.Devices = slices.Clone(desired.Devices)
+	input, clients, buildErr := c.builder(ctx, desired)
+	c.clients = slices.Clone(clients)
+	var partial *PartialScopeError
+	pending := errors.As(buildErr, &partial)
+	if buildErr != nil && !pending {
+		c.restoreError = buildErr.Error()
+		return c.statusLocked(), errors.Join(buildErr, c.cleanupLocked(ctx))
+	}
+	expected, err := proxy.PlanOwnedRules(input)
+	if err != nil {
+		c.restoreError = "capture_native_scope_invalid"
+		return c.statusLocked(), errors.Join(err, c.cleanupLocked(ctx))
+	}
+	if c.plan != nil && plansEqual(*c.plan, expected) && !c.cleanupPending {
+		if err = c.observeLocked(ctx); err == nil {
+			c.active = true
+			c.restoreError = ""
+			if pending {
+				c.restoreError = partial.Error()
+			}
+			return c.statusLocked(), nil
+		}
+	}
+	if err = c.cleanupLocked(ctx); err != nil {
+		c.restoreError = "capture_cleanup_failed"
+		return c.statusLocked(), err
+	}
+	if c.failedPlan != nil && plansEqual(*c.failedPlan, expected) {
+		c.restoreError = "capture_activation_failed_apply_required"
+		return c.statusLocked(), errors.New(c.restoreError)
+	}
+	if _, err = c.applyLocked(ctx, input); err != nil {
+		failed := clonePlan(expected)
+		c.failedPlan = &failed
+		c.restoreError = "capture_activation_failed_apply_required"
+		return c.statusLocked(), err
+	}
+	c.failedPlan = nil
+	if pending {
+		c.restoreError = partial.Error()
+	}
+	return c.statusLocked(), nil
 }

@@ -65,12 +65,12 @@ func TestRestoreResolvesDHCPChangeAndUnresolvedNeverUsesStaleIP(t *testing.T) {
 	if err == nil || state.Active || !state.Desired || state.Error != "capture_scope_changed_apply_required" {
 		t.Fatalf("drift did not withdraw: %+v %v", state, err)
 	}
-	state, err = c.Restore(context.Background())
+	state, err = c.Refresh(context.Background())
 	if err != nil || !state.Active || state.Clients[0].IP != "192.0.2.20" {
 		t.Fatalf("DHCP refresh failed: %+v %v", state, err)
 	}
 	observation.Devices[0] = router.Device{MAC: "02:00:00:00:00:99", IP: "192.0.2.20", Eligible: true}
-	state, err = c.Restore(context.Background())
+	state, err = c.Refresh(context.Background())
 	if err != nil || !state.Active || !state.Desired || state.State != "partial" || state.Error != "capture_devices_pending" || state.Clients[0].MAC != "02:00:00:00:00:10" || state.Clients[0].IP != "" || state.Clients[1].IP != "192.0.2.11" {
 		t.Fatalf("reused/unresolved IP retained: %+v %v", state, err)
 	}
@@ -216,5 +216,88 @@ func TestThreeDeviceGroupReplacementRemovesOnlyDeselectedClient(t *testing.T) {
 	desiredRead.Devices[0].MAC = "02:00:00:00:00:99"
 	if controller.Desired().Devices[0].MAC != "02:00:00:00:00:10" {
 		t.Fatal("desired read alias")
+	}
+}
+
+func TestReadOnlyReconcileAndBoundedBackgroundFailureRetry(t *testing.T) {
+	calls := 0
+	fail := false
+	c := testController(t, func(ctx context.Context, args []string) ([]byte, error) {
+		if !isReadCommand(args) {
+			calls++
+		}
+		if fail && len(args) > 5 && args[5] == "-N" {
+			return nil, errors.New("kernel failure")
+		}
+		return idleRunner(ctx, args)
+	})
+	observation := deviceObservation()
+	c.SetBuilder(func(ctx context.Context, d Desired) (proxy.RulesPlanInput, []Client, error) {
+		return BuildFromAccepted(ctx, d, []byte(acceptedNative), observation, fakeResolve)
+	})
+	if _, err := c.Select(context.Background(), desiredDevices()); err != nil {
+		t.Fatal(err)
+	}
+	baseline := calls
+	observation.Devices[0].IP = "192.0.2.20"
+	if _, err := c.ReconcileDesired(context.Background()); err == nil {
+		t.Fatal("drift not observed")
+	}
+	if calls != baseline {
+		t.Fatal("GET observation mutated rules")
+	}
+	fail = true
+	if _, err := c.Refresh(context.Background()); err == nil {
+		t.Fatal("failed apply hidden")
+	}
+	baseline = calls
+	if _, err := c.Refresh(context.Background()); err == nil {
+		t.Fatal("failed same input must require explicit retry")
+	}
+	if calls != baseline {
+		t.Fatal("timer blindly reapplied failed commands")
+	}
+	fail = false
+	if _, err := c.Restore(context.Background()); err != nil {
+		t.Fatal("explicit retry failed", err)
+	}
+	if !c.Status().Active {
+		t.Fatal("explicit retry did not restore")
+	}
+	if err := c.DisableRetainingSelection(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	baseline = calls
+	if _, err := c.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != baseline || c.Status().Active || c.Status().Desired {
+		t.Fatal("disabled retained selection applied")
+	}
+}
+
+func TestExplicitFailedApplyIsNotTimerRetriedUntilExplicitStart(t *testing.T) {
+	mutations := 0
+	c := testController(t, func(ctx context.Context, args []string) ([]byte, error) {
+		if !isReadCommand(args) {
+			mutations++
+		}
+		if len(args) > 5 && args[5] == "-N" {
+			return nil, errors.New("no TPROXY")
+		}
+		return idleRunner(ctx, args)
+	})
+	c.SetBuilder(func(ctx context.Context, d Desired) (proxy.RulesPlanInput, []Client, error) {
+		return BuildFromAccepted(ctx, d, []byte(acceptedNative), deviceObservation(), fakeResolve)
+	})
+	if _, err := c.Select(context.Background(), desiredDevices()); err == nil {
+		t.Fatal("failed explicit apply hidden")
+	}
+	baseline := mutations
+	if _, err := c.Refresh(context.Background()); err == nil {
+		t.Fatal("failed timer refresh hidden")
+	}
+	if mutations != baseline {
+		t.Fatal("background blindly retried explicit failed apply")
 	}
 }

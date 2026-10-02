@@ -931,6 +931,8 @@ func (m *Manager) ReadyOperation(ctx context.Context, id string, operation func(
 		return err
 	}
 	defer done()
+	ctx, cancel := context.WithTimeout(ctx, m.opts.ResourceTimeout)
+	defer cancel()
 	m.mu.Lock()
 	s := m.services[id]
 	ready := s.state == Running && s.proc != nil
