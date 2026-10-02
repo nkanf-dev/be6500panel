@@ -155,7 +155,7 @@ export const api = {
     request("/runtime/acquire", RuntimeStatusSchema, {
       method: "POST",
       body,
-      timeoutMs: 120_000,
+      timeoutMs: 420_000,
     }),
   runtimeConfigure: (body: RuntimeConfigureInput) =>
     request("/runtime/configure", RuntimeStatusSchema, {

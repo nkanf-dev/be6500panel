@@ -22,6 +22,7 @@ import (
 	"be6500panel/internal/modules"
 	"be6500panel/internal/router"
 	managedruntime "be6500panel/internal/runtime"
+	"be6500panel/internal/transport"
 	"path/filepath"
 )
 
@@ -40,6 +41,7 @@ func run() error {
 	controlEnabled := flag.Bool("enable-control", false, "Enable staged UCI configuration commits")
 	adapterRoot := flag.String("router-root", "/", "Router observation/configuration root")
 	localArtifacts := flag.String("local-artifacts", "", "Trusted local artifact source directory")
+	artifactTransport := flag.String("artifact-transport", "native", "Artifact HTTPS transport: native or curl")
 	flag.Parse()
 	logs := &core.LogBuffer{}
 	logger := slog.New(core.NewRingHandler(slog.NewJSONHandler(os.Stderr, nil), logs))
@@ -72,6 +74,12 @@ func run() error {
 	var controlManager *control.Manager
 	var captureManager *capture.Controller
 	var err error
+	var artifactClient *http.Client
+	if *artifactTransport == "curl" {
+		artifactClient = &http.Client{Transport: transport.CurlTransport{}}
+	} else if *artifactTransport != "native" {
+		return fmt.Errorf("unknown artifact transport")
+	}
 	if *dataDir != "" {
 		if password == "" {
 			return fmt.Errorf("runtime control requires BE6500PANEL_PASSWORD")
@@ -80,7 +88,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, MaxCompressedBytes: 20 << 20, MaxUncompressedBytes: 40 << 20, ReadyHook: runtimeReadiness(func() *managedruntime.Manager { return runtimeManager }), ReadyTimeout: 10 * time.Second, CleanupHook: func(ctx context.Context, id string) error {
+		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, HTTPClient: artifactClient, MaxCompressedBytes: 20 << 20, DownloadTimeout: 6 * time.Minute, MaxUncompressedBytes: 40 << 20, ReadyHook: runtimeReadiness(func() *managedruntime.Manager { return runtimeManager }), ReadyTimeout: 10 * time.Second, CleanupHook: func(ctx context.Context, id string) error {
 			if id == managedruntime.SingBox {
 				return captureManager.Cleanup(ctx)
 			}
