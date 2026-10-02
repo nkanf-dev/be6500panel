@@ -19,6 +19,7 @@ export function ProxyPage() {
   const resource = useResource(api.proxyNodes);
   const [imported, setImported] = useState<ProxyNodes>();
   const [importing, setImporting] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const [tab, setTab] = useState("nodes");
   const nodes = imported || resource.data;
   return (
@@ -35,7 +36,7 @@ export function ProxyPage() {
           ].map((item) => (
             <button
               role="tab"
-              disabled={importing || runtime.pending}
+              disabled={importing || runtime.pending || capturing}
               key={item.id}
               aria-selected={tab === item.id}
               onClick={() => setTab(item.id)}
@@ -51,7 +52,9 @@ export function ProxyPage() {
         </Badge>
         <Button
           size="small"
-          disabled={resource.loading || importing || runtime.pending}
+          disabled={
+            resource.loading || importing || runtime.pending || capturing
+          }
           onClick={() => {
             setImported(undefined);
             resource.reload();
@@ -72,7 +75,7 @@ export function ProxyPage() {
           <ProxySetupGuidance
             runtime={runtime}
             nodes={nodes}
-            busy={importing || runtime.pending}
+            busy={importing || runtime.pending || capturing}
             onRuntime={() => setTab("runtime")}
             onCapture={() => setTab("capture")}
           />
@@ -97,7 +100,7 @@ export function ProxyPage() {
           <NativeConfigEditor runtime={runtime} />
         </>
       ) : tab === "capture" ? (
-        <CapturePanel runtime={runtime} />
+        <CapturePanel runtime={runtime} onPending={setCapturing} />
       ) : tab === "analysis" ? (
         <ConnectionAnalysis />
       ) : tab === "diagnostics" ? (
