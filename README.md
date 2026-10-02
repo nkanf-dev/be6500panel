@@ -1,20 +1,29 @@
 # be6500panel
 
-A modular control plane for the Xiaomi BE6500 (RN02), built for professional users.
+A modular, professional control panel for the Xiaomi BE6500 (RN02).
 
-**Core:** one Go service, typed APIs, bounded events and a shared change coordinator. **Browser:** React, TypeScript, Effect, Motion, Tailwind CSS, accessible Radix/shadcn-style components and Apache ECharts. No Node.js runtime on the router.
+**Native control plane:** Go, typed APIs, bounded events/logs, private configuration generations and commit/rollback transactions. **Browser:** React, Effect, Motion, Tailwind CSS, accessible Radix/shadcn-style components and Apache ECharts. No Node.js runtime on the router.
 
 ## Modules
 
-| Module | Initial capability |
+| Module | Capabilities |
 | --- | --- |
-| System | Linux CPU, memory, load and uptime observations |
-| Network | Interfaces and addresses |
-| Devices / Wi-Fi / DNS / firewall | Adapter registration and capability state |
-| Proxy | Split-policy validation and coordinated plan preview |
-| FRPC | Tunnel validation and exposure-aware plan preview |
+| System | CPU/memory/load/uptime, diagnostics, native system configuration |
+| Network | Interfaces, IPv4/IPv6 routes, traffic counters, native WAN/LAN commits |
+| Devices | DHCP leases and ARP observations |
+| Wi-Fi | Radio/SSID configuration observation, native wireless editor |
+| DNS / DHCP | Resolver and lease observations, native DHCP/DNS configuration |
+| Firewall | IPv4/IPv6 policy observations and native firewall commits |
+| Proxy | Local VLESS import, REALITY/Vision/uTLS, native core management and scoped split-routing intent |
+| FRPC | Native TOML configuration, verified artifact acquisition, start/stop and process supervision |
 
-The console uses dense tables, keyboard navigation, an operation plan inspector and structured diagnostics. Traffic charts, phase waterfalls, activity heatmaps, latency distributions and rule-hit charts share a decoupled theme layer. Demo datasets carry a source label; disconnected collectors use an empty state.
+The console uses dense tables, Cmd+K, configuration diffs, explicit Commit, risk confirmation and provisional rollback. Light/dark/system themes share semantic tokens with traffic charts, waterfalls, heatmaps, latency distributions and rule-hit charts. Actual interface samples feed the live traffic graph; other collectors retain a short empty state until connected.
+
+## Configuration workflow
+
+**Edit → Stage → Diff/Validate → Commit.** Editing or staging does not change live UCI files. Risk-sensitive network, management and primary Wi-Fi commits require one acknowledgment and remain provisional until confirmed. Timeout or failed verification restores the previous generation. Native expert editing supports network, wireless, DHCP, firewall, system and Dropbear documents.
+
+Runtime configurations use explicit **Commit 配置**, followed by Start/Stop. Subscriptions are parsed locally; no public conversion service receives node credentials. Proxy and FRPC are independent modules.
 
 ## Development
 
@@ -25,18 +34,20 @@ make setup
 make dev-api
 # Another terminal:
 make dev-web
-```
-
-API: `127.0.0.1:8787`. The development API uses `--demo`. Omit that flag for Linux host observations.
-
-```text
 make test
 make build
-./dist/be6500panel --listen 127.0.0.1:8787 --demo --web-dir web/dist
 make armv7
 ```
 
-Browser assets are local static files. Non-loopback service binding requires `BE6500PANEL_PASSWORD`; authentication uses a session cookie. Linux `/proc` observation errors appear in diagnostics.
+The development API binds to127.0.0.1:8787 with explicit demo data. Omit `--demo` for actual Linux proc observations.
+
+## Router run
+
+```text
+BE6500PANEL_PASSWORD=<private-password> ./be6500panel   --listen 192.168.31.1:8787   --web-dir ./web   --data-dir /data/be6500panel   --run-dir /tmp/be6500panel/managed   --enable-control
+```
+
+Password sessions protect the API. Native settings and journals stay in `/data`; verified external binaries can be reconstructed in `/tmp`. `scripts/bootstrap.sh` reconstructs a checksum-verified persistent panel archive. Factory Web and SSH remain independent recovery paths.
 
 ## Architecture
 
@@ -48,21 +59,17 @@ Browser modules ─ Shared UI ─ Theme ─ Visualizations
      System · Network · Devices · Wi-Fi · DNS · Firewall
                       Proxy · FRPC
                          │
-                  Platform adapters
+       RN02 adapter · Config transactions · Runtime manager
 ```
 
-Modules register their capabilities and own domain state. Network, DNS and firewall own their respective resources; proxy and FRPC request coordinated contributions. Apply follows validation, planning, verification and rollback. The initial build exposes observations and plans; runtime execution is the next implementation stage.
+Resource ownership is explicit: network owns routes; DNS owns resolver intent; firewall owns chains and marks; proxy requests compiled contributions. Runtime binaries are fixed executable types, not shell commands. Process exits trigger owned cleanup and bounded restart backoff.
 
-[Design](docs/superpowers/specs/2026-10-02-be6500panel-design.md) · [Plan](docs/superpowers/plans/2026-10-02-be6500panel-foundation.md) · [Module contracts](docs/modules.md)
+[Architecture](docs/superpowers/specs/2026-10-02-be6500panel-design.md) · [Production design](docs/superpowers/specs/2026-10-02-production-deployment.md) · [Official capability matrix](docs/official-capability-matrix.md) · [Split policy](docs/proxy-policy.md) · [Runtime provenance](docs/runtime-provenance.md)
 
-## Runtime direction
+## Official feature coverage
 
-The target firmware uses **ARMv7**, a read-only root filesystem and a small persistent data partition. Runtime binaries can be downloaded, checksum-verified and reconstructed in `/tmp` at boot. Small configuration stays persistent. Bootstrap sources must be directly reachable before the proxy starts.
-
-Proxy split policy combines explicit overrides, domestic domain/IP sets, DNS routing, UDP and IPv6. Gateway process-name rules are not used for forwarded clients. Management bypass and a defined failure policy are coordinated with the network module. FRPC is independent and never publishes the panel automatically.
+The capability matrix tracks dedicated RN02 adapters for official Wi-Fi7/MLO/Mesh, multi-WAN, QoS/ECM, IPTV/VLAN, NAT/UPnP, parental/security, DDNS/VPN and maintenance features. Native UCI editing is a control mechanism, not a substitute for those dedicated operations. The current runtime and transaction layer is the base for that coverage.
 
 ## Source boundary
 
-Source, tests and synthetic examples only. Device snapshots, subscriptions, keys and live configurations stay outside the public repository. External runtime binaries retain their own licenses.
-
-MIT license.
+Only source, tests and synthetic examples belong in Git. Subscriptions, keys, Wi-Fi credentials, live snapshots and private configuration remain on the managed device/developer machine. The panel is MIT; external binaries and data retain their upstream licenses.

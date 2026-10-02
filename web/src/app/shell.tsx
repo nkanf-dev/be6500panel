@@ -127,7 +127,7 @@ export function Shell({
           {!collapsed && (
             <span>
               <strong>本地工作空间</strong>
-              <small>Foundation · 只读</small>
+              <small>{health?.readOnly ? "观察模式" : "控制模式"}</small>
             </span>
           )}
         </div>
@@ -199,7 +199,7 @@ export function Shell({
                   ? "Host"
                   : "连接中"}
             </Badge>
-            <Badge>只读</Badge>
+            <Badge tone={health?.readOnly === false ? "primary" : "neutral"}>{health?.readOnly === false ? "Full control" : "观察"}</Badge>
             <span
               className={cn(
                 "connection-indicator",

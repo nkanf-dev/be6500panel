@@ -39,6 +39,7 @@ test("console observations, charts, command palette and split plan", async ({
   await expect(page.locator("table tbody tr").first()).toBeVisible();
 
   await navigate(page, "proxy");
+  await page.getByRole("tab", { name: "计划预览" }).click();
   const proxyResponse = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/proxy/plan") &&
@@ -52,8 +53,8 @@ test("console observations, charts, command palette and split plan", async ({
   expect(plan.canApply).toBe(false);
   expect(plan.steps.length).toBeGreaterThan(0);
   await expect(page.getByText(plan.summary, { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: "请求诊断" }).click();
-  await expect(page.locator("canvas").first()).toBeVisible();
+  await page.getByRole("tab", { name: "诊断", exact: true }).click();
+  await expect(page.getByText("订阅诊断", { exact: true })).toBeVisible();
   await page.screenshot({
     path: "test-results/proxy-diagnostics.png",
     fullPage: true,
@@ -61,23 +62,17 @@ test("console observations, charts, command palette and split plan", async ({
   expect(errors).toEqual([]);
 });
 
-test("FRPC coordinated plan uses the real validation endpoint", async ({
-  page,
-}) => {
+test("FRPC keeps unconfigured runtime disabled in demo", async ({ page }) => {
   await page.goto("/#/frpc");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await page.getByPlaceholder("frps.example.com").fill("frps.example.com");
-  const frpcResponse = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/frpc/plan") &&
-      response.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "校验并生成计划" }).click();
-  const response = await frpcResponse;
-  expect(response.status()).toBe(200);
-  const plan = await response.json();
-  expect(plan.canApply).toBe(false);
-  await expect(page.getByText(plan.summary, { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "生成并 Commit frpc 配置" }),
+  ).toBeDisabled();
+  await expect(page.getByPlaceholder("frps.example.com")).toBeVisible();
+  await page.getByRole("tab", { name: "原生配置" }).click();
+  await expect(
+    page.getByText("运行管理未启用", { exact: false }).first(),
+  ).toBeVisible();
 });
 
 test("mobile navigation and layout stay within viewport", async ({ page }) => {
