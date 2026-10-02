@@ -52,37 +52,54 @@ func safeID(id string) bool {
 	_, err := hex.DecodeString(id)
 	return err == nil
 }
+
+// storageError carries a fixed operation name but does not format private paths.
+type storageError struct {
+	step  string
+	cause error
+}
+
+func (e *storageError) Error() string { return e.step }
+func (e *storageError) Unwrap() error { return e.cause }
+func storageFailure(step string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &storageError{step: step, cause: err}
+}
 func syncDir(path string) error {
-	f, e := os.Open(path)
-	if e != nil {
-		return e
+	f, err := os.Open(path)
+	if err != nil {
+		return storageFailure("open_directory", err)
 	}
 	defer f.Close()
-	return f.Sync()
+	return storageFailure("sync_directory", f.Sync())
 }
 func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	f, err := os.CreateTemp(dir, ".control-")
 	if err != nil {
-		return err
+		return storageFailure("create_temporary", err)
 	}
 	name := f.Name()
 	defer os.Remove(name)
-	if err = f.Chmod(mode); err == nil {
-		_, err = f.Write(data)
+	if err = f.Chmod(mode); err != nil {
+		f.Close()
+		return storageFailure("chmod_temporary", err)
 	}
-	if err == nil {
-		err = f.Sync()
+	if _, err = f.Write(data); err != nil {
+		f.Close()
+		return storageFailure("write_temporary", err)
 	}
-	closeErr := f.Close()
-	if err == nil {
-		err = closeErr
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return storageFailure("sync_file", err)
 	}
-	if err != nil {
-		return err
+	if err = f.Close(); err != nil {
+		return storageFailure("close_temporary", err)
 	}
 	if err = os.Rename(name, path); err != nil {
-		return err
+		return storageFailure("rename_document", err)
 	}
 	return syncDir(dir)
 }

@@ -391,6 +391,9 @@ func (m *Manager) reload(ctx context.Context, changed []string) error {
 			}
 		}
 		cancel()
+		if err != nil {
+			m.logFailure("reload", module, err)
+		}
 		if err != nil && first == nil {
 			first = failure("reload_failed", "A fixed module reload failed.")
 		}
@@ -542,6 +545,7 @@ func (m *Manager) Commit(ctx context.Context, r CommitRequest) (Operation, error
 			return failApply(failure("cancelled", "Configuration commit was cancelled."))
 		}
 		if err = atomicWrite(m.livePath(module), []byte(candidates[module]), 0600); err != nil {
+			m.logFailure("write_live", module, err)
 			return failApply(failure("apply_failed", "Cannot replace a native configuration document."))
 		}
 	}
@@ -695,6 +699,9 @@ func (m *Manager) rollbackLocked(ctx context.Context) (Operation, error) {
 				err = syncDir(filepath.Dir(m.livePath(module)))
 			}
 		}
+		if err != nil {
+			m.logFailure("restore_snapshot", module, err)
+		}
 		if err != nil && first == nil {
 			first = err
 		}
@@ -804,9 +811,70 @@ func runCommand(ctx context.Context, path string, args ...string) ([]byte, error
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = 2 * time.Second
+	// Reload scripts can start background processes that inherit stdout/stderr.
+	// Real file descriptors avoid os/exec copy pipes and false ErrWaitDelay after
+	// the script has already exited successfully. Only the fixed initialization
+	// query needs bounded captured output; configuration output is never retained.
+	discard, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer discard.Close()
+	cmd.Stdout, cmd.Stderr = discard, discard
+	capture := path == "/sbin/uci" && len(args) == 3 && args[0] == "-q" && args[1] == "get" && args[2] == "xiaoqiang.common.INITTED"
+	if !capture {
+		return nil, cmd.Run()
+	}
 	out := &boundedOutput{}
 	cmd.Stdout = out
-	cmd.Stderr = out
-	err := cmd.Run()
+	err = cmd.Run()
 	return out.Bytes(), err
+}
+
+// diagnosticCause reports only fixed error classes, never a command's output,
+// path, arguments or private native configuration.
+func diagnosticCause(err error) string {
+	switch {
+	case err == nil:
+		return "none"
+	case errors.Is(err, exec.ErrWaitDelay):
+		return "exec_wait_delay"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.Is(err, syscall.EINVAL):
+		return "errno_einval"
+	case errors.Is(err, syscall.EXDEV):
+		return "errno_exdev"
+	case errors.Is(err, syscall.EBUSY):
+		return "errno_ebusy"
+	case errors.Is(err, syscall.EROFS):
+		return "errno_erofs"
+	case errors.Is(err, syscall.ENOSPC):
+		return "errno_enospc"
+	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
+		return "errno_permission"
+	case errors.Is(err, syscall.EIO):
+		return "errno_eio"
+	case errors.Is(err, os.ErrNotExist):
+		return "errno_enoent"
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return "exec_exit"
+	}
+	var typed *Error
+	if errors.As(err, &typed) {
+		return typed.Code
+	}
+	return "operation_error"
+}
+func (m *Manager) logFailure(step, module string, err error) {
+	storageStep := "none"
+	var storage *storageError
+	if errors.As(err, &storage) {
+		storageStep = storage.step
+	}
+	m.logger.Error("Configuration step failed", "code", "configuration_step_failed", "step", step, "storageStep", storageStep, "module", module, "cause", diagnosticCause(err))
 }

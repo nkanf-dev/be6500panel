@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -592,5 +594,35 @@ func TestExpertDocumentsCannotAddArbitraryExecutionHooks(t *testing.T) {
 	d = stage(t, m, "network", "config interface 'lan'\n option proto 'custom_user_script'\n")
 	if d.Valid || d.Errors[0].Code != "protocol_not_registered" {
 		t.Fatal("unregistered protocol accepted")
+	}
+}
+
+func TestRunnerReturnsWhenReloadBackgroundChildHoldsDescriptors(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "reload-fixture")
+	// A synthetic reload imitates a factory init script spawning an independent
+	// helper that inherits stdout/stderr. It is fixture code, never user input.
+	content := "#!/bin/sh\nsleep 3 &\nexit 0\n"
+	if err := os.WriteFile(script, []byte(content), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := runCommand(ctx, script, "reload")
+	if err != nil {
+		t.Fatalf("successful reload treated as failure: %v", err)
+	}
+	if len(out) != 0 {
+		t.Fatal("reload output should be discarded")
+	}
+}
+func TestSafeDiagnosticCauses(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{{exec.ErrWaitDelay, "exec_wait_delay"}, {context.Canceled, "cancelled"}, {&os.PathError{Op: "rename", Path: "private-test-secret", Err: syscall.EXDEV}, "errno_exdev"}, {errors.New("private-test-secret"), "operation_error"}} {
+		if got := diagnosticCause(tc.err); got != tc.want || strings.Contains(got, "private-test-secret") {
+			t.Fatalf("diagnostic %q want %q", got, tc.want)
+		}
 	}
 }
