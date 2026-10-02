@@ -88,7 +88,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, HTTPClient: artifactClient, MaxCompressedBytes: 20 << 20, DownloadTimeout: 6 * time.Minute, MaxUncompressedBytes: 40 << 20, ReadyHook: runtimeReadiness(func() *managedruntime.Manager { return runtimeManager }), ReadyTimeout: 10 * time.Second, CleanupHook: func(ctx context.Context, id string) error {
+		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, HTTPClient: artifactClient, MaxCompressedBytes: 20 << 20, DownloadTimeout: 6 * time.Minute, MaxUncompressedBytes: 40 << 20, ReadyHook: runtimeReadiness(func() *managedruntime.Manager { return runtimeManager }), ReadyTimeout: 15 * time.Second, CleanupHook: func(ctx context.Context, id string) error {
 			if id == managedruntime.SingBox {
 				return captureManager.Cleanup(ctx)
 			}
