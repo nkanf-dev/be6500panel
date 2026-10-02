@@ -6,6 +6,7 @@ import { ProxyPage } from "./proxy";
 import { OverviewPage } from "./overview";
 import { ConnectionAnalysis } from "./proxy/connection-analysis";
 import { jsonResponse } from "./production-fixtures.test-data";
+import { historyFixture } from "../components/traffic-history/history-fixture.test-data";
 
 const state = vi.hoisted(() => ({ mode: "host" }));
 vi.mock("../app/console-context", () => ({
@@ -94,18 +95,26 @@ describe("production visualization entry points", () => {
       ).toBeInTheDocument();
     }
   });
-  it("retains the overview device heatmap while actual WAN samples never become demo traffic", () => {
+  it("retains the overview device heatmap while server history replaces browser WAN samples without a demo fallback", async () => {
+    const fetch = vi.fn().mockResolvedValue(jsonResponse(historyFixture()));
+    vi.stubGlobal("fetch", fetch);
     renderPanel(<OverviewPage navigate={vi.fn()} />);
+    await screen.findByText("来源：WAN · test-wan");
     const heatmap = screen.getByRole("region", { name: "终端活跃度" });
     expect(within(heatmap).getByRole("status")).toHaveTextContent(
       "未接入终端活跃度",
     );
     expect(within(heatmap).queryByRole("img")).not.toBeInTheDocument();
-    const traffic = screen.getByRole("region", { name: "接口流量" });
+    const traffic = screen.getByRole("region", { name: "WAN 流量历史" });
     expect(
-      within(traffic).getByText("WAN · synthetic-wan"),
+      within(traffic).getByText("WAN · test-wan", { selector: ".viz-source" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("演示数据")).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/traffic/history?range=30m&maxPoints=1500",
+      expect.any(Object),
+    );
+    expect(screen.queryByText("WAN · synthetic-wan")).not.toBeInTheDocument();
   });
   it("keeps the overview heatmap explicitly marked as demo in demo mode", () => {
     state.mode = "demo";

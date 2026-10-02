@@ -1,0 +1,60 @@
+.traffic-history {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--shadow-panel);
+}
+.traffic-history .viz-panel {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.traffic-history-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+.traffic-history-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0 var(--space-5);
+  font-size: var(--text-xs);
+}
+.traffic-history-metadata dt {
+  color: var(--muted-foreground);
+  margin-bottom: var(--space-1);
+}
+.traffic-history-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.traffic-history-wide {
+  grid-column: 1 / -1;
+}
+.traffic-history-note {
+  margin: 0;
+  padding: var(--space-3) var(--space-5) 0;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.traffic-history-note[role="alert"] {
+  color: var(--destructive);
+}
+@media (max-width: 480px) {
+  .traffic-history-controls,
+  .traffic-history-metadata,
+  .traffic-history-note {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+}

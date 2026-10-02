@@ -7,7 +7,7 @@ import {
   Network,
   Server,
 } from "lucide-react";
-import { TrafficTrend, ActivityHeatmap } from "../components/visualizations";
+import { ActivityHeatmap } from "../components/visualizations";
 import {
   Badge,
   Button,
@@ -16,20 +16,14 @@ import {
   PanelHeader,
 } from "../components/ui/primitives";
 import { useConsole } from "../app/console-context";
+import { TrafficHistoryPanel } from "../components/traffic-history/TrafficHistoryPanel";
 import { errorMessage } from "../lib/api";
 import { bytes, timestamp, uptime } from "../lib/format";
 import { modules, type PageId } from "./registry";
 
 export function OverviewPage({ navigate }: { navigate: (id: PageId) => void }) {
-  const {
-    system,
-    systemError,
-    health,
-    capabilities,
-    connection,
-    trafficSamples,
-    trafficSource,
-  } = useConsole();
+  const { system, systemError, health, capabilities, connection } =
+    useConsole();
   const memoryUsed = system
     ? Math.max(0, system.memory.totalBytes - system.memory.availableBytes)
     : undefined;
@@ -101,11 +95,7 @@ export function OverviewPage({ navigate }: { navigate: (id: PageId) => void }) {
         <ErrorState message={errorMessage(systemError)} />
       )}
       <div className="dashboard-grid">
-        <TrafficTrend
-          demo={health?.mode === "demo"}
-          samples={trafficSamples}
-          source={trafficSource}
-        />
+        <TrafficHistoryPanel demo={health?.mode === "demo"} active={!!health} />
         <Panel className="environment-panel">
           <PanelHeader
             title="运行环境"

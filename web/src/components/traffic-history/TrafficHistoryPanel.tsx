@@ -1,0 +1,207 @@
+import { useState } from "react";
+import { useConsole } from "../../app/console-context";
+import { TrafficTrend } from "../visualizations";
+import { ChartSelect } from "../visualizations/ChartFrame";
+import { Button, ErrorState } from "../ui/primitives";
+import { errorMessage } from "../../lib/api";
+import { bytes } from "../../lib/format";
+import {
+  TRAFFIC_HISTORY_RANGES,
+  trafficHistoryRangeLabels,
+  trafficHistoryRangeSeconds,
+  type TrafficHistoryRange,
+} from "../../lib/traffic-history-contracts";
+import {
+  downloadTrafficHistory,
+  trafficDuration,
+  trafficTimestamp,
+} from "../../lib/traffic-history-format";
+import { useTrafficHistory } from "./use-traffic-history";
+import "./traffic-history.css";
+
+export function TrafficHistoryPanel({
+  demo = false,
+  active = true,
+}: {
+  demo?: boolean;
+  active?: boolean;
+}) {
+  const [range, setRange] = useState<TrafficHistoryRange>("30m");
+  const { data, error, loading, reload } = useTrafficHistory(
+    range,
+    active && !demo,
+  );
+  const coverage = data
+    ? Math.min(
+        100,
+        (data.summary.coverageSeconds / trafficHistoryRangeSeconds[range]) *
+          100,
+      )
+    : 0;
+  const first = data?.samples.find((point) => point.coverageSeconds > 0);
+  const last = data?.samples
+    .slice()
+    .reverse()
+    .find((point) => point.coverageSeconds > 0);
+  const hasMeasurements = !!first;
+  const rangeStart = data?.samples.length
+    ? Date.parse(data.samples[0].time)
+    : undefined;
+  const rangeEnd =
+    data?.samples.length && data.resolutionSeconds > 0
+      ? Date.parse(data.samples[data.samples.length - 1].time) +
+        data.resolutionSeconds * 1000
+      : undefined;
+  const unavailable = !active
+    ? "等待服务连接"
+    : loading
+      ? "正在读取流量历史"
+      : error
+        ? "流量历史读取失败"
+        : data && !data.enabled
+          ? "服务器未启用流量记录"
+          : "此时间范围没有真实记录";
+  return (
+    <div className="traffic-history" role="group" aria-label="WAN 流量历史">
+      {!demo && (
+        <div className="traffic-history-controls">
+          <ChartSelect
+            label="时间范围"
+            value={range}
+            onChange={(value) => setRange(value as TrafficHistoryRange)}
+          >
+            {TRAFFIC_HISTORY_RANGES.map((value) => (
+              <option key={value} value={value}>
+                {trafficHistoryRangeLabels[value]}
+              </option>
+            ))}
+          </ChartSelect>
+          <Button
+            size="small"
+            variant="ghost"
+            onClick={reload}
+            disabled={loading || !active}
+          >
+            刷新历史
+          </Button>
+          <Button
+            size="small"
+            variant="ghost"
+            onClick={() => data && downloadTrafficHistory(data)}
+            disabled={!hasMeasurements}
+          >
+            导出 CSV
+          </Button>
+          <span className="text-muted text-xs">UTC · 每 30 秒刷新</span>
+        </div>
+      )}
+      {demo ? (
+        <p className="traffic-history-note">
+          演示模式：固定 1 小时样本，不代表服务器历史记录。
+        </p>
+      ) : (
+        <>
+          {error !== undefined && (
+            <ErrorState
+              message={`${errorMessage(error)}${data ? " · 以下为此范围上次成功读取的记录" : ""}`}
+              onRetry={reload}
+            />
+          )}
+          {data?.error && <ErrorState message={data.error} onRetry={reload} />}
+          {data && (
+            <>
+              <dl className="traffic-history-metadata">
+                <div>
+                  <dt>范围 RX 总量</dt>
+                  <dd title={`${data.summary.rxBytes} bytes`}>
+                    {data.summary.coverageSeconds > 0
+                      ? bytes(data.summary.rxBytes)
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>范围 TX 总量</dt>
+                  <dd title={`${data.summary.txBytes} bytes`}>
+                    {data.summary.coverageSeconds > 0
+                      ? bytes(data.summary.txBytes)
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>有效采样覆盖</dt>
+                  <dd>
+                    {trafficDuration(data.summary.coverageSeconds)} ·{" "}
+                    {coverage.toFixed(1)}%
+                  </dd>
+                </div>
+                <div>
+                  <dt>聚合分辨率</dt>
+                  <dd>
+                    {data.resolutionSeconds > 0
+                      ? trafficDuration(data.resolutionSeconds)
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>服务器保留期</dt>
+                  <dd>
+                    {data.retentionDays > 0 ? `${data.retentionDays} 天` : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>持久存储</dt>
+                  <dd>
+                    {data.persistent ? "已持久化" : "未持久化"}
+                    {!data.enabled && " · 记录未启用"}
+                  </dd>
+                </div>
+                <div className="traffic-history-wide">
+                  <dt>最早保留记录（UTC）</dt>
+                  <dd>
+                    {data.oldestAt
+                      ? trafficTimestamp(data.oldestAt)
+                      : "尚无真实记录"}
+                  </dd>
+                </div>
+              </dl>
+              {data.enabled && !data.persistent && (
+                <p className="traffic-history-note" role="alert">
+                  历史未写入持久存储；请检查服务存储配置和错误。重启后记录可能丢失。
+                </p>
+              )}
+              <p className="traffic-history-note">
+                仅显示实际记录，不补齐启用前的历史。总量来自接口计数器差值，不是速率求和。缺失或不完整时间桶在曲线上留空，已有测量仍可在数据表中查看。
+              </p>
+              {first && last && (
+                <p className="traffic-history-note">
+                  所选范围内记录：{trafficTimestamp(first.time)} 至{" "}
+                  {trafficTimestamp(last.time)}（UTC 桶起点）
+                  {loading && " · 刷新中"}
+                </p>
+              )}
+            </>
+          )}
+        </>
+      )}
+      <TrafficTrend
+        demo={demo}
+        samples={hasMeasurements ? data?.samples : []}
+        source={data?.source || "服务器 WAN 记录"}
+        title="WAN 流量历史"
+        range={data?.range}
+        resolutionSeconds={data?.resolutionSeconds}
+        rangeStart={rangeStart}
+        rangeEnd={rangeEnd}
+        unavailable={unavailable}
+      />
+    </div>
+  );
+}
+
+/** A no-props dashboard entry point. Production never falls back to browser-owned samples. */
+export function TrafficHistoryWidget() {
+  const { health } = useConsole();
+  return (
+    <TrafficHistoryPanel demo={health?.mode === "demo"} active={!!health} />
+  );
+}
