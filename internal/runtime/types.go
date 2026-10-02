@@ -16,13 +16,15 @@ const (
 )
 
 var (
-	ErrService       = errors.New("unsupported managed service")
-	ErrBusy          = errors.New("another runtime operation is in progress")
-	ErrClosed        = errors.New("runtime manager is closed")
-	ErrGeneration    = errors.New("configuration generation conflict")
-	ErrNotConfigured = errors.New("service is not configured")
-	ErrNoArtifact    = errors.New("service artifact is unavailable")
-	ErrCheck         = errors.New("candidate verification failed")
+	ErrService                   = errors.New("unsupported managed service")
+	ErrBusy                      = errors.New("another runtime operation is in progress")
+	ErrClosed                    = errors.New("runtime manager is closed")
+	ErrGeneration                = errors.New("configuration generation conflict")
+	ErrNotConfigured             = errors.New("service is not configured")
+	ErrNoArtifact                = errors.New("service artifact is unavailable")
+	ErrCheck                     = errors.New("candidate verification failed")
+	ErrArtifactCompressedLimit   = errors.New("artifact exceeds compressed byte limit")
+	ErrArtifactUncompressedLimit = errors.New("artifact exceeds uncompressed byte limit")
 	// ErrDurability means the atomic rename committed, but directory fsync failed.
 	// The returned generation is authoritative; previous snapshots are retained.
 	ErrDurability = errors.New("runtime state committed without confirmed directory durability")

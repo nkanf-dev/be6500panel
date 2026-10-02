@@ -309,11 +309,19 @@ func (m *Manager) Acquire(ctx context.Context, id string, artifact Artifact) (St
 	staged, err := acquireArtifact(downloadCtx, m.opts, id, artifact)
 	cancel()
 	if err != nil {
-		m.setState(id, previous, "artifact_acquire_failed")
+		code := "artifact_acquire_failed"
+		var publicError error = errors.New("artifact acquisition failed")
+		switch {
+		case errors.Is(err, ErrArtifactCompressedLimit):
+			code, publicError = "artifact_compressed_limit", ErrArtifactCompressedLimit
+		case errors.Is(err, ErrArtifactUncompressedLimit):
+			code, publicError = "artifact_uncompressed_limit", ErrArtifactUncompressedLimit
+		}
+		m.setState(id, previous, code)
 		if ctx.Err() != nil {
 			return m.result(id, ctx.Err())
 		}
-		return m.result(id, errors.New("artifact acquisition failed"))
+		return m.result(id, publicError)
 	}
 	activated := false
 	defer func() {

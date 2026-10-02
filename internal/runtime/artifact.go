@@ -18,8 +18,8 @@ import (
 )
 
 var (
-	errArtifactCompressedLimit   = errors.New("artifact exceeds compressed byte limit")
-	errArtifactUncompressedLimit = errors.New("artifact exceeds uncompressed byte limit")
+	errArtifactCompressedLimit   = ErrArtifactCompressedLimit
+	errArtifactUncompressedLimit = ErrArtifactUncompressedLimit
 )
 
 // acquireArtifact returns a new, checksum-verified executable in RunDir. The

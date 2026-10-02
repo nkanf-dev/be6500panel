@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -812,5 +814,48 @@ func TestExitPreemptsOtherServiceSlowDownloadForCleanup(t *testing.T) {
 	}
 	if time.Since(before) > time.Second {
 		t.Fatal("core exit cleanup waited for download timeout")
+	}
+}
+
+func TestArtifactLimitsAreTypedAndPreserveStableCore(t *testing.T) {
+	m, opts := testManager(t, func(o *Options) { o.MaxCompressedBytes = 4096; o.MaxUncompressedBytes = 4096 })
+	acquireFixture(t, m, opts, SingBox, fixture)
+	accepted(t, m, SingBox, "good", 0)
+	stable, err := m.Start(context.Background(), SingBox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, compression, code string
+		data                    []byte
+		want                    error
+	}{
+		{"compressed", "none", "artifact_compressed_limit", bytes.Repeat([]byte("x"), 4097), ErrArtifactCompressedLimit},
+	}
+	var zipped bytes.Buffer
+	writer := gzip.NewWriter(&zipped)
+	if _, err = writer.Write(bytes.Repeat([]byte("x"), 4097)); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cases = append(cases, struct {
+		name, compression, code string
+		data                    []byte
+		want                    error
+	}{"uncompressed", "gzip", "artifact_uncompressed_limit", zipped.Bytes(), ErrArtifactUncompressedLimit})
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(opts.LocalSourceRoot, test.name)
+			if err := os.WriteFile(path, test.data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			digest := sha256.Sum256(test.data)
+			status, err := m.Acquire(context.Background(), SingBox, Artifact{URL: "file://" + path, SHA256: hex.EncodeToString(digest[:]), Compression: test.compression})
+			if !errors.Is(err, test.want) || status.ErrorCode != test.code || status.PID != stable.PID || status.State != Running || status.Generation != stable.Generation {
+				t.Fatalf("artifact bound lost diagnostic or stable core: %+v %v", status, err)
+			}
+		})
 	}
 }
