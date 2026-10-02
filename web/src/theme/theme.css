@@ -1,0 +1,52 @@
+/* Theme owns every color, typography, spacing and motion token. No remote fonts. */
+:root {
+  color-scheme: light;
+  --font-sans: Inter, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem;
+  --space-5: 1.25rem; --space-6: 1.5rem; --space-7: 1.75rem; --space-8: 2rem;
+  --radius: .625rem; --radius-sm: .375rem; --radius-md: .625rem; --radius-lg: .875rem;
+  --duration-fast: 120ms; --duration-normal: 200ms;
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --text-xs: .75rem; --text-sm: .8125rem; --text-base: .875rem; --text-lg: 1rem;
+  --shadow-panel: 0 1px 3px oklch(20% .02 260 / .04);
+  --background: oklch(97.5% .004 260); --foreground: oklch(25% .025 260);
+  --card: oklch(100% 0 0); --card-foreground: var(--foreground);
+  --surface: var(--card); --surface-hover: oklch(96% .008 260);
+  --primary: oklch(49% .16 258); --primary-foreground: oklch(100% 0 0);
+  --secondary: oklch(94% .012 260); --secondary-foreground: oklch(34% .03 260);
+  --muted: oklch(95.5% .008 260); --muted-foreground: oklch(47% .025 260);
+  --accent: oklch(94% .028 258); --accent-foreground: oklch(39% .12 258);
+  --border: oklch(88% .014 260); --input: var(--border); --ring: oklch(55% .16 258);
+  --success: oklch(44% .10 165); --warning: oklch(47% .10 75);
+  --info: var(--primary); --destructive: oklch(51% .19 25); --destructive-foreground: oklch(100% 0 0);
+  --danger: var(--destructive);
+  --chart-rx: oklch(54% .17 255); --chart-tx: oklch(49% .11 175);
+  --chart-latency: oklch(54% .14 305); --chart-direct: var(--chart-tx);
+  --chart-proxy: var(--chart-rx); --chart-blocked: var(--destructive);
+  --chart-dns: oklch(58% .13 80); --chart-connect: var(--chart-rx);
+  --chart-tls: var(--chart-latency); --chart-wait: var(--chart-dns); --chart-transfer: var(--chart-tx);
+  --chart-heat-low: oklch(97% .014 255); --chart-heat-high: oklch(47% .17 255);
+  --chart-text: var(--muted-foreground); --chart-grid: var(--border);
+  --chart-surface: var(--card); --chart-tooltip: var(--card);
+}
+:root[data-theme="dark"], :root.dark {
+  color-scheme: dark;
+  --shadow-panel: 0 1px 3px oklch(0% 0 0 / .12);
+  --background: oklch(16.5% .014 260); --foreground: oklch(91% .01 260);
+  --card: oklch(20% .018 260); --surface-hover: oklch(26% .022 260);
+  --primary: oklch(73% .13 255); --primary-foreground: oklch(19% .035 255);
+  --secondary: oklch(27% .02 260); --secondary-foreground: oklch(88% .01 260);
+  --muted: oklch(24% .018 260); --muted-foreground: oklch(70% .022 260);
+  --accent: oklch(29% .045 255); --accent-foreground: oklch(84% .09 255);
+  --border: oklch(32% .022 260); --ring: oklch(73% .13 255);
+  --success: oklch(75% .12 165); --warning: oklch(80% .13 80);
+  --destructive: oklch(73% .15 25); --destructive-foreground: oklch(19% .035 25);
+  --chart-rx: oklch(74% .13 255); --chart-tx: oklch(73% .12 175);
+  --chart-latency: oklch(76% .12 305); --chart-dns: oklch(80% .13 80);
+  --chart-heat-low: oklch(24% .03 255); --chart-heat-high: oklch(77% .12 255);
+}
+html { background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
+@media (prefers-reduced-motion: reduce) {
+  :root { --duration-fast: 0ms; --duration-normal: 0ms; }
+}
