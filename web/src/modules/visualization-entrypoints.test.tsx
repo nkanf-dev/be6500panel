@@ -21,6 +21,16 @@ vi.mock("../app/console-context", () => ({
     trafficSource: "WAN · synthetic-wan",
   }),
 }));
+vi.mock("./proxy/use-proxy-telemetry", () => ({
+  useProxyTelemetry: () => ({
+    data: undefined,
+    error: undefined,
+    loading: false,
+    refresh: vi.fn(),
+    probe: vi.fn(async () => {}),
+    probing: false,
+  }),
+}));
 vi.mock("../components/visualizations/EChart", () => ({
   EChart: ({ label }: { label: string }) => (
     <div role="img" aria-label={label} />
@@ -55,22 +65,25 @@ describe("production visualization entry points", () => {
       "true",
     );
     expect(
-      screen.getByRole("region", { name: "请求瀑布" }),
+      screen.getByRole("region", { name: "活动连接时间线" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("变更计划")).not.toBeInTheDocument();
     expect(screen.queryByText("运行日志")).not.toBeInTheDocument();
   });
-  it("keeps all three analysis charts accessible, with empty host collectors and no demo statistics", async () => {
+  it("keeps all four actual analysis charts accessible, with missing samples and no demo statistics", async () => {
     const user = userEvent.setup();
     renderPanel(<ConnectionAnalysis />);
     for (const [tab, title] of [
-      ["请求阶段", "请求瀑布"],
-      ["延迟分布", "延迟分布"],
-      ["规则命中", "规则命中"],
+      ["活动连接", "活动连接时间线"],
+      ["代理流量", "代理流量"],
+      ["探测延迟", "探测延迟分布"],
+      ["活动连接分流", "活动连接分流"],
     ]) {
       await user.click(screen.getByRole("tab", { name: tab }));
       const chart = screen.getByRole("region", { name: title });
-      expect(within(chart).getByRole("status")).toHaveTextContent("未接入");
+      expect(within(chart).getByRole("status")).toHaveTextContent(
+        "尚未取得代理采样",
+      );
       expect(within(chart).queryByRole("img")).not.toBeInTheDocument();
       expect(within(chart).queryByRole("table")).not.toBeInTheDocument();
       expect(within(chart).queryByText("演示数据")).not.toBeInTheDocument();
