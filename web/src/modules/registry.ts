@@ -111,12 +111,12 @@ export const modules: readonly ModuleRegistration[] = [
     id: "proxy",
     title: "代理",
     shortTitle: "代理",
-    description: "路由策略与联合计划",
+    description: "订阅节点、原生配置与透明代理",
     icon: ArrowLeftRight,
     group: "services",
     keywords: "proxy sing-box 分流 代理",
     command: "打开代理策略",
-    summary: "plan",
+    summary: "runtime",
   },
   {
     id: "frpc",
@@ -127,7 +127,7 @@ export const modules: readonly ModuleRegistration[] = [
     group: "services",
     keywords: "frpc frp tunnel 隧道 穿透",
     command: "打开 frpc",
-    summary: "plan",
+    summary: "runtime",
   },
 ];
 export const groups = [

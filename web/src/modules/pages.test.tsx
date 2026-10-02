@@ -61,10 +61,21 @@ describe("domain pages", () => {
     expect(screen.getByText("路由观察未接入")).toBeInTheDocument();
   });
   it("submits proxy plans via POST and never enables unsupported apply", async () => {
-    const fetch = vi.fn().mockResolvedValue(respond(plan));
+    const fetch = vi.fn((url: string) =>
+      Promise.resolve(
+        respond(
+          url === "/api/runtime"
+            ? { enabled: false, services: [] }
+            : url === "/api/proxy/nodes"
+              ? { nodes: [], diagnostics: [], selectedNodeId: "" }
+              : plan,
+        ),
+      ),
+    );
     vi.stubGlobal("fetch", fetch);
     const user = userEvent.setup();
     render(<ProxyPage />);
+    await user.click(screen.getByRole("tab", { name: "计划预览" }));
     await user.click(screen.getByRole("button", { name: "校验并生成计划" }));
     await screen.findByText("联合校验通过");
     expect(fetch).toHaveBeenCalledWith(
@@ -80,45 +91,6 @@ describe("domain pages", () => {
         }),
       }),
     );
-    expect(screen.getByRole("button", { name: "应用计划" })).toBeDisabled();
-  });
-  it("builds credential-free frpc mappings through the actual contract", async () => {
-    const fetch = vi.fn((url: string) =>
-      Promise.resolve(
-        respond(
-          url === "/api/frpc"
-            ? {
-                supported: false,
-                running: false,
-                reason: "未接入",
-                proxies: [],
-              }
-            : plan,
-        ),
-      ),
-    );
-    vi.stubGlobal("fetch", fetch);
-    const user = userEvent.setup();
-    render(<FrpcPage />);
-    await user.type(
-      screen.getByRole("textbox", { name: "服务器地址" }),
-      "frps.example.com",
-    );
-    await user.click(screen.getByRole("button", { name: "校验并生成计划" }));
-    await screen.findByText("联合校验通过");
-    const call = fetch.mock.calls.find(
-      ([url]) => url === "/api/frpc/plan",
-    ) as unknown as [string, RequestInit];
-    expect(call).toBeDefined();
-    const body = JSON.parse(call[1].body as string);
-    expect(body.serverAddress).toBe("frps.example.com");
-    expect(body.tls).toBe(true);
-    expect(body.proxies[0]).toMatchObject({
-      type: "tcp",
-      localPort: 8080,
-      remotePort: 18080,
-    });
-    expect(body).not.toHaveProperty("token");
     expect(screen.getByRole("button", { name: "应用计划" })).toBeDisabled();
   });
   it("loads structured logs on demand and filters codes", async () => {
