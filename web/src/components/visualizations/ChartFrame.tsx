@@ -29,5 +29,5 @@ export function ChartFrame({ title, subtitle, demo, unavailable, summary, contro
 }
 export function ChartSelect({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode }) {
   const id = useId();
-  return <label className="viz-filter" htmlFor={id}><span>{label}</span><select id={id} value={value} onChange={event => onChange(event.target.value)}>{children}</select></label>;
+  return <label className="viz-filter" htmlFor={id}><span>{label}</span><select id={id} aria-label={label} value={value} onChange={event => onChange(event.target.value)}>{children}</select></label>;
 }
