@@ -13,3 +13,13 @@
 Validation uses only synthetic private-native fixtures. No content enters logs, local storage, public demo data, or shell calls. Explicit Commit applies selected validated drafts. Low-risk commits have no extra gate. High-risk Commit gets one concise changed-field/risk dialog. Pending deadline expiration blocks confirmation; status, not the local clock, decides rollback.
 
 **Result:** Synthetic fetch-mock cases, native parser tests, full frontend tests and typecheck pass. No real router configuration enters fixtures.
+
+## Routine section forms follow-up (approved design)
+
+Goal: Add/remove everyday DHCP leases, firewall rules/port forwards, network interfaces/routes and wireless SSIDs without raw text editing. New sections receive a generated internal identifier, hidden in advanced settings. Existing interfaces/radios/zones supply editable reference suggestions. All changes stay in the local buffer until checked and explicitly applied.
+
+- [x] Replace Git/transaction jargon with friendly check/apply/confirm/restore copy; internal IDs and generations stay in advanced details. Verify temporary application and server-confirmed restoration states.
+- [x] Add source-preserving section insert/remove helpers and synthetic round-trip tests.
+- [x] Add bounded module templates with inline required/address/port/secret validation.
+- [x] Add friendly section dialogs and reference suggestions; integrate selection/navigation.
+- [x] Test local add/delete, cancel, unknown values/comments, and actual buffer-to-check submission. Run typecheck and serialized frontend tests; commit copy and section changes separately.

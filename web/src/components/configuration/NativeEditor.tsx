@@ -9,8 +9,9 @@ import {
   cn,
 } from "../ui/primitives";
 import { configurationModules, type ConfigurationModule } from "./contracts";
-import { nativeSections } from "./native-document";
+import { nativeSectionLabel, nativeSections } from "./native-document";
 import { NativeFields } from "./NativeFields";
+import { SectionControls } from "./SectionControls";
 import { sectionSchema } from "./field-schema";
 import { isDirty, type ConfigurationController } from "./use-configuration";
 
@@ -50,11 +51,11 @@ export function NativeEditor({
     buffer.stagedContent === buffer.content;
   const statusLabel = stagedCurrent
     ? staged.valid
-      ? "已暂存"
-      : "校验失败"
+      ? "检查通过，待应用"
+      : "检查未通过"
     : dirty
-      ? "未暂存"
-      : "与已保存一致";
+      ? "有未检查的更改"
+      : "与已保存设置一致";
   const stageDisabled =
     !!controller.busy ||
     !!controller.status?.pendingCommit ||
@@ -73,7 +74,7 @@ export function NativeEditor({
     >
       <PanelHeader
         title={`${info.label}配置`}
-        subtitle={`/etc/config/${module} · ${info.description}`}
+        subtitle={`${info.description} · 编辑不会立即影响路由器`}
         action={
           <Badge
             tone={
@@ -119,17 +120,44 @@ export function NativeEditor({
             高级：原生编辑
           </button>
         </div>
-        <span className="configuration-generation">
-          {stale
-            ? `编辑基线 g${buffer.generation} · 当前 g${controller.status?.generation}`
-            : `已保存版本 g${buffer.generation}`}
-        </span>
+        <details className="configuration-technical-details">
+          <summary>技术详情</summary>
+          <span className="configuration-generation">
+            /etc/config/{module} · 编辑版本 g{buffer.generation} · 当前版本 g
+            {controller.status?.generation}
+          </span>
+        </details>
       </div>
       {stale && (
         <div className="configuration-inline-warning" role="status">
-          配置版本已改变。载入当前版本后再编辑；本地文本仍保留。
+          路由器上的设置已改变。你的编辑仍保留，但不能直接应用。请载入最新设置后重新检查。
         </div>
       )}
+      <SectionControls
+        module={module}
+        content={buffer.content}
+        section={section}
+        documents={Object.fromEntries(
+          Object.entries(controller.buffers).map(([name, value]) => [
+            name,
+            value.content,
+          ]),
+        )}
+        disabled={
+          !!controller.busy ||
+          !!controller.status?.pendingCommit ||
+          !controller.status?.enabled
+        }
+        onChange={(content, name) => {
+          controller.edit(module, content);
+          if (name)
+            setSectionId(
+              nativeSections(content).find((item) => item.name === name)?.id,
+            );
+          else setSectionId(undefined);
+          setView("fields");
+        }}
+      />
       <div className="configuration-native-layout">
         <nav
           className="configuration-section-nav"
@@ -164,10 +192,8 @@ export function NativeEditor({
                 }
               }}
             >
-              <strong>{item.name}</strong>
-              <span>
-                {sectionSchema(module, item.type).label} · L{item.line}
-              </span>
+              <strong>{nativeSectionLabel(item)}</strong>
+              <span>{sectionSchema(module, item.type).label}</span>
             </button>
           ))}
           {!sections.length && (
@@ -230,8 +256,7 @@ export function NativeEditor({
       </div>
       <footer className="configuration-editor-footer">
         <span>
-          UCI · {buffer.content.split("\n").length} 行 ·{" "}
-          <kbd>⌘ / Ctrl + Enter</kbd> 暂存
+          更改先检查，再应用 · <kbd>⌘ / Ctrl + Enter</kbd> 检查更改
         </span>
         <div className="configuration-actions">
           <Button
@@ -241,7 +266,7 @@ export function NativeEditor({
             disabled={!!controller.busy || (!dirty && !stale)}
           >
             <RotateCcw size={14} />
-            {stale ? "载入当前版本" : "丢弃本地编辑"}
+            {stale ? "载入最新设置" : "撤销本地编辑"}
           </Button>
           <Button
             size="small"
@@ -252,7 +277,7 @@ export function NativeEditor({
             disabled={stageDisabled}
           >
             <Save size={14} />
-            {controller.busy === "stage" ? "正在校验…" : "暂存并校验"}
+            {controller.busy === "stage" ? "正在检查…" : "检查更改"}
           </Button>
         </div>
       </footer>

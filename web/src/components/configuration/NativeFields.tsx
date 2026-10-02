@@ -10,6 +10,7 @@ import {
 } from "./field-schema";
 import {
   addNativeField,
+  nativeSectionLabel,
   editNativeField,
   removeNativeField,
   type NativeField,
@@ -173,9 +174,9 @@ export function NativeFields({
     >
       <header className="configuration-field-heading">
         <h3>
-          {sectionInfo.label} · {section.name}
+          {sectionInfo.label} · {nativeSectionLabel(section)}
         </h3>
-        <p>{sectionInfo.hint} 编辑只保留在本地；暂存校验后才可 Commit。</p>
+        <p>{sectionInfo.hint} 编辑只保留在本地；检查通过后可应用更改。</p>
       </header>
       {groups.map((group, groupIndex) => {
         const schema = fieldSchema(module, section.type, group.name);
@@ -320,7 +321,7 @@ export function NativeFields({
           添加字段
         </Button>
         <p>
-          保留未知厂商设置。自定义名称仅用字母、数字或下划线；新值由暂存校验检查。
+          保留未知厂商设置。自定义名称仅用字母、数字或下划线；新值由“检查更改”校验。
         </p>
       </div>
     </div>

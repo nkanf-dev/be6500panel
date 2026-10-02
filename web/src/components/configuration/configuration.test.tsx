@@ -161,15 +161,15 @@ describe("FullControl configuration", () => {
       screen.queryByRole("textbox", { name: "network 原生配置" }),
     ).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: "192.0.2.2" } });
-    expect(screen.getByText("未暂存")).toBeInTheDocument();
+    expect(screen.getByText("有未检查的更改")).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
-    await screen.findByText("已暂存");
+    await screen.findByText("检查通过，待应用");
     expect(posts(fetchMock, "stage")).toHaveLength(1);
     expect(JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string)).toEqual(
       { module: "network", content: edited, generation: 7 },
     );
     expect(posts(fetchMock, "commit")).toHaveLength(0);
-    expect(screen.getByText("已保存版本 g7")).toBeInTheDocument();
+    expect(screen.getByText(/编辑版本 g7.*当前版本 g7/)).toBeInTheDocument();
     expect(screen.getByTestId("configuration-diff")).toHaveTextContent(
       "192.0.2.2",
     );
@@ -181,22 +181,20 @@ describe("FullControl configuration", () => {
       name: /\(ipaddr\)/,
     });
     fireEvent.change(input, { target: { value: "192.0.2.2" } });
-    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
+    fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
     await screen.findByText(/generation_conflict/);
     expect(input).toHaveValue("192.0.2.2");
     expect(posts(fetchMock, "stage")).toHaveLength(1);
-    await screen.findByText("编辑基线 g7 · 当前 g8");
-    expect(screen.getByRole("button", { name: "暂存并校验" })).toBeDisabled();
+    await screen.findByText(/编辑版本 g7.*当前版本 g8/);
+    expect(screen.getByRole("button", { name: "检查更改" })).toBeDisabled();
   });
   it("commits a low-risk selected draft directly with no confirmation dialog", async () => {
     const fetchMock = mockApi({ drafts: [draft] });
     const user = userEvent.setup();
     render(<ConfigurationWorkspace />);
-    await screen.findByRole("checkbox", { name: "选择草稿 draft-synthetic" });
-    await user.click(
-      screen.getByRole("button", { name: "Commit 已选草稿 (1)" }),
-    );
-    await screen.findByText(/已提交.*network/);
+    await screen.findByRole("checkbox", { name: "选择网络草稿 1" });
+    await user.click(screen.getByRole("button", { name: "应用已选更改 (1)" }));
+    await screen.findByText(/更改已生效.*网络/);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(
       JSON.parse(posts(fetchMock, "commit")[0][1]!.body as string),
@@ -208,17 +206,17 @@ describe("FullControl configuration", () => {
     mockApi({ drafts: [draft], captureDisabled: true, warning });
     render(<ConfigurationWorkspace />);
     const commit = await screen.findByRole("button", {
-      name: "Commit 已选草稿 (1)",
+      name: "应用已选更改 (1)",
     });
     fireEvent.click(commit);
-    await screen.findByText(/已提交.*network/);
-    const notice = screen.getByRole("status", { name: "配置提交提示" });
+    await screen.findByText(/更改已生效.*网络/);
+    const notice = screen.getByRole("status", { name: "配置应用提示" });
     expect(notice).toHaveTextContent("设备代理捕获已停用");
     expect(notice).toHaveTextContent("设备选择仍保留，不会自动重新启用");
     expect(notice).toHaveTextContent("到代理页面检查并重新应用所选设备");
     expect(notice).toHaveTextContent(warning);
   });
-  it.each(["确认当前连接", "恢复先前配置"])(
+  it.each(["确认生效", "恢复上一配置"])(
     "retains capture-disabled guidance during pending confirmation and after %s",
     async (action) => {
       const warning =
@@ -230,25 +228,23 @@ describe("FullControl configuration", () => {
       mockApi({ drafts: [risky], risky: true, captureDisabled: true, warning });
       render(<ConfigurationWorkspace />);
       fireEvent.click(
-        await screen.findByRole("button", { name: "Commit 已选草稿 (1)" }),
+        await screen.findByRole("button", { name: "应用已选更改 (1)" }),
       );
-      fireEvent.click(
-        screen.getByRole("button", { name: "确认风险并 Commit" }),
-      );
-      await screen.findByText("等待连接确认");
+      fireEvent.click(screen.getByRole("button", { name: "确认并应用" }));
+      await screen.findByText("待确认生效");
       expect(
-        screen.getByRole("status", { name: "配置提交提示" }),
-      ).toHaveTextContent("请先确认当前连接或恢复先前配置");
+        screen.getByRole("status", { name: "配置应用提示" }),
+      ).toHaveTextContent("请先确认生效或恢复上一配置");
       fireEvent.click(screen.getByRole("button", { name: action }));
       await screen.findByText(
-        action === "确认当前连接" ? /已提交.*network/ : /已回滚.*network/,
+        action === "确认生效" ? /更改已生效.*网络/ : /已恢复上一配置.*网络/,
       );
-      expect(screen.queryByText("等待连接确认")).not.toBeInTheDocument();
+      expect(screen.queryByText("待确认生效")).not.toBeInTheDocument();
       expect(
-        screen.getByRole("status", { name: "配置提交提示" }),
+        screen.getByRole("status", { name: "配置应用提示" }),
       ).toHaveTextContent(warning);
       expect(
-        screen.getByRole("status", { name: "配置提交提示" }),
+        screen.getByRole("status", { name: "配置应用提示" }),
       ).toHaveTextContent("设备选择仍保留");
     },
   );
@@ -260,11 +256,11 @@ describe("FullControl configuration", () => {
     });
     render(<ConfigurationWorkspace />);
     fireEvent.click(
-      await screen.findByRole("button", { name: "Commit 已选草稿 (1)" }),
+      await screen.findByRole("button", { name: "应用已选更改 (1)" }),
     );
-    await screen.findByText(/已提交.*network/);
+    await screen.findByText(/更改已生效.*网络/);
     expect(
-      screen.getByRole("status", { name: "配置提交提示" }),
+      screen.getByRole("status", { name: "配置应用提示" }),
     ).toHaveTextContent("Check the configuration transaction result.");
     expect(screen.queryByText("设备代理捕获已停用")).not.toBeInTheDocument();
   });
@@ -276,27 +272,23 @@ describe("FullControl configuration", () => {
     const fetchMock = mockApi({ drafts: [risky], risky: true });
     const user = userEvent.setup();
     render(<ConfigurationWorkspace />);
-    await screen.findByRole("checkbox", { name: "选择草稿 draft-synthetic" });
-    await user.click(
-      screen.getByRole("button", { name: "Commit 已选草稿 (1)" }),
-    );
-    const dialog = screen.getByRole("dialog", { name: "确认高风险 Commit" });
-    expect(
-      within(dialog).getByText("network / option ipaddr"),
-    ).toBeInTheDocument();
+    await screen.findByRole("checkbox", { name: "选择网络草稿 1" });
+    await user.click(screen.getByRole("button", { name: "应用已选更改 (1)" }));
+    const dialog = screen.getByRole("dialog", { name: "确认应用高风险更改" });
+    expect(within(dialog).getByText("网络 · IPv4 地址")).toBeInTheDocument();
     expect(posts(fetchMock, "commit")).toHaveLength(0);
     await user.click(
-      within(dialog).getByRole("button", { name: "确认风险并 Commit" }),
+      within(dialog).getByRole("button", { name: "确认并应用" }),
     );
-    await screen.findByText("等待连接确认");
+    await screen.findByText("待确认生效");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(
       JSON.parse(posts(fetchMock, "commit")[0][1]!.body as string)
         .acknowledgeRisks,
     ).toBe(true);
-    expect(screen.getByRole("button", { name: "确认当前连接" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "恢复先前配置" }));
-    await screen.findByText(/已回滚/);
+    expect(screen.getByRole("button", { name: "确认生效" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "恢复上一配置" }));
+    await screen.findByText(/已恢复上一配置/);
     expect(posts(fetchMock, "rollback")).toHaveLength(1);
   });
   it("blocks confirmation after deadline and never assumes the rollback is already complete", async () => {
@@ -307,10 +299,10 @@ describe("FullControl configuration", () => {
       },
     });
     render(<ConfigurationWorkspace />);
-    await screen.findByText("确认期限已到，正在核对回滚状态");
-    expect(screen.getByRole("button", { name: "确认当前连接" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "刷新提交状态" })).toBeEnabled();
-    expect(screen.queryByText(/已回滚/)).not.toBeInTheDocument();
+    await screen.findByText("确认期限已到，正在核对恢复状态");
+    expect(screen.getByRole("button", { name: "确认生效" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "刷新应用状态" })).toBeEnabled();
+    expect(screen.queryByText(/已恢复上一配置/)).not.toBeInTheDocument();
   });
   it("does not request private documents when write support is disabled", async () => {
     const fetchMock = mockApi({ enabled: false });
@@ -343,8 +335,8 @@ describe("FullControl configuration", () => {
     });
     fireEvent.click(screen.getByRole("tab", { name: "字段编辑" }));
     expect(screen.getByLabelText(/\(key\)/)).toHaveValue("raw-test-key");
-    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
-    await screen.findByText("已暂存");
+    fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
+    await screen.findByText("检查通过，待应用");
     expect(JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string)).toEqual(
       {
         module: "wireless",
@@ -388,8 +380,8 @@ describe("FullControl configuration", () => {
     fireEvent.change(screen.getByRole("combobox", { name: /\(proto\)/ }), {
       target: { value: "static" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
-    await screen.findByText("已暂存");
+    fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
+    await screen.findByText("检查通过，待应用");
     expect(
       JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string).content,
     ).toBe(
@@ -423,8 +415,8 @@ describe("FullControl configuration", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /\(dns\) 2/ }), {
       target: { value: "198.51.100.54" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
-    await screen.findByText("已暂存");
+    fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
+    await screen.findByText("检查通过，待应用");
     const staged = JSON.parse(
       posts(fetchMock, "stage")[0][1]!.body as string,
     ).content;
@@ -451,8 +443,8 @@ describe("FullControl configuration", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /\(vendor_note\)/ }), {
       target: { value: "editable unknown" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
-    await screen.findByText("已暂存");
+    fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
+    await screen.findByText("检查通过，待应用");
     expect(
       JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string).content,
     ).toBe(
@@ -471,7 +463,7 @@ describe("FullControl configuration", () => {
     expect(screen.getByRole("textbox", { name: /\(mtu\)/ })).toHaveValue(
       "auto",
     );
-    expect(screen.getByRole("button", { name: "暂存并校验" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "检查更改" })).toBeDisabled();
     expect(posts(fetchMock, "stage")).toHaveLength(0);
     fireEvent.change(screen.getByRole("textbox", { name: /\(mtu\)/ }), {
       target: { value: "1400" },
@@ -492,8 +484,8 @@ describe("FullControl configuration", () => {
     expect(input).toHaveValue("First\nSecond");
     expect(screen.getByRole("textbox", { name: /\(mtu\)/ })).toHaveValue("1.");
     fireEvent.change(input, { target: { value: "Next\nLine" } });
-    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
-    await screen.findByText("已暂存");
+    fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
+    await screen.findByText("检查通过，待应用");
     expect(
       JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string).content,
     ).toBe(content.replace("First\nSecond", "Next\nLine"));
@@ -540,8 +532,8 @@ describe("FullControl configuration", () => {
         name: new RegExp(`\\(${field}\\)`),
       });
       fireEvent.change(input, { target: { value } });
-      fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
-      await screen.findByText("已暂存");
+      fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
+      await screen.findByText("检查通过，待应用");
       expect(
         JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string),
       ).toEqual({
@@ -551,6 +543,66 @@ describe("FullControl configuration", () => {
       });
     },
   );
+  it("adds a DHCP reservation through fields, then checks its exact local UCI without applying", async () => {
+    const content =
+      "# existing lease\nconfig host 'known'\n option mac '02:00:00:00:00:01'\n option ip '192.0.2.10'\n option vendor_note \"untouched\" # keep\n";
+    const fetchMock = mockApi({ documents: [{ module: "dhcp", content }] });
+    const user = userEvent.setup();
+    render(<ConfigurationEditor module="dhcp" />);
+    await user.click(await screen.findByRole("button", { name: "添加配置" }));
+    await user.click(screen.getByRole("menuitem", { name: /静态/ }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/MAC/), {
+      target: { value: "02:00:00:00:00:02" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/IPv4|IP 地址/), {
+      target: { value: "192.0.2.25" },
+    });
+    expect(
+      within(dialog).getByLabelText("内部配置标识（可选）"),
+    ).not.toBeVisible();
+    await user.click(
+      within(dialog).getByRole("button", { name: "添加到待应用更改" }),
+    );
+    expect(posts(fetchMock, "stage")).toHaveLength(0);
+    expect(posts(fetchMock, "commit")).toHaveLength(0);
+    expect(screen.getByRole("textbox", { name: /\(ip\)/ })).toHaveValue(
+      "192.0.2.25",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
+    await screen.findByText("检查通过，待应用");
+    const staged = JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string);
+    expect(staged.module).toBe("dhcp");
+    expect(staged.content.startsWith(content)).toBe(true);
+    expect(staged.content).toContain("config host 'panel_host_1'");
+    expect(staged.content).toContain("option mac '02:00:00:00:00:02'");
+    expect(staged.content).toContain("option ip '192.0.2.25'");
+    expect(posts(fetchMock, "commit")).toHaveLength(0);
+  });
+  it("confirms local section deletion and checks only the remaining document", async () => {
+    const content =
+      "# first note\nconfig route 'selected'\n option target '192.0.2.0/24' # preserved comment\n option interface 'lan'\nconfig route 'other'\n option target '198.51.100.0/24'\n option vendor_note \"untouched\"\n";
+    const fetchMock = mockApi({ documents: [{ module: "network", content }] });
+    const user = userEvent.setup();
+    render(<ConfigurationEditor module="network" />);
+    await user.click(
+      await screen.findByRole("button", { name: "删除当前配置" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "删除配置？" });
+    expect(dialog).toHaveTextContent("192.0.2.0/24");
+    await user.click(
+      within(dialog).getByRole("button", { name: "删除并保留为待应用更改" }),
+    );
+    expect(posts(fetchMock, "stage")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
+    await screen.findByText("检查通过，待应用");
+    expect(
+      JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string).content,
+    ).toBe(
+      "# first note\n # preserved comment\nconfig route 'other'\n option target '198.51.100.0/24'\n option vendor_note \"untouched\"\n",
+    );
+    expect(posts(fetchMock, "commit")).toHaveLength(0);
+  });
   it("retains local edits when switching documents and refreshing", async () => {
     mockApi();
     render(<ConfigurationWorkspace />);
@@ -558,13 +610,13 @@ describe("FullControl configuration", () => {
       name: /\(ipaddr\)/,
     });
     fireEvent.change(input, { target: { value: "192.0.2.2" } });
-    fireEvent.click(screen.getByRole("button", { name: "编辑 wireless" }));
+    fireEvent.click(screen.getByRole("button", { name: "编辑无线配置" }));
     await screen.findByLabelText(/\(key\)/);
     fireEvent.click(screen.getByRole("button", { name: "刷新配置" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "刷新配置" })).toBeEnabled(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "编辑 network" }));
+    fireEvent.click(screen.getByRole("button", { name: "编辑网络配置" }));
     expect(screen.getByRole("textbox", { name: /\(ipaddr\)/ })).toHaveValue(
       "192.0.2.2",
     );
@@ -583,8 +635,8 @@ describe("FullControl configuration", () => {
     expect(screen.getByRole("textbox", { name: /\(ipaddr\)/ })).toHaveValue(
       "192.0.2.2",
     );
-    fireEvent.click(screen.getByRole("button", { name: "暂存并校验" }));
-    await screen.findAllByText("已暂存");
+    fireEvent.click(screen.getByRole("button", { name: "检查更改" }));
+    await screen.findAllByText("检查通过，待应用");
     expect(JSON.parse(posts(fetchMock, "stage")[0][1]!.body as string)).toEqual(
       { module: "network", content: edited, generation: 7 },
     );
@@ -606,8 +658,8 @@ describe("FullControl configuration", () => {
     });
     render(<ConfigurationEditor module="network" />);
     await screen.findByRole("textbox", { name: /\(ipaddr\)/ });
-    await screen.findByText("编辑基线 g7 · 当前 g8");
-    expect(screen.getByRole("button", { name: "暂存并校验" })).toBeDisabled();
+    await screen.findByText(/编辑版本 g7.*当前版本 g8/);
+    expect(screen.getByRole("button", { name: "检查更改" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: /\(ipaddr\)/ })).toHaveValue(
       "192.0.2.2",
     );
@@ -620,7 +672,7 @@ describe("FullControl configuration", () => {
     const dirtyClose = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(dirtyClose);
     expect(dirtyClose.defaultPrevented).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "丢弃本地编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "撤销本地编辑" }));
     const cleanClose = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(cleanClose);
     expect(cleanClose.defaultPrevented).toBe(false);
@@ -647,19 +699,17 @@ describe("FullControl configuration", () => {
     const stale = { ...draft, id: "stale-synthetic", generation: 6 };
     mockApi({ drafts: [invalid, stale] });
     render(<ConfigurationWorkspace />);
-    await screen.findByRole("checkbox", { name: "选择草稿 invalid-synthetic" });
+    await screen.findByRole("checkbox", { name: "选择网络草稿 1" });
     expect(
-      screen.getByRole("checkbox", { name: "选择草稿 invalid-synthetic" }),
+      screen.getByRole("checkbox", { name: "选择网络草稿 1" }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("checkbox", { name: "选择草稿 stale-synthetic" }),
+      screen.getByRole("checkbox", { name: "选择网络草稿 2" }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Commit 已选草稿 (0)" }),
+      screen.getByRole("button", { name: "应用已选更改 (0)" }),
     ).toBeDisabled();
-    fireEvent.click(
-      screen.getByRole("button", { name: "查看差异 invalid-synthetic" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "查看网络草稿 1详情" }));
     expect(screen.getByText("invalid_port")).toBeInTheDocument();
     expect(screen.getByText("端口超出范围")).toBeInTheDocument();
   });
@@ -668,24 +718,19 @@ describe("FullControl configuration", () => {
     const fetchMock = mockApi({ drafts: [older, draft] });
     render(<ConfigurationWorkspace />);
     const checkbox = await screen.findByRole("checkbox", {
-      name: "选择草稿 draft-synthetic",
+      name: "选择网络草稿 2",
     });
     expect(checkbox).toBeChecked();
     expect(
-      screen.getByRole("checkbox", { name: "选择草稿 older-synthetic" }),
+      screen.getByRole("checkbox", { name: "选择网络草稿 1" }),
     ).not.toBeChecked();
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "选择草稿 older-synthetic" }),
-    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择网络草稿 1" }));
     expect(checkbox).not.toBeChecked();
-    fireEvent.click(
-      screen.getByRole("button", { name: "删除草稿 older-synthetic" }),
-    );
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("checkbox", { name: "选择草稿 older-synthetic" }),
-      ).not.toBeInTheDocument(),
-    );
+    const deletedCheckbox = screen.getByRole("checkbox", {
+      name: "选择网络草稿 1",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "删除网络草稿 1" }));
+    await waitFor(() => expect(deletedCheckbox).not.toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/configuration/drafts?id=older-synthetic",
       expect.objectContaining({ method: "DELETE", credentials: "same-origin" }),
@@ -700,9 +745,9 @@ describe("FullControl configuration", () => {
       },
     });
     render(<ConfigurationWorkspace />);
-    const confirm = await screen.findByRole("button", { name: "确认当前连接" });
+    const confirm = await screen.findByRole("button", { name: "确认生效" });
     fireEvent.click(confirm);
-    await screen.findByText(/已提交.*network/);
+    await screen.findByText(/更改已生效.*网络/);
     expect(posts(fetchMock, "confirm")).toHaveLength(1);
     expect(posts(fetchMock, "commit")).toHaveLength(0);
   });
@@ -715,10 +760,10 @@ describe("FullControl configuration", () => {
       },
     });
     const view = render(<ConfigurationWorkspace />);
-    await screen.findByRole("button", { name: "确认当前连接" });
+    await screen.findByRole("button", { name: "确认生效" });
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "刷新提交状态" }),
+        screen.getByRole("button", { name: "刷新应用状态" }),
       ).toBeEnabled(),
     );
     const documentReads = fetchMock.mock.calls.filter(

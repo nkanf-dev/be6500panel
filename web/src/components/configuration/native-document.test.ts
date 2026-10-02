@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   addNativeField,
+  addNativeSection,
+  newNativeSectionName,
+  removeNativeSection,
   changedFields,
   editNativeField,
   nativeSections,
@@ -187,5 +190,37 @@ config rule
     expect(
       addNativeField(document, sections[0], "invalid field", "option"),
     ).toBe(document);
+  });
+});
+
+describe("routine section operations", () => {
+  it("generates unique IDs and appends sections without rewriting the existing document", () => {
+    const content =
+      "# existing\r\nconfig host 'panel_host_1'\r\n option mac '02:00:00:00:00:01' # known\r\n option vendor_note \"keep quotes\"\r\n";
+    expect(newNativeSectionName(content, "host")).toBe("panel_host_2");
+    const added = addNativeSection(content, "host", "panel_host_2", [
+      { name: "name", value: "Workstation" },
+      { name: "mac", value: "02:00:00:00:00:02" },
+      { name: "ip", value: "192.0.2.25" },
+    ]);
+    expect(added).toBe(
+      content +
+        "\r\nconfig host 'panel_host_2'\r\n\toption name 'Workstation'\r\n\toption mac '02:00:00:00:00:02'\r\n\toption ip '192.0.2.25'\r\n",
+    );
+    expect(nativeSections(added)[1].fields.map((field) => field.value)).toEqual(
+      ["Workstation", "02:00:00:00:00:02", "192.0.2.25"],
+    );
+    expect(addNativeSection(content, "host", "panel_host_1", [])).toBe(content);
+    expect(addNativeSection(content, "host", "unsafe name", [])).toBe(content);
+  });
+  it("deletes only the selected section statements, keeping comments and neighboring vendor settings", () => {
+    const content =
+      "# header\nconfig host 'first' # selected host\n option mac '02:00:00:00:00:01' # keep note\n option vendor_x 'remove with selected section'\n\n# next lease comment\nconfig host 'second'\n option vendor_y \"unchanged\" # quote style\n";
+    const removed = removeNativeSection(content, nativeSections(content)[0]);
+    expect(removed).toBe(
+      "# header\n# selected host\n # keep note\n\n# next lease comment\nconfig host 'second'\n option vendor_y \"unchanged\" # quote style\n",
+    );
+    expect(nativeSections(removed)).toHaveLength(1);
+    expect(nativeSections(removed)[0].name).toBe("second");
   });
 });

@@ -38,6 +38,9 @@
 .configuration-tabs {
   display: flex;
   gap: var(--space-1);
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 .configuration-tabs button {
   display: flex;
@@ -539,5 +542,172 @@
   .configuration-documents th:nth-child(2),
   .configuration-documents td:nth-child(2) {
     display: none;
+  }
+}
+
+.configuration-technical-details {
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+}
+.configuration-technical-details summary {
+  cursor: pointer;
+}
+.configuration-technical-details > :not(summary) {
+  overflow-wrap: anywhere;
+}
+
+.configuration-section-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.configuration-section-menu {
+  z-index: 62;
+  min-width: 12rem;
+  max-width: calc(100vw - var(--space-6));
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-panel);
+}
+.configuration-section-menu [role="menuitem"] {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+.configuration-section-menu [data-highlighted] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.configuration-section-dialog {
+  position: fixed;
+  z-index: 61;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(36rem, calc(100vw - var(--space-6)));
+  max-height: calc(100dvh - var(--space-6));
+  overflow: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-panel);
+}
+.configuration-section-dialog h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+.configuration-section-dialog > p {
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.configuration-section-form {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.configuration-section-field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+.configuration-section-field > label {
+  font-weight: 600;
+}
+.configuration-section-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+}
+.configuration-section-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.configuration-section-input[aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+.configuration-section-hint,
+.configuration-section-error {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+.configuration-section-hint,
+.configuration-section-advanced {
+  color: var(--muted-foreground);
+}
+.configuration-section-error {
+  color: var(--destructive);
+}
+.configuration-section-advanced {
+  font-size: var(--text-xs);
+}
+.configuration-section-advanced summary {
+  cursor: pointer;
+  margin-bottom: var(--space-2);
+}
+.configuration-section-delete-summary {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.configuration-advanced-details {
+  max-width: 100%;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+.configuration-advanced-details summary {
+  cursor: pointer;
+  padding: var(--space-1) 0;
+}
+.configuration-advanced-details summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.configuration-advanced-details p {
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .configuration-field-item > input,
+  .configuration-field-item > textarea,
+  .configuration-field-item > select,
+  .configuration-add-field > input,
+  .configuration-add-field > select,
+  .configuration-section-input {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  .configuration-checkbox input {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  .configuration-section-actions .button,
+  .configuration-dialog-footer .button {
+    min-height: 44px;
   }
 }

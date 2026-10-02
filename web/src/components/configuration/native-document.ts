@@ -245,6 +245,93 @@ export function addNativeField(
   return content.slice(0, position) + added + content.slice(position);
 }
 
+export function nativeSectionLabel(section: NativeSection): string {
+  for (const name of ["name", "ssid", "hostname", "target", "ip"]) {
+    const value = section.fields.find((field) => field.name === name)?.value;
+    if (value) return value;
+  }
+  if (!section.name.startsWith("panel_") && !section.name.startsWith("匿名 "))
+    return section.name;
+  const device = section.fields.find((field) => field.name === "device")?.value;
+  return device || `配置 ${Number(section.id.replace("section-", "")) + 1}`;
+}
+
+export interface NewNativeField {
+  name: string;
+  value: string;
+  kind?: NativeField["kind"];
+}
+
+/** Friendly forms create new sections with generated, collision-free UCI IDs. */
+export function newNativeSectionName(content: string, type: string): string {
+  const stem = type.replace(/[^A-Za-z0-9_]/g, "_");
+  const names = new Set(nativeSections(content).map((section) => section.name));
+  let index = 1;
+  while (names.has(`panel_${stem}_${index}`)) index++;
+  return `panel_${stem}_${index}`;
+}
+
+export function addNativeSection(
+  content: string,
+  type: string,
+  name: string,
+  fields: readonly NewNativeField[],
+): string {
+  if (
+    !/^[A-Za-z0-9_-]+$/.test(type) ||
+    !/^[A-Za-z0-9_-]+$/.test(name) ||
+    nativeSections(content).some((section) => section.name === name) ||
+    fields.some((field) => !/^[A-Za-z0-9_-]+$/.test(field.name))
+  )
+    return content;
+  const newline = content.includes("\r\n") ? "\r\n" : "\n";
+  const prefix = !content
+    ? ""
+    : content.endsWith(newline + newline)
+      ? ""
+      : content.endsWith(newline)
+        ? newline
+        : newline + newline;
+  const body = [
+    `config ${type} ${quoteValue(name)}`,
+    ...fields.map(
+      (field) =>
+        `\t${field.kind ?? "option"} ${field.name} ${quoteValue(field.value)}`,
+    ),
+  ].join(newline);
+  return content + prefix + body + newline;
+}
+
+/** Remove config/option/list statements only. Retain comments, blank lines,
+ * unknown vendor directives and all neighboring sections byte-for-byte.
+ */
+export function removeNativeSection(
+  content: string,
+  section: NativeSection,
+): string {
+  const owned = statements(content).filter(
+    (statement) =>
+      statement.start >= section.offset &&
+      statement.start < section.end &&
+      ["config", "option", "list"].includes(statement.tokens[0]?.value),
+  );
+  let updated = content;
+  for (const statement of owned.reverse()) {
+    const comment =
+      statement.commentStart === undefined
+        ? ""
+        : (content
+            .slice(statement.start, statement.end)
+            .match(/^[\t ]*/)?.[0] ?? "") +
+          content.slice(statement.commentStart, statement.fullEnd);
+    updated =
+      updated.slice(0, statement.start) +
+      comment +
+      updated.slice(statement.fullEnd);
+  }
+  return updated;
+}
+
 /** Summarize changed field names, never values, in the risk acknowledgment.
  * Whole-document diffs can include unchanged lines on both sides. Cancel those.
  */
