@@ -7,6 +7,10 @@
   align-items: start;
   gap: 16px;
 }
+.dashboard-toolbar > div {
+  min-width: 0;
+  max-width: 100%;
+}
 .dashboard-toolbar h2 {
   display: flex;
   flex-wrap: wrap;
@@ -123,6 +127,10 @@
   min-width: 0;
   cursor: pointer;
 }
+.dashboard-visibility > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .dashboard-visibility input {
   accent-color: var(--primary);
   width: 16px;
@@ -160,6 +168,9 @@
   justify-content: space-between;
   padding: 12px 0;
   border-top: 1px solid var(--border);
+}
+.dashboard-device-list > li > span:first-child {
+  min-width: 0;
 }
 .dashboard-device-list strong {
   display: block;
