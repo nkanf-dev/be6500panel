@@ -672,3 +672,142 @@ func TestOwnedRulesFakeIPOptInPreservesRealPrivateAddresses(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnedRulesRouterDNSOptInRedirectsBeforeLocalReturn(t *testing.T) {
+	for _, follow := range []bool{false, true} {
+		t.Run(fmt.Sprintf("follow=%v", follow), func(t *testing.T) {
+			input := ownedTestInput()
+			input.Ports = Ports{Mixed: 2080, TProxy: 7893, DNS: 1053}
+			input.FakeIP = false
+			input.RouterDNSAddresses = []string{"192.168.31.1", "192.168.31.1"}
+			if follow {
+				input.IPv6 = IPv6Follow
+				input.ClientIPv6 = "2001:db8::42"
+				input.ManagementIPs = append(input.ManagementIPs, "fd12::1")
+				input.RouterDNSAddresses = append(input.RouterDNSAddresses, "fd12:0:0:0:0:0:0:1")
+			}
+			plan := ownedTestPlan(t, input)
+			for _, family := range []int{4, 6} {
+				tool, address, chain := "iptables", "192.168.31.1/32", "B6P_V4_DNS"
+				if family == 6 {
+					if !follow {
+						continue
+					}
+					tool, address, chain = "ip6tables", "fd12::1/128", "B6P_V6_DNS"
+				}
+				local := ownedFindCommand(plan.Apply, tool, "-w", "5", "-t", "nat", "-A", chain, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "RETURN")
+				for _, protocol := range []string{"tcp", "udp"} {
+					prefix := []string{tool, "-w", "5", "-t", "nat", "-A", chain, "-d", address, "-p", protocol, "--dport", "53", "-j", "REDIRECT", "--to-ports", "1053"}
+					redirect := ownedFindCommand(plan.Apply, prefix...)
+					if redirect < 0 || local <= redirect {
+						t.Fatalf("explicit router DNS redirect does not precede LOCAL bypass: family=%d protocol=%s", family, protocol)
+					}
+					count := 0
+					for _, command := range plan.Apply {
+						if slices.Equal(command, prefix) {
+							count++
+						}
+					}
+					if count != 1 {
+						t.Fatal("duplicate RouterDNSAddresses generated duplicate redirect rules")
+					}
+				}
+			}
+			for _, tc := range []struct {
+				chain, address, protocol string
+				port                     int
+				local                    bool
+				want                     string
+			}{
+				{"B6P_V4_DNS", "192.168.31.1", "udp", 53, true, "REDIRECT"},
+				{"B6P_V4_DNS", "192.168.31.1", "tcp", 53, true, "REDIRECT"},
+				{"B6P_V4_DNS", "192.168.31.1", "tcp", 22, true, "RETURN"},
+				{"B6P_V4_DNS", "192.168.31.1", "tcp", 8787, true, "RETURN"},
+				{"B6P_V4_DNS", "192.168.31.9", "udp", 53, true, "RETURN"},
+				{"B6P_V4_CAPTURE", "192.168.31.1", "udp", 53, true, "RETURN"},
+				{"B6P_V4_CAPTURE", "192.168.31.1", "tcp", 22, true, "RETURN"},
+			} {
+				if got := ownedTestVerdict(t, plan.Apply, tc.chain, tc.address, tc.protocol, tc.port, tc.local); got != tc.want {
+					t.Fatalf("router DNS/control %s:%d got %s want %s", tc.address, tc.port, got, tc.want)
+				}
+			}
+			if follow {
+				if got := ownedTestVerdict(t, plan.Apply, "B6P_V6_DNS", "fd12::1", "udp", 53, true); got != "REDIRECT" {
+					t.Fatal("IPv6 router DNS missing opt-in")
+				}
+				if got := ownedTestVerdict(t, plan.Apply, "B6P_V6_DNS", "fd12::2", "udp", 53, true); got != "RETURN" {
+					t.Fatal("other IPv6 router address was redirected")
+				}
+				if got := ownedTestVerdict(t, plan.Apply, "B6P_V6_CAPTURE", "fc00::2", "tcp", 443, false); got != "RETURN" {
+					t.Fatal("router DNS opt-in changed fake-off ULA bypass")
+				}
+			}
+			// There is no rule widening DNS to another client. Every NAT PREROUTING
+			// hook still has the exact selected client's source and LAN interface.
+			for _, command := range plan.Apply {
+				if command[0] == "iptables" || command[0] == "ip6tables" {
+					if command[5] == "-I" {
+						source := "192.168.31.42/32"
+						if command[0] == "ip6tables" {
+							source = "2001:db8::42/128"
+						}
+						if !ownedHasArgs(command, "-i", "br-lan", "-s", source) {
+							t.Fatalf("router DNS hook widened selected client: %v", command)
+						}
+					}
+				}
+			}
+			without := input
+			without.RouterDNSAddresses = nil
+			original := ownedTestPlan(t, without)
+			if !reflect.DeepEqual(original.Cleanup, plan.Cleanup) || !reflect.DeepEqual(original.Ownership, plan.Ownership) {
+				t.Fatal("router DNS opt-in changed owned cleanup or scope")
+			}
+			if got := ownedTestVerdict(t, original.Apply, "B6P_V4_DNS", "192.168.31.1", "udp", 53, true); got != "RETURN" {
+				t.Fatal("router DNS redirected without opt-in")
+			}
+		})
+	}
+}
+
+func TestOwnedRulesRouterDNSRequiresExplicitRouterManagementSubset(t *testing.T) {
+	for _, addresses := range [][]string{
+		{"example.com"}, {"192.168.31.1/32"}, {"192.168.31.9"}, {"0.0.0.0"}, {"127.0.0.1"},
+		{"224.0.0.1"}, {"255.255.255.255"}, {"fe80::1"}, {"fe80::1%br-lan"}, {"::ffff:192.168.31.1"},
+	} {
+		input := ownedTestInput()
+		input.RouterDNSAddresses = addresses
+		// The unsafe literal addresses must be refused even if also listed as
+		// management. Literal parsing still rejects hostnames/prefix/zone/mapped.
+		if addresses[0] != "192.168.31.9" {
+			input.ManagementIPs = append(input.ManagementIPs, addresses[0])
+		}
+		plan, err := PlanOwnedRules(input)
+		if err == nil || !reflect.DeepEqual(plan, OwnedRulesPlan{}) {
+			t.Fatalf("unsafe router DNS input accepted: %v", addresses)
+		}
+	}
+	input := ownedTestInput()
+	input.RouterDNSAddresses = make([]string, 17)
+	for i := range input.RouterDNSAddresses {
+		input.RouterDNSAddresses[i] = "192.168.31.1"
+	}
+	if _, err := PlanOwnedRules(input); err == nil {
+		t.Fatal("router DNS address limit not enforced")
+	}
+	// IPv6 direct and block do not install a NAT IPv6 redirect even if the
+	// future owner enumerates router IPv6 addresses ahead of a later follow.
+	for _, mode := range []IPv6Mode{IPv6Direct, IPv6Block} {
+		input = ownedTestInput()
+		input.IPv6 = mode
+		input.ClientIPv6 = "2001:db8::42"
+		input.ManagementIPs = append(input.ManagementIPs, "fd12::1")
+		input.RouterDNSAddresses = []string{"fd12::1"}
+		plan := ownedTestPlan(t, input)
+		for _, command := range plan.Apply {
+			if command[0] == "ip6tables" && command[4] == "nat" {
+				t.Fatal("non-follow mode redirected router IPv6 DNS")
+			}
+		}
+	}
+}
