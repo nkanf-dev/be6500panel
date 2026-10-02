@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -128,33 +130,41 @@ func ParseClashYAML(r io.Reader) (Subscription, error) {
 // decoder has no streaming event/AST allocation limit. A byte limit alone is
 // not sufficient: a 2 MiB flow sequence can otherwise allocate >170 MiB.
 //
-// Count conservative lexical units, including punctuation inside quoted text
-// (overcounting is intentional). Each scalar/collection/null node requires a
+// Count Unicode word runs and individual non-word runes, including punctuation
+// inside quoted text. UTF-8 byte length must not turn Chinese node/group labels
+// into apparent YAML structures. ASCII YAML indicators are still charged each.
+// Overcounting is intentional. Each scalar/collection/null node requires a
 // run or delimiter. This conservative budget bounds tree amplification before
 // decoding. Collections and indentation have separate admission limits. This is an admission filter, not a second
 // YAML parser: yaml.v3 still decides all actual syntax and semantic values.
-const maxYAMLLexicalUnits = 65536
+const maxYAMLLexicalUnits = 131072
 
 func preflightYAML(data []byte) error {
-	units, run := 0, 0
-	for _, c := range data {
-		word := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
+	units, runBytes := 0, 0
+	for i := 0; i < len(data); {
+		r, size := utf8.DecodeRune(data[i:])
+		if r == utf8.RuneError && size == 1 {
+			return fmt.Errorf("subscription YAML must be valid UTF-8")
+		}
+		i += size
+		word := r == '_' || unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r)
 		if word {
-			if run == 0 {
+			if runBytes == 0 {
 				units++
 			}
-			run++
-			if run > 8192 {
+			runBytes += size
+			if runBytes > 8192 {
 				return fmt.Errorf("subscription YAML scalar admission limit exceeded")
 			}
 		} else {
 			units++
-			run = 0
+			runBytes = 0
 		}
 		if units > maxYAMLLexicalUnits {
 			return fmt.Errorf("subscription YAML lexical budget exceeded")
 		}
 	}
+
 	// Syntax-agnostic structural admission avoids relying on quote parsing
 	// for a resource limit. Count even harmless brackets in names/comments.
 	// Accepted subscription syntax normally uses only a few nesting levels.

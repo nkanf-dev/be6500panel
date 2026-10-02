@@ -198,6 +198,86 @@ func TestSyntheticProductionSizedSubscription(t *testing.T) {
 		t.Fatalf("unexpected synthetic scale: %v", sub)
 	}
 }
+
+func unicodeProductionFixture() string {
+	var b strings.Builder
+	b.WriteString("proxies:\n")
+	block := syntheticYAML[strings.Index(syntheticYAML, "  - name:"):strings.Index(syntheticYAML, "proxy-groups:")]
+	nodeName := func(i int) string { return fmt.Sprintf("🇨🇳 合成订阅测试节点-华北东区编号%d", i) }
+	groupName := func(i int) string { return fmt.Sprintf("合成选择组-中国直连与国际代理分流策略%d", i) }
+	for i := 0; i < 170; i++ {
+		b.WriteString(strings.Replace(block, "synthetic-node", nodeName(i), 1))
+	}
+	b.WriteString("proxy-groups:\n")
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(&b, "  - name: %s\n    type: select\n    proxies:\n", groupName(i))
+		for j := 0; j < 170; j++ {
+			fmt.Fprintf(&b, "      - %s\n", nodeName(j))
+		}
+	}
+	b.WriteString("dns:\n  enhanced-mode: fake-ip\nrules:\n")
+	for i := 0; i < 1020; i++ {
+		fmt.Fprintf(&b, "  - DOMAIN-SUFFIX,n%d.example.com,%s\n", i, groupName(i%10))
+	}
+	return b.String()
+}
+func TestUnicodeProductionScaleIsNotChargedAsUTF8ByteTokens(t *testing.T) {
+	data := unicodeProductionFixture()
+	if len(data) < 162723 || len(data) > MaxSubscriptionBytes {
+		t.Fatalf("unexpected synthetic UTF-8 scale: %d bytes", len(data))
+	}
+	sub, err := ParseClashYAML(strings.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sub.Nodes) != 170 || sub.GroupCount != 10 || len(sub.Rules) != 1020 || !sub.FakeIP {
+		t.Fatal("Unicode subscription lost entries")
+	}
+	if !strings.Contains(sub.PublicNodes()[0].Label, "合成订阅测试节点") {
+		t.Fatal("Unicode label was changed")
+	}
+	for _, d := range sub.Diagnostics {
+		if d.Scope == "rule" {
+			t.Fatal("Unicode selector rule target was not recognized")
+		}
+	}
+	// This is a Unicode rune resource budget, not a UTF-8 byte budget. Word
+	// letters are one run; symbols/punctuation are individually charged runes.
+	if err := preflightYAML([]byte(strings.Repeat("中", 2000))); err != nil {
+		t.Fatal("Chinese word run charged by bytes")
+	}
+	if err := preflightYAML([]byte(strings.Repeat("🇨", maxYAMLLexicalUnits+1))); err == nil {
+		t.Fatal("Unicode symbols escaped lexical budget")
+	}
+	if err := preflightYAML([]byte{'a', 0xff}); err == nil {
+		t.Fatal("invalid UTF-8 passed admission")
+	}
+}
+func BenchmarkParseUnicodeProduction(b *testing.B) {
+	data := unicodeProductionFixture()
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+	for i := 0; i < b.N; i++ {
+		if _, err := ParseClashYAML(strings.NewReader(data)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+func BenchmarkParseNearLexicalBudget(b *testing.B) {
+	// Every null block-list entry is a charged '-' and newline. This is close
+	// to maximum AST amplification within the budget, not a huge word scalar.
+	data := syntheticYAML + "extra:\n" + strings.Repeat("-\n", (maxYAMLLexicalUnits-2048)/2)
+	if err := preflightYAML([]byte(data)); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+	for i := 0; i < b.N; i++ {
+		if _, err := ParseClashYAML(strings.NewReader(data)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
 func TestKnownRules(t *testing.T) {
 	for _, s := range []string{"DOMAIN,example.com,DIRECT", "DOMAIN-SUFFIX,example.com,PROXY", "DOMAIN-KEYWORD,example,REJECT", "IP-CIDR6,2001:db8::/32,DIRECT,no-resolve", "GEOSITE,CN,DIRECT", "FINAL,PROXY"} {
 		if _, code, _ := parseRule(s, nil); code != "" {
