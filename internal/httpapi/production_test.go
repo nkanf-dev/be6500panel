@@ -50,3 +50,16 @@ func TestLargeEndpointDecoderKeepsStrictness(t *testing.T) {
 		t.Fatal("case override")
 	}
 }
+
+func TestProductionAPIsRequireAuth(t *testing.T) {
+	s, ts := testServer(t, "private-test-password")
+	defer ts.Close()
+	defer s.Close()
+	for _, path := range []string{"/api/router", "/api/runtime", "/api/configuration", "/api/proxy/nodes", "/api/runtime/config?service=sing-box"} {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != 401 {
+			t.Fatalf("%s=%d", path, w.Code)
+		}
+	}
+}
