@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -133,11 +134,15 @@ func TestMultiClientJournalRejectsIncompleteOrChangedScope(t *testing.T) {
 }
 
 func TestMultiClientClonePlanOwnsClientSlices(t *testing.T) {
-	p := multiClientPlan(t, proxy.IPv6Follow)
+	p, err := proxy.PlanOwnedRules(multiClientMACInput(proxy.IPv6Follow))
+	if err != nil {
+		t.Fatal(err)
+	}
 	original := clonePlan(p)
 	cloned := clonePlan(p)
 	cloned.Ownership.ClientIPv4s[0] = "192.0.2.99"
 	cloned.Ownership.ClientIPv6s[0] = "2001:db8::99"
+	cloned.Ownership.ClientMACs["192.0.2.10"] = "02:ff:ff:ff:ff:99"
 	cloned.Apply[0][0] = "changed"
 	cloned.Cleanup[0][0] = "changed"
 	cloned.OnFailure[0][0] = "changed"
@@ -342,5 +347,211 @@ func TestMultiClientCleanupAttemptsAllAfterOneClientFailure(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, p.Cleanup) {
 		t.Fatal("retry skipped cleanup of some exact clients")
+	}
+}
+
+func multiClientMACInput(mode proxy.IPv6Mode) proxy.RulesPlanInput {
+	in := multiClientInput(mode)
+	in.ClientMACs = map[string]string{"192.0.2.10": "02:11:22:33:44:10", "192.0.2.11": "02:11:22:33:44:11"}
+	if mode != proxy.IPv6Direct {
+		in.ClientMACs["2001:db8::10"] = "02:11:22:33:44:10"
+		in.ClientMACs["2001:db8::11"] = "02:11:22:33:44:11"
+	}
+	return in
+}
+
+func TestClientMACJournalRoundTripWithAndWithoutInput(t *testing.T) {
+	for _, mode := range []proxy.IPv6Mode{proxy.IPv6Direct, proxy.IPv6Follow, proxy.IPv6Block} {
+		for _, omitted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/input-omitted=%v", mode, omitted), func(t *testing.T) {
+				in := multiClientMACInput(mode)
+				p, err := proxy.PlanOwnedRules(in)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stored := journal{OwnedRulesPlan: clonePlan(p), Input: &in}
+				if omitted {
+					stored.Input = nil
+				}
+				stored.Apply = [][]string{{"sh", "-c", "never execute stored apply"}}
+				raw, err := json.Marshal(stored)
+				if err != nil {
+					t.Fatal(err)
+				}
+				dir := t.TempDir()
+				if err = os.WriteFile(filepath.Join(dir, "capture-journal.json"), raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+				var calls [][]string
+				c, err := New(dir, func(_ context.Context, a []string) ([]byte, error) {
+					calls = append(calls, slices.Clone(a))
+					return nil, nil
+				})
+				if err != nil || len(calls) != 0 || !reflect.DeepEqual(*c.plan, p) {
+					t.Fatalf("MAC journal did not recompile exact pairs without execution: %v", err)
+				}
+				if err = c.Cleanup(context.Background()); err != nil || !reflect.DeepEqual(calls, p.Cleanup) {
+					t.Fatalf("recovery did not clean exact IP/MAC hooks: %v %v", calls, err)
+				}
+				// Recovery must not expose caller-owned journal map storage either.
+				recovered, err := recoveredPlan(stored)
+				if err != nil {
+					t.Fatal(err)
+				}
+				recovered.Ownership.ClientMACs["192.0.2.10"] = "02:ff:ff:ff:ff:99"
+				if !maps.Equal(stored.Ownership.ClientMACs, p.Ownership.ClientMACs) || in.ClientMACs["192.0.2.10"] != "02:11:22:33:44:10" {
+					t.Fatal("recovery shares ownership or input MAC map")
+				}
+			})
+		}
+	}
+}
+
+func TestClientMACJournalRejectsChangedPairsOrBroadenedHooks(t *testing.T) {
+	for _, omitted := range []bool{false, true} {
+		for _, change := range []string{"missing-map", "missing-v4", "missing-v6", "changed-mac", "extra-key", "noncanonical-key", "noncanonical-mac", "missing-match", "wrong-hook-mac", "input-mismatch"} {
+			t.Run(fmt.Sprintf("%s/input-omitted=%v", change, omitted), func(t *testing.T) {
+				in := multiClientMACInput(proxy.IPv6Follow)
+				p, err := proxy.PlanOwnedRules(in)
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch change {
+				case "missing-map":
+					p.Ownership.ClientMACs = nil
+				case "missing-v4":
+					delete(p.Ownership.ClientMACs, "192.0.2.10")
+				case "missing-v6":
+					delete(p.Ownership.ClientMACs, "2001:db8::10")
+				case "changed-mac":
+					p.Ownership.ClientMACs["192.0.2.10"] = "02:ff:ff:ff:ff:99"
+				case "extra-key":
+					p.Ownership.ClientMACs["192.0.2.99"] = "02:ff:ff:ff:ff:99"
+				case "noncanonical-key":
+					p.Ownership.ClientMACs["2001:0db8::0010"] = p.Ownership.ClientMACs["2001:db8::10"]
+					delete(p.Ownership.ClientMACs, "2001:db8::10")
+				case "noncanonical-mac":
+					p.Ownership.ClientMACs["192.0.2.10"] = "02-11-22-33-44-10"
+				case "missing-match", "wrong-hook-mac":
+					for i, argv := range p.Cleanup {
+						if idx := slices.Index(argv, "--mac-source"); idx >= 0 {
+							if change == "missing-match" {
+								p.Cleanup[i] = append(slices.Clone(argv[:idx-2]), argv[idx+2:]...)
+							} else {
+								argv[idx+1] = "02:ff:ff:ff:ff:99"
+							}
+							break
+						}
+					}
+				case "input-mismatch":
+					if omitted {
+						return // No input is stored in ownership-only journals.
+					}
+					in.ClientMACs["192.0.2.10"] = "02:ff:ff:ff:ff:99"
+				}
+				stored := journal{OwnedRulesPlan: p, Input: &in}
+				if omitted {
+					stored.Input = nil
+				}
+				if _, err = recoveredPlan(stored); err == nil {
+					t.Fatal("accepted journal not matching compiled exact IP/MAC ownership and cleanup")
+				}
+			})
+		}
+	}
+}
+
+func TestClientMACApprovalsRequireExactApplyCleanupAndObservationHooks(t *testing.T) {
+	p, err := proxy.PlanOwnedRules(multiClientMACInput(proxy.IPv6Follow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Controller{plan: &p}
+	var hooks [][]string
+	for _, argv := range p.Apply {
+		if argv[0] != "ip" && argv[5] == "-I" {
+			hooks = append(hooks, slices.Clone(argv))
+			check := slices.Clone(argv)
+			check[5] = "-C"
+			check = append(check[:7], check[8:]...)
+			hooks = append(hooks, check)
+		}
+	}
+	for _, argv := range p.Cleanup {
+		if argv[0] != "ip" && argv[5] == "-D" {
+			hooks = append(hooks, slices.Clone(argv))
+		}
+	}
+	if len(hooks) != 24 {
+		t.Fatalf("unexpected paired hook count: %d", len(hooks))
+	}
+	for _, argv := range hooks {
+		if err = c.approvedCommand(argv); err != nil {
+			t.Fatalf("compiled exact MAC hook rejected: %v %v", argv, err)
+		}
+		idx := slices.Index(argv, "--mac-source")
+		if idx < 0 {
+			t.Fatalf("compiled hook has no exact MAC match: %v", argv)
+		}
+		wrongMAC := slices.Clone(argv)
+		wrongMAC[idx+1] = "02:ff:ff:ff:ff:99"
+		withoutMAC := append(slices.Clone(argv[:idx-2]), argv[idx+2:]...)
+		if c.approvedCommand(wrongMAC) == nil || c.approvedCommand(withoutMAC) == nil {
+			t.Fatalf("hook approval allowed reused IP with unknown MAC or no identity: %v", argv)
+		}
+	}
+}
+
+func TestClientMACReconcileChecksExactPairsDespiteCompleteIPPolicy(t *testing.T) {
+	for _, missing := range []string{"none", "nat", "mangle"} {
+		t.Run(missing, func(t *testing.T) {
+			c := testController(t, idleRunner)
+			if _, err := c.Apply(context.Background(), multiClientMACInput(proxy.IPv6Follow)); err != nil {
+				t.Fatal(err)
+			}
+			p := clonePlan(*c.plan)
+			checks := make(map[string]int)
+			c.runner = func(_ context.Context, argv []string) ([]byte, error) {
+				if !isReadCommand(argv) {
+					t.Fatalf("MAC reconcile mutated resources: %v", argv)
+				}
+				if argv[0] == "ip" {
+					if argv[2] == "route" {
+						return []byte("local default dev lo scope host\n"), nil
+					}
+					clients := p.Ownership.ClientIPv4s
+					if argv[1] == "-6" {
+						clients = p.Ownership.ClientIPv6s
+					}
+					var lines string
+					for _, client := range clients {
+						lines += multiClientRuleLine(client)
+					}
+					return []byte(lines), nil
+				}
+				if argv[5] == "-C" && argv[6] == "PREROUTING" {
+					idx := slices.Index(argv, "--mac-source")
+					if idx < 0 || argv[idx+1] != p.Ownership.ClientMACs[strings.Split(argv[slices.Index(argv, "-s")+1], "/")[0]] {
+						t.Fatalf("observation lost exact IP/MAC pair: %v", argv)
+					}
+					checks[argv[4]]++
+					if argv[4] == missing && slices.Contains(argv, "192.0.2.11/32") {
+						return []byte(argv[0] + ": Bad rule (does a matching rule exist in that chain?)."), errors.New("exit status 1")
+					}
+				}
+				return nil, nil
+			}
+			s, err := c.Reconcile(context.Background())
+			if missing == "none" {
+				if err != nil || !s.Active || s.CleanupPending {
+					t.Fatalf("complete exact pairs not active: %+v %v", s, err)
+				}
+			} else if err == nil || s.Active || !s.CleanupPending {
+				t.Fatalf("complete IP policies concealed missing exact MAC hook: %+v %v", s, err)
+			}
+			if checks["nat"] != 4 || checks["mangle"] != 4 {
+				t.Fatalf("not every client/family exact MAC hook observed: %v", checks)
+			}
+		})
 	}
 }

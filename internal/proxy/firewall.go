@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
 	"regexp"
 	"slices"
@@ -26,6 +27,11 @@ const (
 // valid and are merged with plural fields when both are supplied. All client
 // entries are literal addresses, never hostnames, prefixes, comma-separated
 // lists or interface-zone-qualified addresses.
+// Optional ClientMACs binds exact sources to their layer-2 identities. A supplied
+// map must cover every IPv4 and active IPv6 source, and cannot contain any other
+// address. IP and unicast six-byte MAC literals are canonicalized. A nil map
+// preserves legacy IP-only intent for standalone
+// compiler callers. Mapped hooks require both exact source IP and source MAC.
 // ManagementIPs and EndpointIPs bypass capture except for explicitly selected
 // RouterDNSAddresses on TCP/UDP port 53. RouterDNSAddresses must be a subset
 // of ManagementIPs sourced from actual router LAN addresses by the owner.
@@ -40,8 +46,9 @@ const (
 type RulesPlanInput struct {
 	ClientIPv4         string
 	ClientIPv6         string
-	ClientIPv4s        []string `json:",omitempty"`
-	ClientIPv6s        []string `json:",omitempty"`
+	ClientIPv4s        []string          `json:",omitempty"`
+	ClientIPv6s        []string          `json:",omitempty"`
+	ClientMACs         map[string]string `json:",omitempty"`
 	LANInterface       string
 	Ports              Ports
 	IPv6               IPv6Mode
@@ -72,8 +79,9 @@ type RulesOwnership struct {
 	LANInterface  string
 	ClientIPv4    string
 	ClientIPv6    string
-	ClientIPv4s   []string `json:",omitempty"`
-	ClientIPv6s   []string `json:",omitempty"`
+	ClientIPv4s   []string          `json:",omitempty"`
+	ClientIPv6s   []string          `json:",omitempty"`
+	ClientMACs    map[string]string `json:",omitempty"`
 	RouteFamilies []int
 	Chains        []OwnedChain
 }
@@ -143,6 +151,11 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	default:
 		return OwnedRulesPlan{}, fmt.Errorf("invalid IPv6 mode")
 	}
+	clientMACs, err := ownedClientMACs(input.ClientMACs, v4, v6, input.IPv6)
+	if err != nil {
+		return OwnedRulesPlan{}, fmt.Errorf("ClientMACs: %w", err)
+	}
+	input.ClientMACs = clientMACs
 	switch input.Failure {
 	case FailureDirect:
 	case FailureBlockProxy:
@@ -175,7 +188,7 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	plan := OwnedRulesPlan{
 		Ownership: RulesOwnership{
 			Mark: CaptureMark, Mask: CaptureMask, RouteTable: CaptureTable, RulePriority: CapturePriority,
-			LANInterface: input.LANInterface,
+			LANInterface: input.LANInterface, ClientMACs: clientMACs,
 		},
 		Warnings: []string{
 			"Intent only: verify unused mark 0x4000, chains, table 16500 and priority 16500; serialize generations before applying. No idempotence or rollback success is assumed.",
@@ -283,6 +296,46 @@ func ownedClientAddresses(singular string, plural []string, family int) ([]netip
 		clients = append(clients, netip.MustParseAddr(value))
 	}
 	return clients, nil
+}
+
+func ownedClientMACs(raw map[string]string, v4, v6 []netip.Addr, mode IPv6Mode) (map[string]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	if len(raw) > 2*MaxCaptureClientsPerFamily {
+		return nil, fmt.Errorf("at most %d exact source IP/MAC pairs", 2*MaxCaptureClientsPerFamily)
+	}
+	selected := make(map[string]bool, len(v4)+len(v6))
+	for _, addr := range v4 {
+		selected[addr.String()] = true
+	}
+	if mode != IPv6Direct {
+		for _, addr := range v6 {
+			selected[addr.String()] = true
+		}
+	}
+	canonical := make(map[string]string, len(raw))
+	for source, value := range raw {
+		addr, err := ownedLiteralAddress(source)
+		if err != nil || !selected[addr.String()] {
+			return nil, fmt.Errorf("keys must be selected exact IPv4 or active IPv6 client addresses")
+		}
+		key := addr.String()
+		if _, exists := canonical[key]; exists {
+			return nil, fmt.Errorf("duplicate canonical source address %s", key)
+		}
+		mac, err := net.ParseMAC(value)
+		if err != nil || len(mac) != 6 || mac[0]&1 != 0 || slices.Equal([]byte(mac), []byte{0, 0, 0, 0, 0, 0}) {
+			return nil, fmt.Errorf("source %s requires a nonzero unicast six-byte MAC address", key)
+		}
+		canonical[key] = mac.String()
+	}
+	for source := range selected {
+		if _, exists := canonical[source]; !exists {
+			return nil, fmt.Errorf("every selected IPv4 and active IPv6 client requires an exact source MAC")
+		}
+	}
+	return canonical, nil
 }
 
 func ownedClientStrings(clients []netip.Addr) []string {
@@ -421,7 +474,12 @@ func (b *ownedRulesBuilder) chain(family int, table, name, hook string) {
 }
 
 func (b *ownedRulesBuilder) hook(family int, table, name, hook string, client netip.Addr) {
-	b.hooks = append(b.hooks, ownedIPTables(family, table, "-I", hook, "1", "-i", b.input.LANInterface, "-s", ownedHostPrefix(client), "-j", name))
+	args := []string{"-I", hook, "1", "-i", b.input.LANInterface, "-s", ownedHostPrefix(client)}
+	if mac, exists := b.input.ClientMACs[client.String()]; exists {
+		args = append(args, "-m", "mac", "--mac-source", mac)
+	}
+	args = append(args, "-j", name)
+	b.hooks = append(b.hooks, ownedIPTables(family, table, args...))
 }
 
 func (b *ownedRulesBuilder) prelude(family int, table, chain string) {

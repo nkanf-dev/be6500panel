@@ -100,6 +100,17 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 	} else {
 		input.ClientIPv4s = addresses
 	}
+	// Enforce both current IP and authorized layer-2 identity at the hook.
+	// A DHCP address reused between observations cannot intercept a new MAC.
+	input.ClientMACs = make(map[string]string, len(addresses)+1)
+	for _, client := range clients {
+		if client.IP != "" {
+			input.ClientMACs[client.IP] = client.MAC
+		}
+	}
+	if d.IPv6 != proxy.IPv6Direct && len(d.Devices) == 1 {
+		input.ClientMACs[d.ClientIPv6] = d.Devices[0].MAC
+	}
 	dnsBind, tproxyBind := "", ""
 	seen := map[string]bool{}
 	for _, inbound := range native.Inbounds {

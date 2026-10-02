@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -134,6 +135,7 @@ func (c *Controller) applyLocked(ctx context.Context, input proxy.RulesPlanInput
 	if c.plan != nil {
 		return c.statusLocked(), errors.New("capture already staged; stop first")
 	}
+	input.ClientMACs = maps.Clone(input.ClientMACs)
 	input.ClientIPv4s = slices.Clone(input.ClientIPv4s)
 	input.ClientIPv6s = slices.Clone(input.ClientIPv6s)
 	input.EndpointIPs = slices.Clone(input.EndpointIPs)
@@ -182,7 +184,7 @@ func (c *Controller) cleanupLocked(ctx context.Context) error {
 	var pending error
 	for _, argv := range c.plan.Cleanup {
 		out, err := c.execute(ctx, argv)
-		if err != nil && !resourceAbsent(argv, out, err) {
+		if err != nil && !resourceAbsent(argv, out, err) && !c.absentMACChain(ctx, argv, out, err) {
 			pending = errors.Join(pending, err)
 		}
 	}
@@ -223,10 +225,10 @@ func resourceAbsent(a []string, out []byte, err error) bool {
 		if (op == "-S" || op == "-F" || op == "-X") && len(a) == 7 {
 			return true
 		}
-		// Owned system-chain hooks use only built-in source/interface matches.
-		// A -C check of TPROXY/addrtype rules can instead fail because the
-		// extension is unavailable, so its ambiguous diagnostic is NOT absence.
-		return (op == "-D" || op == "-C") && (a[6] == "PREROUTING" || a[6] == "FORWARD")
+		// Source/interface-only legacy hooks use built-in matches. MAC hooks
+		// and TPROXY/addrtype checks can fail because a match extension is
+		// unavailable, so their ambiguous diagnostic is NOT absence.
+		return (op == "-D" || op == "-C") && (a[6] == "PREROUTING" || a[6] == "FORWARD") && !slices.Contains(a, "--mac-source")
 	}
 	badRule := a[0] + ": Bad rule (does a matching rule exist in that chain?)."
 	return (op == "-D" || op == "-C") && (text == badRule || text == "Bad rule (does a matching rule exist in that chain?).")
@@ -320,4 +322,23 @@ func run(ctx context.Context, argv []string) ([]byte, error) {
 	cmd.Stderr = &out
 	err := cmd.Run()
 	return out.Bytes(), err
+}
+
+// MAC-match load failure and a missing jump target can share one diagnostic.
+// Only a separate approved target-chain listing can prove this hook absent.
+func (c *Controller) absentMACChain(ctx context.Context, args []string, out []byte, err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || len(args) < 7 || args[5] != "-D" || !slices.Contains(args, "--mac-source") {
+		return false
+	}
+	text := strings.TrimSpace(string(out))
+	if text != args[0]+": No chain/target/match by that name." && text != "No chain/target/match by that name." {
+		return false
+	}
+	target, hasTarget, parseErr := option(args, "-j")
+	if parseErr != nil || !hasTarget {
+		return false
+	}
+	inspection := []string{args[0], "-w", "5", "-t", args[4], "-S", target}
+	output, inspectionErr := c.execute(ctx, inspection)
+	return resourceAbsent(inspection, output, inspectionErr)
 }

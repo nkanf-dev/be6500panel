@@ -3,6 +3,7 @@ package capture
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -23,6 +24,7 @@ func recoveredPlan(stored journal) (proxy.OwnedRulesPlan, error) {
 	input := proxy.RulesPlanInput{
 		ClientIPv4: ownership.ClientIPv4, ClientIPv6: ownership.ClientIPv6,
 		ClientIPv4s: slices.Clone(ownership.ClientIPv4s), ClientIPv6s: slices.Clone(ownership.ClientIPv6s),
+		ClientMACs:   maps.Clone(ownership.ClientMACs),
 		LANInterface: ownership.LANInterface, IPv6: proxy.IPv6Direct,
 	}
 	if stored.Input != nil {
@@ -62,6 +64,7 @@ func clonePlan(plan proxy.OwnedRulesPlan) proxy.OwnedRulesPlan {
 	plan.Warnings = slices.Clone(plan.Warnings)
 	plan.Ownership.ClientIPv4s = slices.Clone(plan.Ownership.ClientIPv4s)
 	plan.Ownership.ClientIPv6s = slices.Clone(plan.Ownership.ClientIPv6s)
+	plan.Ownership.ClientMACs = maps.Clone(plan.Ownership.ClientMACs)
 	plan.Ownership.RouteFamilies = slices.Clone(plan.Ownership.RouteFamilies)
 	plan.Ownership.Chains = slices.Clone(plan.Ownership.Chains)
 	return plan

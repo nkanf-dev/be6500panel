@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
+	stdmaps "maps"
 	"net/netip"
 	"reflect"
 	"slices"
@@ -1039,8 +1040,8 @@ func TestOwnedRulesLegacyOwnershipJSONAndCleanupRemainExact(t *testing.T) {
 			in := ownedTestInput()
 			in.ClientIPv6, in.IPv6 = "2001:db8::42", mode
 			plan := ownedTestPlan(t, in)
-			if plan.Ownership.ClientIPv4s != nil || plan.Ownership.ClientIPv6s != nil {
-				t.Fatal("legacy singular plan gained plural ownership")
+			if plan.Ownership.ClientIPv4s != nil || plan.Ownership.ClientIPv6s != nil || plan.Ownership.ClientMACs != nil {
+				t.Fatal("legacy singular plan gained plural or MAC ownership")
 			}
 			var expected [][]string
 			if mode == IPv6Follow {
@@ -1081,10 +1082,217 @@ func TestOwnedRulesLegacyOwnershipJSONAndCleanupRemainExact(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if strings.Contains(string(raw), "ClientIPv4s") || strings.Contains(string(raw), "ClientIPv6s") {
-					t.Fatalf("legacy JSON gained plural fields: %s", raw)
+				if strings.Contains(string(raw), "ClientIPv4s") || strings.Contains(string(raw), "ClientIPv6s") || strings.Contains(string(raw), "ClientMACs") {
+					t.Fatalf("legacy JSON gained plural or MAC fields: %s", raw)
 				}
 			}
 		})
+	}
+}
+
+func ownedMACInput(mode IPv6Mode) RulesPlanInput {
+	in := ownedTestInput()
+	in.ClientIPv4 = ""
+	in.ClientIPv4s = []string{"192.168.31.44", "192.168.31.42", "192.168.31.43"}
+	in.IPv6 = mode
+	in.ClientMACs = map[string]string{
+		"192.168.31.42": "02:11:22:33:44:42",
+		"192.168.31.43": "02:11:22:33:44:43",
+		"192.168.31.44": "02:11:22:33:44:44",
+	}
+	if mode != IPv6Direct {
+		in.ClientIPv6s = []string{"2001:db8::44", "2001:db8::42", "2001:db8::43"}
+		for i := 42; i <= 44; i++ {
+			in.ClientMACs[fmt.Sprintf("2001:db8::%d", i)] = in.ClientMACs[fmt.Sprintf("192.168.31.%d", i)]
+		}
+	}
+	return in
+}
+
+func TestOwnedRulesThreeClientsRequireExactIPMACPairsOnEveryHook(t *testing.T) {
+	for _, mode := range []IPv6Mode{IPv6Direct, IPv6Follow, IPv6Block} {
+		t.Run(string(mode), func(t *testing.T) {
+			in := ownedMACInput(mode)
+			plan := ownedTestPlan(t, in)
+			if !stdmaps.Equal(plan.Ownership.ClientMACs, in.ClientMACs) {
+				t.Fatalf("MAC ownership changed: %+v", plan.Ownership)
+			}
+			without := in
+			without.ClientMACs = nil
+			legacy := ownedTestPlan(t, without)
+			if legacy.Ownership.ClientMACs != nil {
+				t.Fatal("legacy plural plan gained MAC ownership")
+			}
+			for _, value := range []any{without, legacy.Ownership} {
+				raw, err := json.Marshal(value)
+				if err != nil || strings.Contains(string(raw), "ClientMACs") {
+					t.Fatalf("legacy plural JSON changed: %s %v", raw, err)
+				}
+			}
+			for _, commands := range []struct{ paired, old [][]string }{
+				{plan.Apply, legacy.Apply}, {plan.Cleanup, legacy.Cleanup}, {plan.OnFailure, legacy.OnFailure},
+			} {
+				if len(commands.paired) != len(commands.old) {
+					t.Fatal("adding source MAC changed shared preparation or cleanup count")
+				}
+				seen := make(map[string]int)
+				for i, argv := range commands.paired {
+					if argv[0] == "ip" || argv[5] != "-I" && argv[5] != "-D" {
+						if !slices.Equal(argv, commands.old[i]) {
+							t.Fatalf("source MAC changed route or shared chain body: %v", argv)
+						}
+						continue
+					}
+					idx := slices.Index(argv, "-s")
+					source := netip.MustParsePrefix(argv[idx+1]).Addr().String()
+					mac, exists := in.ClientMACs[source]
+					if !exists || !ownedHasArgs(argv, "-i", "br-lan", "-s", argv[idx+1], "-m", "mac", "--mac-source", mac, "-j") {
+						t.Fatalf("hook does not bind one exact IP/MAC pair: %v", argv)
+					}
+					seen[source]++
+					stripped := append(slices.Clone(argv[:idx+2]), argv[idx+6:]...)
+					if !slices.Equal(stripped, commands.old[i]) {
+						t.Fatalf("legacy hook differs beyond exact MAC matcher: %v", argv)
+					}
+				}
+				for source := range in.ClientMACs {
+					want := 2 // IPv4 and IPv6 follow both require NAT and mangle hooks.
+					if mode == IPv6Block && strings.Contains(source, ":") {
+						want = 1
+					}
+					if seen[source] != want {
+						t.Fatalf("source %s has %d hooks, want %d", source, seen[source], want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestOwnedRulesClientMACsAreBoundedValidatedAndCanonical(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*RulesPlanInput)
+	}{
+		{"empty-map", func(in *RulesPlanInput) { in.ClientMACs = map[string]string{} }},
+		{"missing-v4", func(in *RulesPlanInput) { delete(in.ClientMACs, "192.168.31.43") }},
+		{"missing-v6", func(in *RulesPlanInput) { delete(in.ClientMACs, "2001:db8::43") }},
+		{"extra-v4", func(in *RulesPlanInput) { in.ClientMACs["192.168.31.99"] = "02:11:22:33:44:99" }},
+		{"extra-v6", func(in *RulesPlanInput) { in.ClientMACs["2001:db8::99"] = "02:11:22:33:44:99" }},
+		{"inactive-v6", func(in *RulesPlanInput) { in.IPv6 = IPv6Direct }},
+		{"prefix-key", func(in *RulesPlanInput) { in.ClientMACs["192.168.31.42/32"] = "02:11:22:33:44:42" }},
+		{"hostname-key", func(in *RulesPlanInput) { in.ClientMACs["client.example"] = "02:11:22:33:44:42" }},
+		{"mapped-v4-key", func(in *RulesPlanInput) { in.ClientMACs["::ffff:192.168.31.42"] = "02:11:22:33:44:42" }},
+		{"zone-key", func(in *RulesPlanInput) { in.ClientMACs["fe80::42%br-lan"] = "02:11:22:33:44:42" }},
+		{"duplicate-canonical-key", func(in *RulesPlanInput) { in.ClientMACs["2001:0db8:0000::0042"] = "02:11:22:33:44:42" }},
+		{"map-over-limit", func(in *RulesPlanInput) {
+			for i := 0; i <= 2*MaxCaptureClientsPerFamily; i++ {
+				in.ClientMACs[fmt.Sprintf("192.0.2.%d", i)] = "02:11:22:33:44:42"
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := ownedMACInput(IPv6Follow)
+			tc.edit(&in)
+			plan, err := PlanOwnedRules(in)
+			if err == nil || !reflect.DeepEqual(plan, OwnedRulesPlan{}) {
+				t.Fatalf("invalid source MAC scope produced executable intent: %v %+v", err, plan)
+			}
+		})
+	}
+	for _, mac := range []string{"", "00:00:00:00:00:00", "01:11:22:33:44:55", "ff:ff:ff:ff:ff:ff", "02:11:22:33:44", "02:11:22:33:44:55:66:77", "garbage", " 02:11:22:33:44:55", "02:11:22:33:44:55; reboot", "02:11:22:33:44:55\n"} {
+		t.Run("MAC/"+mac, func(t *testing.T) {
+			in := ownedMACInput(IPv6Direct)
+			in.ClientMACs[in.ClientIPv4s[0]] = mac
+			plan, err := PlanOwnedRules(in)
+			if err == nil || !reflect.DeepEqual(plan, OwnedRulesPlan{}) {
+				t.Fatalf("invalid MAC produced executable intent: %q %v", mac, err)
+			}
+		})
+	}
+	in := ownedMACInput(IPv6Follow)
+	in.ClientMACs["192.168.31.42"] = "02:AA:BB:CC:DD:42"
+	in.ClientMACs["192.168.31.43"] = "02-AA-BB-CC-DD-43"
+	in.ClientMACs["192.168.31.44"] = "02aa.bbcc.dd44"
+	in.ClientMACs["2001:0db8:0000::0042"] = in.ClientMACs["2001:db8::42"]
+	delete(in.ClientMACs, "2001:db8::42")
+	original := stdmaps.Clone(in.ClientMACs)
+	first, second := ownedTestPlan(t, in), ownedTestPlan(t, in)
+	if !stdmaps.Equal(in.ClientMACs, original) || !reflect.DeepEqual(first, second) {
+		t.Fatal("compiler changed caller map or produced nondeterministic MAC intent")
+	}
+	for source, want := range map[string]string{"192.168.31.42": "02:aa:bb:cc:dd:42", "192.168.31.43": "02:aa:bb:cc:dd:43", "192.168.31.44": "02:aa:bb:cc:dd:44", "2001:db8::42": "02:11:22:33:44:42"} {
+		if first.Ownership.ClientMACs[source] != want {
+			t.Fatalf("noncanonical IP/MAC ownership for %s: %v", source, first.Ownership.ClientMACs)
+		}
+	}
+	in.ClientMACs["192.168.31.43"] = "02:00:00:00:00:99"
+	first.Ownership.ClientMACs["192.168.31.42"] = "02:00:00:00:00:99"
+	if second.Ownership.ClientMACs["192.168.31.42"] != "02:aa:bb:cc:dd:42" || second.Ownership.ClientMACs["192.168.31.43"] != "02:aa:bb:cc:dd:43" {
+		t.Fatal("compiled ownership aliases input or another plan map")
+	}
+	// Both family bounds are supported together without increasing map scope.
+	bounded := ownedTestInput()
+	bounded.ClientIPv4, bounded.IPv6 = "", IPv6Follow
+	bounded.ClientMACs = map[string]string{}
+	for i := 1; i <= MaxCaptureClientsPerFamily; i++ {
+		v4, v6 := fmt.Sprintf("192.0.2.%d", i), fmt.Sprintf("2001:db8::%x", i)
+		bounded.ClientIPv4s = append(bounded.ClientIPv4s, v4)
+		bounded.ClientIPv6s = append(bounded.ClientIPv6s, v6)
+		bounded.ClientMACs[v4], bounded.ClientMACs[v6] = "02:11:22:33:44:42", "02:11:22:33:44:42"
+	}
+	if len(ownedTestPlan(t, bounded).Ownership.ClientMACs) != 2*MaxCaptureClientsPerFamily {
+		t.Fatal("maximum bounded paired families lost client identity")
+	}
+}
+
+// This hook matcher checks only generated argv, not kernel/offload behavior.
+func ownedTestHookTarget(commands [][]string, table, source, iface, mac string) string {
+	addr := netip.MustParseAddr(source)
+	for _, argv := range commands {
+		if argv[0] == "ip" || argv[4] != table || argv[5] != "-I" {
+			continue
+		}
+		match, target := true, ""
+		for i := 8; i < len(argv); i++ {
+			switch argv[i] {
+			case "-i":
+				i++
+				match = match && argv[i] == iface
+			case "-s":
+				i++
+				match = match && netip.MustParsePrefix(argv[i]).Contains(addr)
+			case "--mac-source":
+				i++
+				match = match && argv[i] == mac
+			case "-j":
+				i++
+				target = argv[i]
+			}
+		}
+		if match {
+			return target
+		}
+	}
+	return ""
+}
+
+func TestOwnedRulesReusedIPUnknownMACNeverReachesNATOrMangleHooks(t *testing.T) {
+	in := ownedMACInput(IPv6Follow)
+	plan := ownedTestPlan(t, in)
+	for source, mac := range in.ClientMACs {
+		for _, table := range []string{"nat", "mangle"} {
+			if ownedTestHookTarget(plan.Apply, table, source, "br-lan", mac) == "" {
+				t.Fatalf("authorized exact pair missing %s hook: %s %s", table, source, mac)
+			}
+			for _, otherMAC := range []string{"02:ff:ff:ff:ff:99", "02:11:22:33:44:42", "02:11:22:33:44:43", "02:11:22:33:44:44"} {
+				if otherMAC != mac && ownedTestHookTarget(plan.Apply, table, source, "br-lan", otherMAC) != "" {
+					t.Fatalf("reused source IP reaches %s with unknown/wrong MAC: %s %s", table, source, otherMAC)
+				}
+			}
+			if ownedTestHookTarget(plan.Apply, table, source, "other-lan", mac) != "" || ownedTestHookTarget(plan.Apply, table, "192.168.31.99", "br-lan", mac) != "" {
+				t.Fatal("MAC matching widened source IP or interface scope")
+			}
+		}
 	}
 }

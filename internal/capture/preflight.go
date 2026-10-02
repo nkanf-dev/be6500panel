@@ -518,6 +518,8 @@ func hasLocalRoute(out []byte, family int) bool {
 // hasOwnedRule proves every exact client policy rule for a routed family.
 // One observed source, duplicate lines or a broader prefix cannot stand in for
 // another client. Unknown selectors cannot prove the compiled unrestricted rule.
+// Source MAC is enforced by the exact hooks checked above, not by ip rule (which
+// has no MAC selector). The masked mark is set only after that hook matches.
 func hasOwnedRule(out []byte, own proxy.RulesOwnership, family int, names map[string]int) bool {
 	clients := own.ClientIPv4s
 	singular := own.ClientIPv4

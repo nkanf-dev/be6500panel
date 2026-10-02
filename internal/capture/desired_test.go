@@ -36,6 +36,9 @@ func TestAcceptedNativeConfigAndCurrentDevicesOwnRestore(t *testing.T) {
 	if input.Ports != (proxy.Ports{Mixed: 2081, TProxy: 7894, DNS: 1054}) || !reflect.DeepEqual(input.ClientIPv4s, []string{"192.0.2.10", "192.0.2.11"}) || !reflect.DeepEqual(input.EndpointIPs, []string{"203.0.113.4", "203.0.113.53"}) || !reflect.DeepEqual(input.RouterDNSAddresses, []string{"192.0.2.1"}) {
 		t.Fatalf("stale/unbounded config: %+v", input)
 	}
+	if !reflect.DeepEqual(input.ClientMACs, map[string]string{"192.0.2.10": "02:00:00:00:00:10", "192.0.2.11": "02:00:00:00:00:11"}) {
+		t.Fatalf("missing MAC guards: %v", input.ClientMACs)
+	}
 	if clients[0].Hostname != "mac" || clients[1].IP != "192.0.2.11" {
 		t.Fatal(clients)
 	}
@@ -299,5 +302,59 @@ func TestExplicitFailedApplyIsNotTimerRetriedUntilExplicitStart(t *testing.T) {
 	}
 	if mutations != baseline {
 		t.Fatal("background blindly retried explicit failed apply")
+	}
+}
+
+func TestMACMatchLoadFailureIsNotTreatedAsAbsentHook(t *testing.T) {
+	command := []string{"iptables", "-w", "5", "-t", "mangle", "-D", "PREROUTING", "-i", "br-lan", "-s", "192.0.2.10/32", "-m", "mac", "--mac-source", "02:00:00:00:00:10", "-j", "B6P_V4_CAPTURE"}
+	if resourceAbsent(command, []byte("iptables: No chain/target/match by that name."), errors.New("failed match load")) {
+		t.Fatal("ambiguous MAC module failure lost cleanup ownership")
+	}
+	if !resourceAbsent(command, []byte("iptables: Bad rule (does a matching rule exist in that chain?)."), errors.New("absent")) {
+		t.Fatal("explicit matching-rule absence not recognized")
+	}
+}
+
+func TestAmbiguousMissingMACHookNeedsTargetChainAbsenceProof(t *testing.T) {
+	controller := testController(t, idleRunner)
+	controller.SetBuilder(func(ctx context.Context, d Desired) (proxy.RulesPlanInput, []Client, error) {
+		return BuildFromAccepted(ctx, d, []byte(acceptedNative), deviceObservation(), fakeResolve)
+	})
+	if _, err := controller.Select(context.Background(), desiredDevices()); err != nil {
+		t.Fatal(err)
+	}
+	proved := 0
+	controller.runner = func(ctx context.Context, args []string) ([]byte, error) {
+		if len(args) > 5 && args[5] == "-D" {
+			return []byte("iptables: No chain/target/match by that name."), errors.New("absent")
+		}
+		if len(args) == 7 && args[5] == "-S" {
+			proved++
+			return absentChain()
+		}
+		return nil, nil
+	}
+	if err := controller.Cleanup(context.Background()); err != nil {
+		t.Fatal("separately proved missing hooks should clean", err)
+	}
+	if proved != 4 || controller.Status().CleanupPending {
+		t.Fatal("missing target proof count", proved)
+	}
+}
+
+func TestExplicitIPv6ScopeSharesAuthorizedMACGuard(t *testing.T) {
+	desired := desiredDevices()
+	desired.Devices = desired.Devices[:1]
+	desired.IPv6 = proxy.IPv6Follow
+	desired.ClientIPv6 = "2001:db8::10"
+	native := strings.Replace(acceptedNative, `"listen":"127.0.0.1"`, `"listen":"::"`, 1)
+	native = strings.Replace(native, `"listen":"192.0.2.1","listen_port":1054`, `"listen":"::","listen_port":1054`, 1)
+	native = strings.Replace(native, `,{"ip_version":6,"outbound":"direct"}`, ``, 1)
+	input, _, err := BuildFromAccepted(context.Background(), desired, []byte(native), deviceObservation(), fakeResolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.ClientMACs["192.0.2.10"] != "02:00:00:00:00:10" || input.ClientMACs["2001:db8::10"] != "02:00:00:00:00:10" {
+		t.Fatal("IPv6 exactidentity guard missing", input.ClientMACs)
 	}
 }
