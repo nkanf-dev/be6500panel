@@ -70,7 +70,11 @@ last operation and prior documents. All changed files are replaced by atomic
 rename, with file and directory fsync. POSIX cannot atomically rename multiple
 files; the durable journal restores **all** of them after partial failure or
 interruption. Reload/Verify failures restore prior documents and reload every
-changed module. Built-in verification also checks installed text after reload.
+changed module. Built-in apply verification checks installed text after reload.
+Rollback also checks every prior document's exact text, existence and original
+permissions after reloading. A rewrite, recreation, missing document or changed
+mode leaves recovery failed and the journal in `rolling_back`; it is never
+accepted as `rolled_back`. The supervisor retries until exact recovery succeeds.
 On restart, any applying, pending or rolling-back journal is restored before New
 returns a ready manager, even if its confirmation deadline has not elapsed.
 

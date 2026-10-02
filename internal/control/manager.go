@@ -420,6 +420,19 @@ func (m *Manager) verifyDocuments(candidates map[string]string) error {
 	}
 	return nil
 }
+
+// Reload scripts must not silently change or recreate restored documents.
+// Compare existence, text and permissions against the retained prior snapshot.
+func (m *Manager) verifyRestored(prior map[string]snapshot) error {
+	for module, expected := range prior {
+		live, err := readDocument(m.livePath(module))
+		if err != nil || live.Exists != expected.Exists || live.Exists && (live.Content != expected.Content || live.Mode != expected.Mode&0777) {
+			return failure("verification_failed", "Reload changed a restored configuration document.")
+		}
+	}
+	return nil
+}
+
 func cloneOperation(o Operation) Operation {
 	o.ChangedModules = append([]string{}, o.ChangedModules...)
 	if o.Deadline != nil {
@@ -713,6 +726,9 @@ func (m *Manager) rollbackLocked(ctx context.Context) (Operation, error) {
 	// whose prior documents were restored do not retain the failed candidate.
 	if reloadErr := m.reload(ctx, j.Operation.ChangedModules); first == nil {
 		first = reloadErr
+	}
+	if verifyErr := m.verifyRestored(j.Before); first == nil {
+		first = verifyErr
 	}
 	if first != nil {
 		m.recoveryError = "rollback_failed"

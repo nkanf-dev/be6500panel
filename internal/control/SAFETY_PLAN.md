@@ -26,3 +26,11 @@ Tech stack: Go standard library; synthetic root files and injected hooks only.
 - [x] Document rules and include ownership; run test, race and vet, then commit.
 
 No commands in this plan connect to a router or use captured live documents.
+
+## Batch 3: Exact rollback readback (new independent reviewer finding)
+
+- [x] Reproduce successful reload silently rewriting a restored prior document.
+- [x] Verify restored text, existence and original permissions before accepting
+  recovery; keep the journal and rollback_failed state on any mismatch.
+- [x] Test file recreation/mode changes and automatic retry after snapshot drift.
+- [x] Run focused and full tests, race and vet; commit the verification batch.

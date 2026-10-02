@@ -826,3 +826,138 @@ func TestFailedApplyRecoveryWakesDeadlineSupervisor(t *testing.T) {
 		t.Fatalf("automatic recovery failed: %#v", status)
 	}
 }
+
+func TestRollbackReloadCannotSilentlyRewritePriorSnapshot(t *testing.T) {
+	f := newFixture(t)
+	m := openFixture(t, f)
+	d := stage(t, m, "dhcp", testDHCP+" option local '/candidate/'\n")
+	op, err := commit(t, m, d, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.reloadFn = func(context.Context, string) error {
+		return os.WriteFile(filepath.Join(f.root, "etc", "config", "dhcp"), []byte(testDHCP+" option local '/rewritten-by-reload/'\n"), 0644)
+	}
+	f.mu.Unlock()
+	_, err = m.Rollback(context.Background(), op.ID)
+	errorCode(t, err, "rollback_failed")
+	if status := m.Status(); status.Enabled || status.ErrorCode != "rollback_failed" {
+		t.Fatalf("snapshot drift accepted as recovery: %#v", status)
+	}
+	var j journal
+	if err = readJSON(filepath.Join(f.data, "journal.json"), &j); err != nil || j.Phase != "rolling_back" {
+		t.Fatalf("recovery journal was not retained: %#v %v", j, err)
+	}
+	f.mu.Lock()
+	f.reloadFn = nil
+	f.mu.Unlock()
+	rolled, err := m.Rollback(context.Background(), op.ID)
+	if err != nil || rolled.State != "rolled_back" || !m.Status().Enabled || readFixture(t, f, "dhcp") != testDHCP {
+		t.Fatalf("retry did not restore exact prior snapshot: %#v %v", rolled, err)
+	}
+}
+
+func TestRollbackVerifiesRestoredExistenceAndPermissions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		missing bool
+	}{
+		{"permissions", false},
+		{"absence", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			path := filepath.Join(f.root, "etc", "config", "dhcp")
+			if tc.missing {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m := openFixture(t, f)
+			d := stage(t, m, "dhcp", testDHCP+" option local '/candidate/'\n")
+			op, err := commit(t, m, d, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.mu.Lock()
+			f.reloadFn = func(context.Context, string) error {
+				if tc.missing {
+					return os.WriteFile(path, []byte(testDHCP), 0600)
+				}
+				return os.Chmod(path, 0600)
+			}
+			f.mu.Unlock()
+			_, err = m.Rollback(context.Background(), op.ID)
+			errorCode(t, err, "rollback_failed")
+			if m.Status().Enabled {
+				t.Fatal("incorrect snapshot accepted as recovery")
+			}
+			f.mu.Lock()
+			f.reloadFn = nil
+			f.mu.Unlock()
+			rolled, err := m.Rollback(context.Background(), op.ID)
+			if err != nil || rolled.State != "rolled_back" || !m.Status().Enabled {
+				t.Fatalf("snapshot retry failed: %#v %v", rolled, err)
+			}
+			info, err := os.Stat(path)
+			if tc.missing {
+				if !os.IsNotExist(err) {
+					t.Fatal("prior absent document was not removed")
+				}
+			} else if err != nil || info.Mode().Perm() != 0644 {
+				t.Fatalf("prior document permissions not restored: %v %v", info, err)
+			}
+		})
+	}
+}
+
+func TestRollbackSnapshotDriftRemainsSupervised(t *testing.T) {
+	f := newFixture(t)
+	o := f.options()
+	o.ConfirmationTimeout = 20 * time.Millisecond
+	firstRecovery := make(chan struct{}, 1)
+	retried := make(chan struct{}, 1)
+	count := 0
+	o.Reload = func(context.Context, string) error {
+		count++
+		switch count {
+		case 2:
+			err := os.WriteFile(filepath.Join(f.root, "etc", "config", "network"), []byte(strings.ReplaceAll(testNetwork, "192.168.31.1", "192.168.99.1")), 0644)
+			firstRecovery <- struct{}{}
+			return err
+		case 3:
+			retried <- struct{}{}
+		}
+		return nil
+	}
+	m, err := New(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	d := stage(t, m, "network", strings.ReplaceAll(testNetwork, "192.168.31.1", "192.168.32.1"))
+	if _, err = commit(t, m, d, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-firstRecovery:
+	case <-time.After(time.Second):
+		t.Fatal("first deadline rollback did not run")
+	}
+	if status := m.Status(); status.Enabled || status.ErrorCode != "rollback_failed" {
+		t.Fatalf("snapshot drift was accepted: %#v", status)
+	}
+	var j journal
+	if err = readJSON(filepath.Join(f.data, "journal.json"), &j); err != nil || j.Phase != "rolling_back" {
+		t.Fatalf("snapshot drift lost recovery journal: %#v %v", j, err)
+	}
+	select {
+	case <-retried:
+	case <-time.After(3 * time.Second):
+		t.Fatal("snapshot mismatch was not retried")
+	}
+	if status := m.Status(); !status.Enabled || status.ErrorCode != "" || readFixture(t, f, "network") != testNetwork {
+		t.Fatalf("retry did not restore prior snapshot: %#v", status)
+	}
+}
