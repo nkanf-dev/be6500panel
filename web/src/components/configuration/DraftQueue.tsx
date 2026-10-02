@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useState } from "react";
 import { FileDiff, Trash2 } from "lucide-react";
 import {
@@ -25,10 +26,27 @@ export function DraftDiff({ draft }: { draft: ConfigurationDraft }) {
       <div className="configuration-diff-heading">
         <FileDiff size={15} />
         <strong>{label}更改详情</strong>
-        <Badge tone={draft.valid ? "success" : "danger"}>
-          {draft.valid ? "检查通过" : "检查未通过"}
+        <Badge
+          tone={
+            !draft.valid
+              ? "danger"
+              : draft.dependencies?.length
+                ? "warning"
+                : "success"
+          }
+        >
+          {!draft.valid
+            ? "检查未通过"
+            : draft.dependencies?.length
+              ? "引用待完整检查"
+              : "检查通过"}
         </Badge>
       </div>
+      {!!draft.dependencies?.length && (
+        <div role="status" className="configuration-inline-warning">
+          此草稿引用了尚未应用的配置。请一并选择所需草稿；应用前会检查完整配置组合。
+        </div>
+      )}
       {!!draft.errors.length && (
         <ul className="configuration-diagnostics" aria-label="检查问题">
           {draft.errors.map((error, index) => (
@@ -51,7 +69,7 @@ export function DraftDiff({ draft }: { draft: ConfigurationDraft }) {
         </ul>
       )}
       <details className="configuration-advanced-details">
-        <summary>高级详情</summary>
+        <summary>{strings.configuration.advancedDetails}</summary>
         <p>
           检查标识：<code>{draft.id}</code>
         </p>
@@ -114,8 +132,8 @@ export function DraftQueue({
   return (
     <Panel className="configuration-draft-queue">
       <PanelHeader
-        title="检查结果"
-        subtitle="检查只保存草稿，不会应用更改。每个配置文档只能选择一个草稿，再统一应用更改。"
+        title={strings.configuration.queueTitle}
+        subtitle={strings.configuration.queueSubtitle}
         action={<Badge>{controller.drafts.length} 个检查结果</Badge>}
       />
       {controller.drafts.length ? (
@@ -127,7 +145,7 @@ export function DraftQueue({
             >
               <thead>
                 <tr>
-                  <th>选择</th>
+                  <th>{strings.proxy.nodes.columns.select}</th>
                   <th>配置文档 / 草稿</th>
                   <th>适用状态</th>
                   <th>检查</th>
@@ -171,7 +189,7 @@ export function DraftQueue({
                       <td>
                         <strong>{label}</strong>
                         <small className="configuration-draft-id">
-                          草稿 {version}
+                          {strings.states.draft} {version}
                         </small>
                       </td>
                       <td>
@@ -182,10 +200,20 @@ export function DraftQueue({
                         )}
                       </td>
                       <td>
-                        <Badge tone={draft.valid ? "success" : "danger"}>
-                          {draft.valid
-                            ? "通过"
-                            : `${draft.errors.length} 个问题`}
+                        <Badge
+                          tone={
+                            !draft.valid
+                              ? "danger"
+                              : draft.dependencies?.length
+                                ? "warning"
+                                : "success"
+                          }
+                        >
+                          {!draft.valid
+                            ? `${draft.errors.length} 个问题`
+                            : draft.dependencies?.length
+                              ? "引用待完整检查"
+                              : "通过"}
                         </Badge>
                       </td>
                       <td>
@@ -205,7 +233,7 @@ export function DraftQueue({
                             onClick={() => setInspectedId(draft.id)}
                             aria-label={`查看${draftLabel}详情`}
                           >
-                            查看详情
+                            {strings.actions.viewDetails}
                           </Button>
                           <Button
                             variant="ghost"
@@ -234,8 +262,8 @@ export function DraftQueue({
       ) : (
         <EmptyState
           icon={<FileDiff size={22} />}
-          title="暂无待应用更改"
-          detail="先编辑配置，再点击“检查更改”。检查只保存草稿；选择检查通过的草稿后，点击“应用更改”才会生效。"
+          title={strings.configuration.emptyQueueTitle}
+          detail={strings.configuration.emptyQueueDetail}
         />
       )}
     </Panel>

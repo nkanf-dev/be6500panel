@@ -9,6 +9,7 @@ import { Login } from "./login";
 import { Shell } from "./shell";
 import { ModulePage } from "./pages";
 import { clearConfigurationSession } from "../components/configuration";
+import { clearRuntimeEditorSession } from "../modules/runtime/editor-session";
 
 export function App() {
   const [session, setSession] = useState<Session>();
@@ -31,6 +32,7 @@ export function App() {
   }, []);
   const onUnauthorized = useCallback(() => {
     clearConfigurationSession();
+    clearRuntimeEditorSession();
     setSession((previous) => ({
       authenticated: false,
       authRequired: previous?.authRequired ?? true,
@@ -45,6 +47,7 @@ export function App() {
     try {
       const nextSession = await runRequest(api.logout());
       clearConfigurationSession();
+      clearRuntimeEditorSession();
       setSession(nextSession);
     } catch (error) {
       setError(error);

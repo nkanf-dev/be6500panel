@@ -211,14 +211,14 @@ describe("real proxy operations", () => {
     ).toBeChecked();
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     expect(
-      screen.getByRole("alertdialog", { name: "确认客户端接管" }),
+      screen.getByRole("alertdialog", { name: "开启客户端透明接管" }),
     ).toBeInTheDocument();
     expect(
       fetch.mock.calls.filter(
         ([url, init]) => url === "/api/proxy/capture" && init.method === "POST",
       ),
     ).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
+    await user.click(screen.getByRole("button", { name: "确认接管" }));
     await screen.findByText("已生效");
     expect(fetch).toHaveBeenCalledWith(
       "/api/proxy/capture",

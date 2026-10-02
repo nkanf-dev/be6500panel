@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
@@ -192,8 +193,7 @@ export function ErrorState({
       <Info size={18} />
       <span>{message}</span>
       {onRetry && (
-        <Button size="small" onClick={onRetry}>
-          重试
+        <Button size="small" onClick={onRetry}>{strings.actions.retry}
         </Button>
       )}
     </div>

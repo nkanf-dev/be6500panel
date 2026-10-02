@@ -33,6 +33,7 @@ export const DraftSchema = Schema.Struct({
   risks: Schema.Array(DiagnosticSchema),
   valid: Schema.Boolean,
   errors: Schema.Array(DiagnosticSchema),
+  dependencies: Schema.optional(Schema.Array(DiagnosticSchema)),
   createdAt: Schema.String,
 });
 export const PendingCommitSchema = Schema.Struct({

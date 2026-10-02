@@ -1,3 +1,4 @@
+import { strings } from "../locales/strings";
 import { useMemo, useState } from "react";
 import { Network, RefreshCw, Search } from "lucide-react";
 import {
@@ -63,7 +64,7 @@ export function NetworkPage() {
               </label>
               <div className="segmented" aria-label="接口状态">
                 {[
-                  { id: "all", label: "全部" },
+                  { id: "all", label: strings.proxy.nodes.regions.all },
                   { id: "up", label: "UP" },
                   { id: "down", label: "DOWN" },
                 ].map((item) => (

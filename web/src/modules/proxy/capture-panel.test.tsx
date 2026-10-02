@@ -227,17 +227,19 @@ describe("observed device capture", () => {
     await ready();
     await user.click(choice("Phone test"));
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
-    const dialog = screen.getByRole("alertdialog", { name: "确认客户端接管" });
+    const dialog = screen.getByRole("alertdialog", {
+      name: "开启客户端透明接管",
+    });
     expect(
       within(dialog).getByText(
-        "开启透明代理将接管指定终端的网络流量，请确认是否继续。",
+        /即将为设备.*开启透明代理转发，请确认是否继续。/,
       ),
     ).toBeInTheDocument();
     expect(within(dialog).getByText(first.mac)).toBeInTheDocument();
     expect(within(dialog).getByText(second.mac)).toBeInTheDocument();
     expect(within(dialog).queryByText(offline.mac)).not.toBeInTheDocument();
     expect(mutations("POST")).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
+    await user.click(screen.getByRole("button", { name: "确认接管" }));
     await screen.findByText("已生效");
     expect(fetch).toHaveBeenCalledWith(
       "/api/proxy/capture",
@@ -287,7 +289,7 @@ describe("observed device capture", () => {
     await user.click(choice("Offline test"));
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     expect(mutations("POST")).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
+    await user.click(screen.getByRole("button", { name: "确认接管" }));
     await screen.findByText("已生效");
     expect(JSON.parse(mutations("POST")[0][1].body as string)).toEqual({
       devices: [{ mac: first.mac }, { mac: second.mac }, { mac: offline.mac }],
@@ -323,7 +325,7 @@ describe("observed device capture", () => {
     expect(saved.getByText(second.mac)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     expect(mutations("POST")).toHaveLength(1);
-    await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
+    await user.click(screen.getByRole("button", { name: "确认接管" }));
     await screen.findByText("已生效");
     expect(JSON.parse(mutations("POST")[1][1].body as string)).toEqual({
       devices: [{ mac: first.mac }, { mac: offline.mac }],
@@ -412,7 +414,7 @@ describe("observed device capture", () => {
     await user.click(choice("Phone test"));
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
     expect(mutations("POST")).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
+    await user.click(screen.getByRole("button", { name: "确认接管" }));
     await screen.findByText("已生效");
     expect(fetch).toHaveBeenCalledWith(
       "/api/proxy/capture",
@@ -647,9 +649,7 @@ describe("saved versus live capture", () => {
         await user.click(
           screen.getByRole("button", { name: "审阅客户端接管" }),
         );
-        await user.click(
-          screen.getByRole("button", { name: "确认接管客户端" }),
-        );
+        await user.click(screen.getByRole("button", { name: "确认接管" }));
         await screen.findByText(/apply rejected/);
       } else {
         state.disableError = "disable rejected";
@@ -716,7 +716,7 @@ describe("device observation failures", () => {
       "离线设备等待当前地址",
     );
     expect(mutations("POST")).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
+    await user.click(screen.getByRole("button", { name: "确认接管" }));
     await waitFor(() => expect(mutations("POST")).toHaveLength(1));
     expect(JSON.parse(mutations("POST")[0][1].body as string)).toEqual({
       devices: [{ mac: offline.mac }],
@@ -852,7 +852,7 @@ describe("device observation failures", () => {
     const user = userEvent.setup();
     await ready();
     await user.click(screen.getByRole("button", { name: "审阅客户端接管" }));
-    await user.click(screen.getByRole("button", { name: "确认接管客户端" }));
+    await user.click(screen.getByRole("button", { name: "确认接管" }));
     await screen.findByText(/current device unresolved · capture_failed/);
     expect(screen.queryByText("已生效")).not.toBeInTheDocument();
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();

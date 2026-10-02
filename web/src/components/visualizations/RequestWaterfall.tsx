@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useMemo, useState } from 'react';
 import type { EChartsOption } from 'echarts';
 import { ChartFrame, ChartSelect, type VisualizationProps } from './ChartFrame';
@@ -30,7 +31,7 @@ export function RequestWaterfall({ demo = false }: VisualizationProps) {
   const end = Math.max(...samples.map(request => request.start + total(request)));
   return <ChartFrame title="请求瀑布" subtitle="请求阶段 · 相对开始时间" demo={demo} unavailable="未接入请求追踪"
     summary={`${samples.length} 个样本请求 · 完成时间 +${end} ms`}
-    controls={<ChartSelect label="协议" value={kind} onChange={setKind}><option value="all">全部请求</option><option value="HTTP">HTTP</option><option value="DNS">DNS</option></ChartSelect>}
+    controls={<ChartSelect label={strings.proxy.nodes.columns.protocol} value={kind} onChange={setKind}><option value="all">全部请求</option><option value="HTTP">HTTP</option><option value="DNS">DNS</option></ChartSelect>}
     hint="拖动底部范围缩放 · 悬停查看阶段耗时" columns={['请求', '开始 / ms', 'DNS / ms', 'TCP / ms', 'TLS / ms', 'TTFB / ms', '传输 / ms', '总计 / ms']}
     rows={samples.map(request => [`${request.id} ${request.resource}`, request.start, ...phases.map(phase => request[phase]), total(request)])}>
     <EChart option={option} label="按开始时间排列的请求阶段瀑布图，DNS、TCP、TLS、TTFB和传输阶段由不同色块表示" height={300} />

@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import {
   Activity,
   ArrowUpRight,
@@ -51,12 +52,12 @@ export function SystemSummaryWidget() {
             }
           >
             {system?.mode === "demo"
-              ? "演示数据"
+              ? strings.dashboard.states.demo
               : system
                 ? connection === "live" && systemError === undefined
-                  ? "实时采样"
-                  : "上次采样"
-                : "等待采样"}
+                  ? strings.dashboard.states.live
+                  : strings.dashboard.states.previous
+                : strings.dashboard.states.waitingSample}
           </Badge>
         }
       />
@@ -124,10 +125,10 @@ export function SystemSummaryWidget() {
           </strong>
           <span className="stat-context">
             {health?.mode === "demo"
-              ? "演示能力清单"
+              ? strings.dashboard.states.demoCapabilities
               : connection === "live"
-                ? "事件流已连接"
-                : "事件流等待连接"}
+                ? strings.dashboard.states.streamConnected
+                : strings.dashboard.states.streamWaiting}
           </span>
         </div>
       </div>
@@ -165,10 +166,10 @@ export function EnvironmentWidget({ navigate }: NavigationProps) {
           <dd>
             <Badge tone={health?.mode === "demo" ? "warning" : "neutral"}>
               {health?.mode === "demo"
-                ? "演示数据"
+                ? strings.dashboard.states.demo
                 : health?.mode === "host"
                   ? "宿主观察"
-                  : "等待连接"}
+                  : strings.dashboard.states.waitingConnection}
             </Badge>
           </dd>
         </div>
@@ -184,8 +185,7 @@ export function EnvironmentWidget({ navigate }: NavigationProps) {
         </div>
       </dl>
       <div className="panel-bottom">
-        <Button variant="ghost" size="small" onClick={() => navigate("system")}>
-          系统详情 <ArrowUpRight size={14} />
+        <Button variant="ghost" size="small" onClick={() => navigate("system")}>{strings.dashboard.actions.systemDetails} <ArrowUpRight size={14} />
         </Button>
       </div>
     </Panel>
@@ -201,7 +201,7 @@ export function ModuleStatusWidget({ navigate }: NavigationProps) {
         subtitle="能力清单与快捷入口"
         action={
           health?.mode === "demo" ? (
-            <Badge tone="warning">演示数据</Badge>
+            <Badge tone="warning">{strings.dashboard.states.demo}</Badge>
           ) : undefined
         }
       />
@@ -210,7 +210,7 @@ export function ModuleStatusWidget({ navigate }: NavigationProps) {
       )}
       {capabilities.length === 0 && (
         <p className="dashboard-data-note" role="status">
-          {refreshing ? "正在读取能力清单…" : "暂无能力清单，模块状态未知。"}
+          {refreshing ? "正在读取能力清单…" : strings.dashboard.states.noCapabilities}
         </p>
       )}
       <div className="table-scroll">
@@ -250,10 +250,10 @@ export function ModuleStatusWidget({ navigate }: NavigationProps) {
                         tone={remote?.state === "ready" ? "success" : "neutral"}
                       >
                         {!remote
-                          ? "未知"
+                          ? strings.dashboard.states.unknown
                           : remote.state === "ready"
-                            ? "就绪"
-                            : "未接入"}
+                            ? strings.dashboard.states.ready
+                            : strings.dashboard.states.unavailable}
                       </Badge>
                     </td>
                     <td>
@@ -270,7 +270,7 @@ export function ModuleStatusWidget({ navigate }: NavigationProps) {
                           >
                             {capability.title}
                           </span>
-                        )) ?? "未读取能力清单"}
+                        )) ?? strings.dashboard.states.capabilityNotRead}
                       </span>
                     </td>
                     <td className="align-right">
@@ -279,8 +279,7 @@ export function ModuleStatusWidget({ navigate }: NavigationProps) {
                         size="small"
                         aria-label={`打开${module.title}`}
                         onClick={() => navigate(module.id)}
-                      >
-                        打开 <ArrowUpRight size={14} />
+                      >{strings.dashboard.actions.open} <ArrowUpRight size={14} />
                       </Button>
                     </td>
                   </tr>
@@ -311,7 +310,7 @@ export function DevicesWidget({ navigate }: NavigationProps) {
         subtitle="当前租约与 ARP 状态 · 不代表实时在线"
         action={
           <Badge tone={health?.mode === "demo" ? "warning" : "neutral"}>
-            {health?.mode === "demo" ? "演示数据" : "路由器观察"}
+            {health?.mode === "demo" ? strings.dashboard.states.demo : "路由器观察"}
           </Badge>
         }
       />
@@ -383,8 +382,7 @@ export function DevicesWidget({ navigate }: NavigationProps) {
           variant="ghost"
           size="small"
           onClick={() => navigate("devices")}
-        >
-          设备详情 <ArrowUpRight size={14} />
+        >{strings.dashboard.actions.deviceDetails} <ArrowUpRight size={14} />
         </Button>
       </div>
     </Panel>

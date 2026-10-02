@@ -1,3 +1,4 @@
+import { strings } from "../locales/strings";
 import {
   CheckCircle2,
   Circle,
@@ -91,7 +92,7 @@ export function SystemPage() {
                   subtitle="最近一次系统快照"
                   action={
                     <Badge tone={connection === "live" ? "success" : "warning"}>
-                      {connection === "live" ? "实时" : "上次采样"}
+                      {connection === "live" ? "实时" : strings.dashboard.states.previous}
                     </Badge>
                   }
                 />
@@ -244,7 +245,7 @@ export function SystemPage() {
                             ) : (
                               <Circle size={13} />
                             )}
-                            {capability.supported ? "支持" : "未接入"}
+                            {capability.supported ? "支持" : strings.dashboard.states.unavailable}
                           </span>
                         </td>
                         <td className="text-muted wrap">

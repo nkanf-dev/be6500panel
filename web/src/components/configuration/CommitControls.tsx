@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
@@ -43,10 +44,10 @@ function PendingConfirmation({
         <strong role="timer" aria-label="连接确认剩余时间">
           {remaining}s
         </strong>
-        <span>临时应用</span>
+        <span>{strings.states.temporaryApplied}</span>
         <span>
           {expired
-            ? "确认期限已到，正在核对恢复状态"
+            ? strings.dialogs.rollbackExpired
             : `配置已应用，正在等待连接确认（剩余${remaining}s）。超时未确认将自动恢复上一配置。`}
         </span>
       </div>
@@ -60,8 +61,7 @@ function PendingConfirmation({
           }}
           aria-label="刷新应用状态"
         >
-          <RefreshCw size={14} />
-          刷新状态
+          <RefreshCw size={14} />{strings.actions.refresh}
         </Button>
         <Button
           size="small"
@@ -71,7 +71,7 @@ function PendingConfirmation({
           }}
         >
           <RotateCcw size={14} />
-          {controller.busy === "rollback" ? "正在恢复…" : "恢复上一配置"}
+          {controller.busy === "rollback" ? "正在恢复…" : strings.actions.restorePrevious}
         </Button>
         <Button
           size="small"
@@ -82,7 +82,7 @@ function PendingConfirmation({
           }}
         >
           <CheckCheck size={14} />
-          {controller.busy === "confirm" ? "正在确认…" : "确认生效"}
+          {controller.busy === "confirm" ? "正在确认…" : strings.actions.confirmWorking}
         </Button>
       </div>
       <span className="configuration-pending-meta">
@@ -90,7 +90,7 @@ function PendingConfirmation({
         秒核对状态
       </span>
       <details className="configuration-advanced-details">
-        <summary>高级详情</summary>
+        <summary>{strings.configuration.advancedDetails}</summary>
         <p>
           操作标识：<code>{pending.id}</code>
         </p>
@@ -155,7 +155,7 @@ function RiskDialog({
           <div className="configuration-dialog-header">
             <div>
               <Badge tone="danger">高风险更改</Badge>
-              <Dialog.Title>确认应用高风险更改</Dialog.Title>
+              <Dialog.Title>{strings.dialogs.applyRisk}</Dialog.Title>
             </div>
             <Dialog.Close asChild>
               <Button variant="ghost" size="icon" aria-label="关闭风险确认">
@@ -168,7 +168,7 @@ function RiskDialog({
             个配置文档的更改。涉及管理连接的更改会先临时应用，需要在期限内确认生效；未确认时，设备将自动恢复上一配置。
           </Dialog.Description>
           <section className="configuration-changed-fields">
-            <h3>涉及配置</h3>
+            <h3>{strings.configuration.involvedDocs}</h3>
             <ul>
               {configurationModules
                 .filter((item) =>
@@ -181,7 +181,7 @@ function RiskDialog({
           </section>
           {readableFields.length > 0 && (
             <section className="configuration-changed-fields">
-              <h3>更改字段</h3>
+              <h3>{strings.configuration.changedFields}</h3>
               <ul>
                 {readableFields.map((item) => (
                   <li key={item.field}>{item.label}</li>
@@ -197,7 +197,7 @@ function RiskDialog({
             ))}
           </ul>
           <details className="configuration-advanced-details">
-            <summary>高级详情</summary>
+            <summary>{strings.configuration.advancedDetails}</summary>
             <p>
               配置版本：<code>{generation}</code>
             </p>
@@ -228,11 +228,10 @@ function RiskDialog({
           </details>
           <footer className="configuration-dialog-footer">
             <Dialog.Close asChild>
-              <Button>返回检查</Button>
+              <Button>{strings.dialogs.returnToCheck}</Button>
             </Dialog.Close>
             <Button className="configuration-danger-button" onClick={onCommit}>
-              <CheckCircle2 size={15} />
-              确认并应用
+              <CheckCircle2 size={15} />{strings.dialogs.confirmAndApply}
             </Button>
           </footer>
         </Dialog.Content>
@@ -276,8 +275,7 @@ export function CommitControls({
       <div className="configuration-commit-bar">
         <div>
           <strong>
-            <CheckCircle2 size={16} />
-            应用更改
+            <CheckCircle2 size={16} />{strings.actions.applyChanges}
           </strong>
           <span>
             {selected.length} 个已选更改 · {controller.drafts.length} 个检查结果
@@ -315,10 +313,10 @@ export function CommitControls({
           )}
           <span>
             {operation.state === "rolled_back"
-              ? "已恢复上一配置"
+              ? strings.configuration.restoredOutcome
               : operation.state === "committed"
-                ? "更改已生效"
-                : "已核对当前配置，请检查更改结果"}
+                ? strings.configuration.appliedOutcome
+                : strings.configuration.reconciledOutcome}
             {operation.changedModules.length > 0 &&
               ` · ${operation.changedModules
                 .map(
@@ -329,7 +327,7 @@ export function CommitControls({
                 .join("、")}`}
           </span>
           <details className="configuration-advanced-details">
-            <summary>高级详情</summary>
+            <summary>{strings.configuration.advancedDetails}</summary>
             <p>
               操作标识：<code>{operation.id}</code>
             </p>
@@ -354,7 +352,7 @@ export function CommitControls({
               <p>本次更改已停用代理捕获。设备选择仍保留，不会自动重新启用。</p>
               <p>
                 {pending
-                  ? "请先确认生效或恢复上一配置，再到代理页面检查并重新应用所选设备。"
+                  ? strings.configuration.captureDisabledPendingNotice
                   : "如需继续代理，请到代理页面检查并重新应用所选设备。"}
               </p>
             </>

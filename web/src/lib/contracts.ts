@@ -218,6 +218,8 @@ export const RuntimeStatusSchema = Schema.Struct({
   retryAt: Schema.optional(Schema.String),
   errorCode: Schema.optional(Schema.String),
   recoveryPlan: Schema.optional(Schema.Array(Schema.String)),
+  restored: Schema.optional(Schema.Boolean),
+  needsRecovery: Schema.optional(Schema.Boolean),
 });
 export const RuntimeSchema = Schema.Struct({
   enabled: Schema.Boolean,

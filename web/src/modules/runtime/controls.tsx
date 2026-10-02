@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import {
   Badge,
   Button,
@@ -12,7 +13,7 @@ import { ArtifactInputs } from "./artifact-inputs";
 import type { RuntimeController } from "./use-runtime";
 
 const stateLabels: Record<string, string> = {
-  running: "运行中",
+  running: strings.states.running,
   stopped: "已停止",
   starting: "启动中",
   stopping: "停止中",
@@ -31,18 +32,14 @@ export function RuntimeControls({ runtime }: { runtime: RuntimeController }) {
     <Panel>
       <PanelHeader
         title={`${runtime.service} 运行管理`}
-        subtitle={
-          status
-            ? `generation ${status.generation} · ${status.version || "版本未登记"}`
-            : "读取进程状态"
-        }
+        subtitle={status ? "配置与核心运行状态" : "读取进程状态"}
         action={
           <Button
             size="small"
             onClick={runtime.refresh}
             disabled={runtime.pending || runtime.loading}
           >
-            刷新状态
+            {strings.actions.refresh}
           </Button>
         }
       />
@@ -95,11 +92,12 @@ export function RuntimeControls({ runtime }: { runtime: RuntimeController }) {
               <dd>{status.retryAt}</dd>
             </div>
           )}
-          {status?.errorCode && (
-            <div>
-              <dt>状态码</dt>
-              <dd className="mono">{status.errorCode}</dd>
-            </div>
+          {status && (
+            <details className="configuration-advanced-details">
+              <summary>高级诊断</summary>
+              <p>{`generation ${status.generation} · ${status.version || "版本未登记"}`}</p>
+              {status.errorCode && <p>状态码：<code>{status.errorCode}</code></p>}
+            </details>
           )}
           {status?.recoveryPlan && (
             <div>
@@ -108,6 +106,16 @@ export function RuntimeControls({ runtime }: { runtime: RuntimeController }) {
             </div>
           )}
         </dl>
+      )}
+      {status?.restored && (
+        <p className="configuration-inline-warning" role="status">
+          本次更改未能运行，已恢复上一可运行配置。
+        </p>
+      )}
+      {status?.needsRecovery && (
+        <p className="configuration-inline-warning" role="alert">
+          恢复尚未完成。请检查运行状态；客户端接管不会被视为已恢复。
+        </p>
       )}
       {runtime.error !== undefined && (
         <ErrorState message={errorMessage(runtime.error)} />

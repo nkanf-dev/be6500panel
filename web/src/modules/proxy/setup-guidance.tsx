@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useConsole } from "../../app/console-context";
 import {
   Badge,
@@ -38,17 +39,17 @@ export function ProxySetupGuidance({
           : !status.artifactAvailable
             ? "先获取校验过的 sing-box 运行文件"
             : !nodes?.nodes.length
-              ? "下一步：导入自己的订阅，再选择节点并应用更改"
+              ? strings.proxy.setup.nextImport
               : !status.configured
-                ? "下一步：选择节点并应用更改；核心未运行时只保存配置，不会自动启动"
+                ? strings.proxy.setup.nextSelect
                 : status.state !== "running"
-                  ? "配置已保存；到运行管理启动 sing-box"
+                  ? strings.proxy.setup.nextStart
                   : "核心运行中；需要透明代理时再单独审阅一个客户端的接管";
   return (
     <Panel aria-label="代理设置步骤">
       <PanelHeader
-        title="开始使用代理"
-        subtitle="配置保存、核心启动和客户端接管是三个独立操作。计划预览不应用配置。"
+        title={strings.proxy.setup.title}
+        subtitle={strings.proxy.setup.subtitle}
       />
       <div className="config-form compact-form">
         {runtime.error !== undefined ? (
@@ -81,7 +82,7 @@ export function ProxySetupGuidance({
                 ? status.artifactAvailable
                   ? "已获取"
                   : "待获取"
-                : "未知"}
+                : strings.dashboard.states.unknown}
             </Badge>{" "}
             在运行管理中获取适配设备的运行文件，下载后先校验再使用。
           </li>
@@ -99,7 +100,7 @@ export function ProxySetupGuidance({
                 ? status.configured
                   ? "已有已校验配置"
                   : "待配置"
-                : "未知"}
+                : strings.dashboard.states.unknown}
             </Badge>{" "}
             更换节点后需再次应用更改。核心未运行时只保存配置；预览策略不影响这里。服务端还需预置已校验的本地规则集，浏览器尚无规则集下载入口。
           </li>
@@ -107,10 +108,10 @@ export function ProxySetupGuidance({
             启动核心：
             <Badge>
               {status?.state === "running"
-                ? "运行中"
+                ? strings.states.running
                 : status
-                  ? "未运行"
-                  : "未知"}
+                  ? strings.states.stopped
+                  : strings.dashboard.states.unknown}
             </Badge>{" "}
             启动只验证本地监听，不代表订阅服务器或互联网已连通。
           </li>

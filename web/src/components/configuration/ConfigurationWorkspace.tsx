@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useState } from "react";
 import { Badge, Button, Panel, PanelHeader } from "../ui/primitives";
 import { ConfigurationSurface } from "./ConfigurationSurface";
@@ -27,7 +28,7 @@ export function ConfigurationWorkspace() {
                 <th>文档</th>
                 <th>范围</th>
                 <th>编辑状态</th>
-                <th>检查结果</th>
+                <th>{strings.configuration.queueTitle}</th>
                 <th className="align-right">操作</th>
               </tr>
             </thead>
@@ -47,7 +48,7 @@ export function ConfigurationWorkspace() {
                     <td>
                       <strong>{item.label}</strong>
                       <details className="configuration-advanced-details">
-                        <summary>高级详情</summary>
+                        <summary>{strings.configuration.advancedDetails}</summary>
                         <p>
                           原生文档：<code>{item.module}</code>
                         </p>

@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { ArrowUpRight } from "lucide-react";
 import { Button } from "../ui/primitives";
 import type { PageId } from "../../modules/registry";
@@ -38,8 +39,7 @@ export function DashboardWidget({
               variant="ghost"
               size="small"
               onClick={() => navigate("proxy")}
-            >
-              代理详情 <ArrowUpRight size={14} />
+            >{strings.dashboard.actions.proxyDetails} <ArrowUpRight size={14} />
             </Button>
           </div>
         </div>

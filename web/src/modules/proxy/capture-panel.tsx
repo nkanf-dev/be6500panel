@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useEffect, useState } from "react";
 import {
   Badge,
@@ -100,18 +101,18 @@ export function CapturePanel({
       ? "读取中"
       : "状态未知"
     : capture.cleanupPending
-      ? "清理待完成"
+      ? strings.states.cleaningPending
       : capture.active && capture.state === "partial"
-        ? "部分已生效"
+        ? strings.states.partialActive
         : capture.error
           ? "接管异常"
           : capture.active
-            ? "已生效"
+            ? strings.states.active
             : desired
               ? "已暂停"
               : retained
                 ? "已停用（选择保留）"
-                : "未接管";
+                : strings.states.notCaptured;
 
   useEffect(() => {
     setConfirming(undefined);
@@ -218,8 +219,8 @@ export function CapturePanel({
   return (
     <Panel>
       <PanelHeader
-        title="设备接管"
-        subtitle="只接管明确勾选的 LAN 设备；默认 IPv6 直连。开启前须确认，策略须与已应用的节点配置一致。"
+        title={strings.proxy.capture.title}
+        subtitle={strings.proxy.capture.subtitle}
         action={
           <Badge
             tone={
@@ -239,8 +240,12 @@ export function CapturePanel({
           </Badge>
         }
       />
-      <div className="config-form" role="region" aria-label="已保存的接管选择">
-        <h3>已保存的接管选择</h3>
+      <div
+        className="config-form"
+        role="region"
+        aria-label={strings.proxy.capture.savedTitle}
+      >
+        <h3>{strings.proxy.capture.savedTitle}</h3>
         <p className="text-muted text-xs">
           {desired
             ? "核心停止或重启时保留此选择；只根据当前设备地址恢复，不使用过期地址。"
@@ -256,7 +261,9 @@ export function CapturePanel({
               <li key={client.mac}>
                 {client.hostname || "未命名设备"} ·{" "}
                 <span className="mono">{client.mac}</span> ·{" "}
-                <span className="mono">{client.ip || "等待设备当前地址"}</span>
+                <span className="mono">
+                  {client.ip || strings.proxy.capture.waitingAddress}
+                </span>
                 {capture.active &&
                 !capture.cleanupPending &&
                 (!capture.error || capture.state === "partial") &&
@@ -332,7 +339,7 @@ export function CapturePanel({
       </div>
       <form className="config-form" onSubmit={stage}>
         <div className="form-actions">
-          <h3>选择接管设备</h3>
+          <h3>{strings.proxy.capture.selectTitle}</h3>
           <div>
             <Button
               type="button"
@@ -352,7 +359,7 @@ export function CapturePanel({
               disabled={busy || !capture || observation.loading}
               onClick={restoreSelection}
             >
-              还原已保存选择
+              {strings.actions.restoreSaved}
             </Button>
           </div>
         </div>
@@ -393,7 +400,7 @@ export function CapturePanel({
             <table className="data-table" aria-label="接管设备选择">
               <thead>
                 <tr>
-                  <th>选择</th>
+                  <th>{strings.proxy.nodes.columns.select}</th>
                   <th>设备名称</th>
                   <th>IP 地址</th>
                   <th>MAC 地址</th>
@@ -429,11 +436,15 @@ export function CapturePanel({
                       {device.ip && device.ip === snapshot?.currentClientIP && (
                         <>
                           {" "}
-                          <Badge tone="primary">当前终端</Badge>
+                          <Badge tone="primary">
+                            {strings.states.currentDevice}
+                          </Badge>
                         </>
                       )}
                     </td>
-                    <td className="mono">{device.ip || "等待当前地址"}</td>
+                    <td className="mono">
+                      {device.ip || strings.states.waitingCurrentAddress}
+                    </td>
                     <td className="mono">{device.mac}</td>
                     <td>
                       <Badge tone={device.online ? "success" : "neutral"}>
@@ -510,8 +521,17 @@ export function CapturePanel({
         )}
         {runtime.result && <p role="status">{runtime.result}</p>}
         {confirming === "apply" && (
-          <div role="alertdialog" aria-label="确认客户端接管">
-            <p>开启透明代理将接管指定终端的网络流量，请确认是否继续。</p>
+          <div role="alertdialog" aria-label={strings.dialogs.captureTitle}>
+            <p>
+              {strings.dialogs.captureBody(
+                selected
+                  .map(
+                    (mac) =>
+                      choices.find((item) => item.mac === mac)?.hostname || mac,
+                  )
+                  .join("、"),
+              )}
+            </p>
             <p className="text-muted text-xs">
               将替换已保存的选择，仅接管以下 {selected.length} 台设备。IPv6
               策略为 {ipv6}。离线设备等待当前地址。
@@ -523,7 +543,9 @@ export function CapturePanel({
                   <li key={mac}>
                     {device?.hostname || "未命名设备"} ·{" "}
                     <span className="mono">{mac}</span> ·{" "}
-                    <span className="mono">{device?.ip || "等待当前地址"}</span>
+                    <span className="mono">
+                      {device?.ip || strings.states.waitingCurrentAddress}
+                    </span>
                   </li>
                 );
               })}
@@ -538,22 +560,23 @@ export function CapturePanel({
               disabled={!canApply}
               onClick={() => void apply()}
             >
-              确认接管客户端
+              {strings.actions.confirmCapture}
             </Button>{" "}
             <Button
               type="button"
               disabled={busy}
               onClick={() => setConfirming(undefined)}
             >
-              取消
+              {strings.actions.cancel}
             </Button>
           </div>
         )}
         {confirming === "disable" && (
-          <div role="alertdialog" aria-label="确认禁用客户端接管">
-            <p>
-              将撤回实时接管并清除已保存的设备选择。之后核心重启也不会恢复接管。
-            </p>
+          <div
+            role="alertdialog"
+            aria-label={strings.dialogs.disableCaptureTitle}
+          >
+            <p>{strings.dialogs.disableCaptureBody}</p>
             <Button
               type="button"
               disabled={busy}
@@ -566,7 +589,7 @@ export function CapturePanel({
               disabled={busy}
               onClick={() => setConfirming(undefined)}
             >
-              取消
+              {strings.actions.cancel}
             </Button>
           </div>
         )}
@@ -591,7 +614,7 @@ export function CapturePanel({
               }
               onClick={() => setConfirming("disable")}
             >
-              禁用接管并清除选择
+              {strings.actions.disableCapture}
             </Button>{" "}
             <Button
               type="button"
@@ -600,10 +623,10 @@ export function CapturePanel({
               }
               onClick={() => void stop()}
             >
-              停止核心（保留选择）
+              {strings.actions.stopCoreKeepSelection}
             </Button>{" "}
             <Button type="submit" variant="primary" disabled={!canApply}>
-              审阅客户端接管
+              {strings.actions.reviewCapture}
             </Button>
           </div>
         </div>

@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useId, useMemo, useState, type FormEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
@@ -322,8 +323,7 @@ function AddSectionForm({
         </p>
       ))}
       <footer className="configuration-dialog-footer">
-        <Button type="button" onClick={onClose}>
-          取消
+        <Button type="button" onClick={onClose}>{strings.actions.cancel}
         </Button>
         <Button type="submit" variant="primary" disabled={disabled}>
           <Plus size={15} />
@@ -502,7 +502,7 @@ export function SectionControls({
             )}
             <footer className="configuration-dialog-footer">
               <Dialog.Close asChild>
-                <Button type="button">取消</Button>
+                <Button type="button">{strings.actions.cancel}</Button>
               </Dialog.Close>
               <Button
                 type="button"

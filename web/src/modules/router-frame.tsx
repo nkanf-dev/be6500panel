@@ -1,3 +1,4 @@
+import { strings } from "../locales/strings";
 import type { ReactNode } from "react";
 import { Activity, RefreshCw } from "lucide-react";
 import { useConsole } from "../app/console-context";
@@ -104,7 +105,7 @@ export function RouterObservationFrame({
           ? errors.length
             ? "部分观察"
             : "采样快照"
-          : "等待采样";
+          : strings.dashboard.states.waitingSample;
   return (
     <Panel>
       <PanelHeader

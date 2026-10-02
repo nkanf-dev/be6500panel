@@ -1,3 +1,4 @@
+import { strings } from "../locales/strings";
 import { useEffect, useMemo, useState } from "react";
 import { FileCheck2 } from "lucide-react";
 import {
@@ -98,7 +99,7 @@ export function FrpcPage() {
         <div className="segmented" role="tablist" aria-label="frpc 配置视图">
           {[
             { id: "form", label: "连接与映射" },
-            { id: "native", label: "原生配置" },
+            { id: "native", label: strings.configuration.title },
           ].map((item) => (
             <button
               type="button"

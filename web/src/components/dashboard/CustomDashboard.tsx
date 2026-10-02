@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   ArrowDown,
@@ -118,8 +119,8 @@ export function CustomDashboard({
         <div>
           <h2>
             <LayoutDashboard size={17} aria-hidden="true" />
-            {layout.name || "未命名布局"}
-            {editing && <Badge tone="warning">未保存预览</Badge>}
+            {layout.name || strings.dashboard.states.unnamed}
+            {editing && <Badge tone="warning">{strings.dashboard.states.unsaved}</Badge>}
           </h2>
           <p>原生仪表盘 · 组件布局仅保存在此浏览器，不在路由器运行 Grafana。</p>
         </div>
@@ -127,22 +128,18 @@ export function CustomDashboard({
           {editing ? (
             <>
               <Button size="small" onClick={reset}>
-                <RotateCcw size={14} />
-                恢复默认
+                <RotateCcw size={14} />{strings.dashboard.actions.reset}
               </Button>
               <Button size="small" onClick={cancel}>
-                <X size={14} />
-                取消
+                <X size={14} />{strings.actions.cancel}
               </Button>
               <Button variant="primary" size="small" onClick={save}>
-                <Check size={14} />
-                保存布局
+                <Check size={14} />{strings.dashboard.actions.save}
               </Button>
             </>
           ) : (
             <Button data-dashboard-edit size="small" onClick={edit}>
-              <Pencil size={14} />
-              编辑布局
+              <Pencil size={14} />{strings.dashboard.actions.edit}
             </Button>
           )}
         </div>
@@ -162,13 +159,13 @@ export function CustomDashboard({
         {announcement}
       </p>
       {editing && (
-        <Panel className="dashboard-editor" aria-label="布局编辑器">
+        <Panel className="dashboard-editor" aria-label={strings.dashboard.labels.editor}>
           <PanelHeader
-            title="编辑组件"
+            title={strings.dashboard.labels.editorTitle}
             subtitle="勾选显示，使用上移 / 下移调整顺序；更改宽度会即时预览。"
           />
           <div className="dashboard-name-field">
-            <label htmlFor={nameId}>布局名称</label>
+            <label htmlFor={nameId}>{strings.dashboard.labels.name}</label>
             <input
               id={nameId}
               ref={nameInput}
@@ -183,7 +180,7 @@ export function CustomDashboard({
               }}
             />
           </div>
-          <ol className="dashboard-editor-list" aria-label="组件顺序">
+          <ol className="dashboard-editor-list" aria-label={strings.dashboard.labels.order}>
             {layout.widgets.map((widget, index) => {
               const definition = widgetDefinitions.find(
                 (item) => item.id === widget.id,
@@ -218,9 +215,9 @@ export function CustomDashboard({
                           })
                         }
                       >
-                        <option value="compact">紧凑 · 1/3</option>
-                        <option value="wide">宽幅 · 2/3</option>
-                        <option value="full">整行</option>
+                        <option value="compact">{strings.dashboard.labels.compact}</option>
+                        <option value="wide">{strings.dashboard.labels.wide}</option>
+                        <option value="full">{strings.dashboard.labels.full}</option>
                       </select>
                     </label>
                     <Button
@@ -253,7 +250,7 @@ export function CustomDashboard({
         <div
           className="dashboard-widget-grid"
           role="list"
-          aria-label="仪表盘组件"
+          aria-label={strings.dashboard.labels.widgets}
         >
           {visible.map((widget) => (
             <div
@@ -273,14 +270,14 @@ export function CustomDashboard({
       ) : (
         <Panel>
           <EmptyState
-            title="所有组件已隐藏"
+            title={strings.dashboard.labels.allHidden}
             detail={
               editing
                 ? "在布局编辑器中勾选组件，或恢复默认布局。"
                 : "编辑布局以显示组件，或恢复默认布局。"
             }
           >
-            {!editing && <Button onClick={edit}>选择组件</Button>}
+            {!editing && <Button onClick={edit}>{strings.dashboard.actions.selectWidgets}</Button>}
           </EmptyState>
         </Panel>
       )}

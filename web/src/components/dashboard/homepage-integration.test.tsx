@@ -122,7 +122,9 @@ describe("custom homepage with real widget integration", () => {
         <CustomDashboard navigate={navigate} />
       </ThemeProvider>,
     );
-    await screen.findByText("来源：WAN · test-wan");
+    await screen.findByText(
+      "来源：服务器 WAN 聚合历史（当前接口：WAN · test-wan）",
+    );
     await screen.findByText(/来源：observed-local-controller/);
     const widgets = screen.getByRole("list", { name: "仪表盘组件" });
     expect(

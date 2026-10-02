@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useState } from "react";
 import { useConsole } from "../../app/console-context";
 import { Button, ErrorState } from "../../components/ui/primitives";
@@ -50,7 +51,7 @@ function ActualConnectionAnalysis() {
       </div>
       <p className="text-muted text-xs" role="status">
         {data
-          ? `${data.state === "unavailable" ? "不可用" : stale ? "上次采样（已过期）" : "实时采样"} · 来源：${data.source || "代理控制器"} · 采样时间：${data.sampledAt || "未提供"} · ${data.reason}${loading ? " · 正在刷新" : ""}`
+          ? `${data.state === "unavailable" ? "不可用" : stale ? "上次采样（已过期）" : strings.dashboard.states.live} · 来源：${data.source || "代理控制器"} · 采样时间：${data.sampledAt || "未提供"} · ${data.reason}${loading ? " · 正在刷新" : ""}`
           : loading
             ? "正在读取代理采样"
             : failed

@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useId, useMemo, useRef, useState } from "react";
 import { FileCode2, Layers, RotateCcw, Save } from "lucide-react";
 import {
@@ -91,6 +92,12 @@ export function NativeEditor({
           </Badge>
         }
       />
+      {module === "network" && (
+        <p className="configuration-inline-warning" role="note">
+          当前版本保留现有 LAN 管理地址和网桥。更改其他网络设置前会检查配置；LAN
+          地址迁移请使用路由器原厂管理页面。
+        </p>
+      )}
       <div className="configuration-editor-toolbar">
         <div
           className="configuration-tabs"
@@ -256,7 +263,8 @@ export function NativeEditor({
       </div>
       <footer className="configuration-editor-footer">
         <span>
-          更改先检查，再应用 · <kbd>⌘ / Ctrl + Enter</kbd> 检查更改
+          更改先检查，再应用 · <kbd>⌘ / Ctrl + Enter</kbd>
+          {strings.actions.checkChanges}
         </span>
         <div className="configuration-actions">
           <Button
@@ -277,7 +285,9 @@ export function NativeEditor({
             disabled={stageDisabled}
           >
             <Save size={14} />
-            {controller.busy === "stage" ? "正在检查…" : "检查更改"}
+            {controller.busy === "stage"
+              ? "正在检查…"
+              : strings.actions.checkChanges}
           </Button>
         </div>
       </footer>

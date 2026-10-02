@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { Effect } from "effect";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -207,7 +208,7 @@ export function NodeSelector({
               Effect.map((response) => {
                 setSaved(
                   response.status.state === "running"
-                    ? "节点切换已生效"
+                    ? strings.proxy.nodes.switchSuccess
                     : "节点配置已保存",
                 );
                 onSelected();
@@ -224,7 +225,7 @@ export function NodeSelector({
   return (
     <Panel className="node-selector">
       <PanelHeader
-        title="代理节点"
+        title={strings.proxy.nodes.title}
         subtitle="搜索、收藏并选择节点；保存前不会切换节点"
         action={<Badge>{all.length} 个节点</Badge>}
       />
@@ -259,10 +260,10 @@ export function NodeSelector({
               {!runtime.status
                 ? "状态读取中"
                 : runtime.status.state === "running"
-                  ? "运行中"
+                  ? strings.states.running
                   : runtime.status.state === "stopped"
                     ? "已停止"
-                    : "未运行"}{" "}
+                    : strings.states.stopped}{" "}
               · 延迟未测
             </span>
             <div className="node-selector-quick-actions">
@@ -370,9 +371,9 @@ export function NodeSelector({
             aria-label="按名称地区标识筛选"
           >
             {[
-              { id: "", label: "全部" },
+              { id: "", label: strings.proxy.nodes.regions.all },
               ...NODE_REGIONS,
-              { id: "other", label: "其他" },
+              { id: "other", label: strings.proxy.nodes.regions.other },
             ].map((item) => (
               <Button
                 key={item.id}

@@ -37,7 +37,10 @@ describe("proxy setup and recovery", () => {
     );
     expect(
       fetchMock.mock.calls.every(
-        ([url]) => url === "/api/runtime" || url === "/api/proxy/nodes",
+        ([url]) =>
+          url === "/api/runtime" ||
+          url === "/api/proxy/nodes" ||
+          url === "/api/runtime/config?service=sing-box",
       ),
     ).toBe(true);
   });
@@ -65,7 +68,10 @@ describe("proxy setup and recovery", () => {
     ).toBeGreaterThan(1);
     expect(
       fetchMock.mock.calls.every(
-        ([url]) => url === "/api/runtime" || url === "/api/proxy/nodes",
+        ([url]) =>
+          url === "/api/runtime" ||
+          url === "/api/proxy/nodes" ||
+          url === "/api/runtime/config?service=sing-box",
       ),
     ).toBe(true);
   });

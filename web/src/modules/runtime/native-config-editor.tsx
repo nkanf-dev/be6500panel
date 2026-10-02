@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
@@ -157,7 +158,7 @@ export function NativeConfigEditor({
   return (
     <Panel>
       <PanelHeader
-        title="原生配置"
+        title={strings.configuration.title}
         subtitle={`${runtime.service === "sing-box" ? "JSON" : "TOML"} · 校验后保存，是否已生效请查看运行状态`}
         action={
           <Button

@@ -1,3 +1,4 @@
+import { strings } from "../../locales/strings";
 import { RefreshCw } from "lucide-react";
 import {
   Badge,
@@ -29,7 +30,7 @@ export function ConfigurationSurface({
       <header className="configuration-surface-header">
         <div>
           <h2>{title}</h2>
-          <p>编辑配置 → 检查更改 → 应用更改</p>
+          <p>{strings.configuration.subtitle}</p>
         </div>
         <div className="configuration-actions">
           {controller.status?.enabled && (
@@ -39,7 +40,7 @@ export function ConfigurationSurface({
               )}
               <Badge>{controller.drafts.length} 个检查结果</Badge>
               <details className="configuration-advanced-details">
-                <summary>高级详情</summary>
+                <summary>{strings.configuration.advancedDetails}</summary>
                 <p>
                   配置版本：<code>{controller.status.generation}</code>
                 </p>
