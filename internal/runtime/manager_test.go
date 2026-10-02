@@ -859,3 +859,178 @@ func TestArtifactLimitsAreTypedAndPreserveStableCore(t *testing.T) {
 		})
 	}
 }
+
+func TestStartingWaitsForLocalReadiness(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var m *Manager
+	m, opts := testManager(t, func(o *Options) {
+		o.ReadyTimeout = time.Second
+		o.ReadyHook = func(ctx context.Context, id string) error {
+			raw, generation, err := m.Config(id)
+			if err != nil || generation != 1 || string(raw) != "good" {
+				return errors.New("cannot read private accepted config")
+			}
+			close(entered)
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	})
+	acquireFixture(t, m, opts, SingBox, fixture)
+	accepted(t, m, SingBox, "good", 0)
+	completed := make(chan error, 1)
+	go func() { _, err := m.Start(context.Background(), SingBox); completed <- err }()
+	<-entered
+	status, _ := m.Status(SingBox)
+	if status.State != Starting || status.PID == 0 || !status.Desired {
+		t.Fatalf("running reported before readiness: %+v", status)
+	}
+	select {
+	case err := <-completed:
+		t.Fatal("start completed before readiness", err)
+	default:
+	}
+	close(release)
+	if err := <-completed; err != nil {
+		t.Fatal(err)
+	}
+	status, _ = m.Status(SingBox)
+	if status.State != Running || status.PID == 0 {
+		t.Fatal(status)
+	}
+}
+
+func TestReadinessCancellationTimeoutAndCloseCleanProcesses(t *testing.T) {
+	for _, mode := range []string{"request-cancel", "timeout", "close"} {
+		t.Run(mode, func(t *testing.T) {
+			entered := make(chan struct{})
+			var cleanups atomic.Int32
+			m, opts := testManager(t, func(o *Options) {
+				o.ReadyTimeout = 100 * time.Millisecond
+				o.ReadyHook = func(ctx context.Context, id string) error {
+					close(entered)
+					<-ctx.Done()
+					return errors.New("private config detail")
+				}
+				o.CleanupHook = func(ctx context.Context, id string) error { cleanups.Add(1); return nil }
+			})
+			acquireFixture(t, m, opts, SingBox, fixture)
+			accepted(t, m, SingBox, "good", 0)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			completed := make(chan error, 1)
+			go func() { _, err := m.Start(ctx, SingBox); completed <- err }()
+			<-entered
+			status, _ := m.Status(SingBox)
+			pid := status.PID
+			switch mode {
+			case "request-cancel":
+				cancel()
+			case "close":
+				if err := m.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var err error
+			select {
+			case err = <-completed:
+			case <-time.After(time.Second):
+				t.Fatal("readiness did not finish bounded")
+			}
+			if mode == "timeout" && !errors.Is(err, ErrReadiness) {
+				t.Fatal(err)
+			}
+			if mode != "timeout" && !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+			if strings.Contains(err.Error(), "private") {
+				t.Fatal("readiness hook details leaked", err)
+			}
+			assertGone(t, pid)
+			status, _ = m.Status(SingBox)
+			if status.PID != 0 || status.Desired {
+				t.Fatalf("readiness failure left process desired/live: %+v", status)
+			}
+			if mode != "close" && status.ErrorCode != "readiness_failed" {
+				t.Fatal(status)
+			}
+			if cleanups.Load() < 2 {
+				t.Fatal("readiness failure skipped owned cleanup", cleanups.Load())
+			}
+		})
+	}
+}
+
+func TestLeaderExitCancelsReadinessHookPromptly(t *testing.T) {
+	m, opts := testManager(t, func(o *Options) {
+		o.ReadyTimeout = 5 * time.Second
+		o.ReadyHook = func(ctx context.Context, id string) error { <-ctx.Done(); return ctx.Err() }
+	})
+	acquireFixture(t, m, opts, SingBox, fixture)
+	accepted(t, m, SingBox, "crash", 0)
+	before := time.Now()
+	status, err := m.Start(context.Background(), SingBox)
+	if !errors.Is(err, ErrReadiness) || status.PID != 0 || status.State != Error || status.ErrorCode != "readiness_failed" {
+		t.Fatalf("crash readiness accepted: %+v %v", status, err)
+	}
+	if time.Since(before) > time.Second {
+		t.Fatal("leader exit waited for full readiness timeout")
+	}
+}
+
+func TestRestartReadinessUsesManagerNotOldRequestContext(t *testing.T) {
+	var checks atomic.Int32
+	m, opts := testManager(t, func(o *Options) {
+		o.ReadyHook = func(ctx context.Context, id string) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			checks.Add(1)
+			return nil
+		}
+	})
+	acquireFixture(t, m, opts, SingBox, fixture)
+	accepted(t, m, SingBox, "good", 0)
+	requestCtx, cancel := context.WithCancel(context.Background())
+	first, err := m.Start(requestCtx, SingBox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	m.mu.Lock()
+	p := m.services[SingBox].proc
+	m.mu.Unlock()
+	p.signal(syscall.SIGKILL)
+	restarted := waitStatus(t, m, SingBox, func(s Status) bool {
+		return s.State == Running && s.PID != 0 && s.PID != first.PID && checks.Load() >= 2
+	})
+	if restarted.ErrorCode != "" || !restarted.Desired {
+		t.Fatal(restarted)
+	}
+	assertGone(t, first.PID)
+}
+
+func TestFRPCReadinessMayMeanAliveNotConnected(t *testing.T) {
+	m, opts := testManager(t, func(o *Options) {
+		o.ReadyHook = func(ctx context.Context, id string) error {
+			if id != FRPC {
+				return errors.New("wrong service")
+			}
+			return nil
+		}
+	})
+	acquireFixture(t, m, opts, FRPC, fixture)
+	accepted(t, m, FRPC, "serverAddr = 'private.example'", 0)
+	status, err := m.Start(context.Background(), FRPC)
+	if err != nil || status.State != Running || status.PID == 0 {
+		t.Fatalf("frpc alive rejected: %+v %v", status, err)
+	}
+	public, _ := json.Marshal(status)
+	if strings.Contains(string(public), "connected") {
+		t.Fatal("remote connectivity invented")
+	}
+}

@@ -149,6 +149,9 @@ func normalizeOptions(o *Options) error {
 	if o.CheckTimeout == 0 {
 		o.CheckTimeout = 10 * time.Second
 	}
+	if o.ReadyTimeout == 0 {
+		o.ReadyTimeout = 10 * time.Second
+	}
 	if o.TermGrace == 0 {
 		o.TermGrace = 2 * time.Second
 	}
@@ -167,7 +170,7 @@ func normalizeOptions(o *Options) error {
 	if o.MaxCompressedBytes < 1 || o.MaxCompressedBytes > 64<<20 || o.MaxUncompressedBytes < 1 || o.MaxUncompressedBytes > 128<<20 || o.MaxConfigBytes < 1 || o.MaxConfigBytes > 4<<20 || o.TailBytes < 1 || o.TailBytes > 16<<10 || o.MinFreeRunBytes < 0 || o.MaxRestarts < 1 || o.MaxRestarts > 20 {
 		return errors.New("invalid runtime resource limits")
 	}
-	if o.DownloadTimeout < time.Millisecond || o.DownloadTimeout > 10*time.Minute || o.CheckTimeout < time.Millisecond || o.CheckTimeout > time.Minute || o.TermGrace < time.Millisecond || o.TermGrace > 10*time.Second || o.BackoffInitial < time.Millisecond || o.BackoffMax < o.BackoffInitial || o.BackoffMax > 5*time.Minute || o.StableAfter < time.Millisecond {
+	if o.DownloadTimeout < time.Millisecond || o.DownloadTimeout > 10*time.Minute || o.CheckTimeout < time.Millisecond || o.CheckTimeout > time.Minute || o.ReadyTimeout < time.Millisecond || o.ReadyTimeout > time.Minute || o.TermGrace < time.Millisecond || o.TermGrace > 10*time.Second || o.BackoffInitial < time.Millisecond || o.BackoffMax < o.BackoffInitial || o.BackoffMax > 5*time.Minute || o.StableAfter < time.Millisecond {
 		return errors.New("invalid runtime time limits")
 	}
 	return nil
@@ -259,6 +262,9 @@ func (m *Manager) statusLocked(id string) Status {
 	}
 	if s.errorCode == "restart_limit" {
 		out.RecoveryPlan = append(out.RecoveryPlan, "inspect_core_and_start_explicitly")
+	}
+	if s.errorCode == "readiness_failed" {
+		out.RecoveryPlan = append(out.RecoveryPlan, "inspect_local_listeners_and_start_explicitly")
 	}
 	if s.cleanupPending {
 		out.RecoveryPlan = append(out.RecoveryPlan, "retry_owned_resource_cleanup")
@@ -365,7 +371,7 @@ func (m *Manager) Acquire(ctx context.Context, id string, artifact Artifact) (St
 	}
 	if shouldRun {
 		if err = m.stopProcess(id, false); err == nil {
-			err = m.startProcess(id)
+			err = m.startProcess(ctx, id)
 		}
 		return m.result(id, err)
 	}
@@ -440,7 +446,7 @@ func (m *Manager) Configure(ctx context.Context, id string, raw []byte, expected
 	}
 	if shouldRun {
 		if err = m.stopProcess(id, false); err == nil {
-			err = m.startProcess(id)
+			err = m.startProcess(ctx, id)
 		}
 		return m.result(id, err)
 	}
@@ -507,7 +513,7 @@ func (m *Manager) Restore(ctx context.Context, id string, expectedGeneration uin
 	}
 	if shouldRun {
 		if err = m.stopProcess(id, false); err == nil {
-			err = m.startProcess(id)
+			err = m.startProcess(ctx, id)
 		}
 		return m.result(id, err)
 	}
@@ -568,7 +574,7 @@ func (m *Manager) Start(ctx context.Context, id string) (Status, error) {
 	s.restarts = 0
 	s.epoch++
 	m.mu.Unlock()
-	err = m.startProcess(id)
+	err = m.startProcess(ctx, id)
 	return m.result(id, err)
 }
 func (m *Manager) Stop(ctx context.Context, id string) (Status, error) {
@@ -580,7 +586,10 @@ func (m *Manager) Stop(ctx context.Context, id string) (Status, error) {
 	err = m.stopProcess(id, true)
 	return m.result(id, err)
 }
-func (m *Manager) startProcess(id string) error {
+func (m *Manager) startProcess(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	s := m.services[id]
 	if m.closed {
@@ -607,13 +616,56 @@ func (m *Manager) startProcess(id string) error {
 		m.mu.Unlock()
 		return errors.New("managed process start failed")
 	}
+	m.mu.Lock()
+	s.proc = p // Status exposes starting/PID while the local readiness hook waits.
+	m.mu.Unlock()
+	if m.opts.ReadyHook != nil {
+		readyCtx, cancelReady := context.WithTimeout(ctx, m.opts.ReadyTimeout)
+		// A leader exit wakes a cooperative hook immediately rather than waiting
+		// for ReadyTimeout. The monitor itself ends when the hook returns.
+		monitorDone := make(chan struct{})
+		go func() {
+			defer close(monitorDone)
+			select {
+			case <-p.done:
+				cancelReady()
+			case <-readyCtx.Done():
+			}
+		}()
+		hookErr := m.opts.ReadyHook(readyCtx, id)
+		readyErr := readyCtx.Err()
+		cancelReady()
+		<-monitorDone
+		p.signalMu.Lock()
+		exited := p.exited
+		p.signalMu.Unlock()
+		if hookErr != nil || readyErr != nil || exited {
+			cleanupErr := m.stopProcess(id, true)
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+			m.setState(id, Error, "readiness_failed")
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return ErrReadiness // never forward hook messages or config details
+		}
+	}
+	// Cancellation may arrive during exec even when no local readiness hook is
+	// configured (for example FRPC with no listener). Never leave that start live.
+	if err := ctx.Err(); err != nil {
+		if cleanupErr := m.stopProcess(id, true); cleanupErr != nil {
+			return cleanupErr
+		}
+		m.setState(id, Error, "readiness_failed")
+		return err
+	}
 	watchCtx, cancelWatch := context.WithCancel(m.ctx)
 	m.mu.Lock()
 	if s.cancelWatch != nil {
 		s.cancelWatch()
 	}
 	s.cancelWatch = cancelWatch
-	s.proc = p
 	s.state = Running
 	m.mu.Unlock()
 	m.wg.Add(1)
@@ -768,7 +820,17 @@ func (m *Manager) watch(ctx context.Context, id string, p *managedProcess, epoch
 	allowed := !m.closed && s.desired && s.epoch == epoch && s.proc == nil
 	m.mu.Unlock()
 	if allowed {
-		_ = m.startProcess(id)
+		// Restarts use manager lifetime, not a completed HTTP request context.
+		// They remain preemptible by another core's unexpected exit.
+		restartCtx, cancelRestart := context.WithCancel(m.ctx)
+		m.mu.Lock()
+		m.activeCancel = cancelRestart
+		m.mu.Unlock()
+		_ = m.startProcess(restartCtx, id)
+		cancelRestart()
+		m.mu.Lock()
+		m.activeCancel = nil
+		m.mu.Unlock()
 	}
 }
 

@@ -23,6 +23,7 @@ var (
 	ErrNotConfigured             = errors.New("service is not configured")
 	ErrNoArtifact                = errors.New("service artifact is unavailable")
 	ErrCheck                     = errors.New("candidate verification failed")
+	ErrReadiness                 = errors.New("managed process readiness failed")
 	ErrArtifactCompressedLimit   = errors.New("artifact exceeds compressed byte limit")
 	ErrArtifactUncompressedLimit = errors.New("artifact exceeds uncompressed byte limit")
 	// ErrDurability means the atomic rename committed, but directory fsync failed.
@@ -57,14 +58,18 @@ type Options struct {
 	TailBytes            int
 	DownloadTimeout      time.Duration
 	CheckTimeout         time.Duration
+	ReadyTimeout         time.Duration
 	TermGrace            time.Duration
 	BackoffInitial       time.Duration
 	BackoffMax           time.Duration
 	StableAfter          time.Duration
 	MaxRestarts          int
 	CleanupHook          func(context.Context, string) error
-	syncDirectory        func(string) error // test seam; production always uses syncDir
-	waitExitedLeader     func(int) bool     // test seam; production always uses waitid(WNOWAIT)
+	// ReadyHook checks fixed local listeners, not remote connectivity. It must
+	// honor ctx and must not call manager mutations; Config/Status reads are safe.
+	ReadyHook        func(context.Context, string) error
+	syncDirectory    func(string) error // test seam; production always uses syncDir
+	waitExitedLeader func(int) bool     // test seam; production always uses waitid(WNOWAIT)
 }
 
 type State string
