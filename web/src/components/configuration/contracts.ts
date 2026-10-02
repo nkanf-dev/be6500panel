@@ -63,6 +63,8 @@ export const CommitSchema = Schema.Struct({
   generation: Schema.Number,
   deadline: Schema.optional(Schema.String),
   changedModules: Schema.Array(ConfigurationModuleSchema),
+  captureDisabled: Schema.optional(Schema.Boolean),
+  warning: Schema.optional(Schema.String),
 });
 export type ConfigurationSnapshot = typeof ConfigurationSchema.Type;
 export type ConfigurationDraft = typeof DraftSchema.Type;

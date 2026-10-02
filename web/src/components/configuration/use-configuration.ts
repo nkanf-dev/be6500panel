@@ -393,7 +393,21 @@ export function useConfiguration() {
         return {
           ...previous,
           buffers,
-          operation,
+          // Confirm/Rollback may omit the original Commit warning. It still
+          // applies to this transaction; never carry it to another operation.
+          operation: {
+            ...operation,
+            captureDisabled:
+              operation.captureDisabled ??
+              (previous.operation?.id === operation.id
+                ? previous.operation.captureDisabled
+                : undefined),
+            warning:
+              operation.warning ??
+              (previous.operation?.id === operation.id
+                ? previous.operation.warning
+                : undefined),
+          },
           status: {
             enabled: previous.status?.enabled ?? true,
             generation: operation.generation,

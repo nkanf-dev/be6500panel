@@ -245,6 +245,28 @@ export function CommitControls({
       {pending && (
         <PendingConfirmation pending={pending} controller={controller} />
       )}
+      {(operation?.captureDisabled || operation?.warning) && (
+        <section
+          className="configuration-operation-warning"
+          role="status"
+          aria-label="配置提交提示"
+        >
+          {operation.captureDisabled && (
+            <>
+              <Badge tone="warning">设备代理捕获已停用</Badge>
+              <p>
+                原生配置事务已停用代理捕获。设备选择仍保留，不会自动重新启用。
+              </p>
+              <p>
+                {pending
+                  ? "请先确认当前连接或恢复先前配置，再到代理页面检查并重新应用所选设备。"
+                  : "如需继续代理，请到代理页面检查并重新应用所选设备。"}
+              </p>
+            </>
+          )}
+          {operation.warning && <p>{operation.warning}</p>}
+        </section>
+      )}
       <RiskDialog
         drafts={riskDrafts}
         generation={riskGeneration ?? controller.status?.generation ?? 0}

@@ -39,6 +39,8 @@ function mockApi(
     drafts?: readonly ConfigurationDraft[];
     documents?: readonly { module: string; content: string }[];
     risky?: boolean;
+    captureDisabled?: boolean;
+    warning?: string;
     enabled?: boolean;
     stageConflict?: boolean;
     pending?: { id: string; deadline: string };
@@ -108,6 +110,10 @@ function mockApi(
         generation,
         state: pending ? "pending_confirmation" : "committed",
         ...(pending ? { deadline: pending.deadline } : {}),
+        ...(options.captureDisabled === undefined
+          ? {}
+          : { captureDisabled: options.captureDisabled }),
+        ...(options.warning === undefined ? {} : { warning: options.warning }),
         changedModules: ["network"],
       });
     }
@@ -195,6 +201,72 @@ describe("FullControl configuration", () => {
     expect(
       JSON.parse(posts(fetchMock, "commit")[0][1]!.body as string),
     ).toEqual({ draftIds: [draft.id], generation: 7, acknowledgeRisks: false });
+  });
+  it("shows capture-disabled Commit guidance without claiming saved device selection was erased", async () => {
+    const warning =
+      "Capture was disabled by the native configuration transaction. Reapply selected devices after checking connectivity.";
+    mockApi({ drafts: [draft], captureDisabled: true, warning });
+    render(<ConfigurationWorkspace />);
+    const commit = await screen.findByRole("button", {
+      name: "Commit 已选草稿 (1)",
+    });
+    fireEvent.click(commit);
+    await screen.findByText(/已提交.*network/);
+    const notice = screen.getByRole("status", { name: "配置提交提示" });
+    expect(notice).toHaveTextContent("设备代理捕获已停用");
+    expect(notice).toHaveTextContent("设备选择仍保留，不会自动重新启用");
+    expect(notice).toHaveTextContent("到代理页面检查并重新应用所选设备");
+    expect(notice).toHaveTextContent(warning);
+  });
+  it.each(["确认当前连接", "恢复先前配置"])(
+    "retains capture-disabled guidance during pending confirmation and after %s",
+    async (action) => {
+      const warning =
+        "Apply the selected devices again after Confirm or Rollback.";
+      const risky = {
+        ...draft,
+        risks: [{ code: "management_address", message: "管理地址发生变化" }],
+      };
+      mockApi({ drafts: [risky], risky: true, captureDisabled: true, warning });
+      render(<ConfigurationWorkspace />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Commit 已选草稿 (1)" }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "确认风险并 Commit" }),
+      );
+      await screen.findByText("等待连接确认");
+      expect(
+        screen.getByRole("status", { name: "配置提交提示" }),
+      ).toHaveTextContent("请先确认当前连接或恢复先前配置");
+      fireEvent.click(screen.getByRole("button", { name: action }));
+      await screen.findByText(
+        action === "确认当前连接" ? /已提交.*network/ : /已回滚.*network/,
+      );
+      expect(screen.queryByText("等待连接确认")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("status", { name: "配置提交提示" }),
+      ).toHaveTextContent(warning);
+      expect(
+        screen.getByRole("status", { name: "配置提交提示" }),
+      ).toHaveTextContent("设备选择仍保留");
+    },
+  );
+  it("decodes a warning without claiming capture was disabled when the flag is false", async () => {
+    mockApi({
+      drafts: [draft],
+      captureDisabled: false,
+      warning: "Check the configuration transaction result.",
+    });
+    render(<ConfigurationWorkspace />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Commit 已选草稿 (1)" }),
+    );
+    await screen.findByText(/已提交.*network/);
+    expect(
+      screen.getByRole("status", { name: "配置提交提示" }),
+    ).toHaveTextContent("Check the configuration transaction result.");
+    expect(screen.queryByText("设备代理捕获已停用")).not.toBeInTheDocument();
   });
   it("acknowledges risks once and shows pending confirmation with explicit Confirm and Rollback", async () => {
     const risky = {

@@ -393,6 +393,18 @@
   gap: var(--space-2);
   color: var(--success);
 }
+.configuration-operation-warning {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+  background: var(--card);
+  font-size: var(--text-sm);
+}
+.configuration-operation-warning p {
+  margin: var(--space-2) 0 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
 .configuration-operation-result code {
   margin-left: auto;
   color: var(--muted-foreground);
