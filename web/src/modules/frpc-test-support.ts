@@ -34,8 +34,15 @@ export function mockRuntime(
   };
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url === "/api/runtime") {
-      const observed = options.observedStatus ? options.observedStatus() : currentStatus;
-      return Promise.resolve(respond({ enabled: options.enabled ?? true, services: options.missingStatus || !observed ? [] : [observed] }));
+      const observed = options.observedStatus
+        ? options.observedStatus()
+        : currentStatus;
+      return Promise.resolve(
+        respond({
+          enabled: options.enabled ?? true,
+          services: options.missingStatus || !observed ? [] : [observed],
+        }),
+      );
     }
     if (url === "/api/runtime/config?service=frpc")
       return Promise.resolve(
