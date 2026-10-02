@@ -1,11 +1,11 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "../theme";
 import { ProxyPage } from "./proxy";
 import { OverviewPage } from "./overview";
 import { ConnectionAnalysis } from "./proxy/connection-analysis";
-import { jsonResponse } from "./production-fixtures.test-data";
+import { jsonResponse, routerSnapshot } from "./production-fixtures.test-data";
 import { historyFixture } from "../components/traffic-history/history-fixture.test-data";
 
 const state = vi.hoisted(() => ({ mode: "host" }));
@@ -14,6 +14,10 @@ vi.mock("../app/console-context", () => ({
     health: { mode: state.mode, readOnly: state.mode === "demo" },
     capabilities: [],
     connection: "live",
+    router: routerSnapshot,
+    routerLoading: false,
+    refreshRouter: vi.fn(),
+    refreshing: false,
     trafficSamples:
       state.mode === "host"
         ? [{ time: "2026-01-01T00:00:00Z", rx: 0, tx: 0 }]
@@ -36,6 +40,7 @@ vi.mock("../components/visualizations/EChart", () => ({
     <div role="img" aria-label={label} />
   ),
 }));
+beforeEach(() => window.localStorage.clear());
 afterEach(() => {
   vi.unstubAllGlobals();
   state.mode = "host";
@@ -108,19 +113,31 @@ describe("production visualization entry points", () => {
       ).toBeInTheDocument();
     }
   });
-  it("retains the overview device heatmap while server history replaces browser WAN samples without a demo fallback", async () => {
+  it("renders the custom homepage with observed devices and durable WAN history, not browser samples or a heatmap", async () => {
     const fetch = vi.fn().mockResolvedValue(jsonResponse(historyFixture()));
     vi.stubGlobal("fetch", fetch);
     renderPanel(<OverviewPage navigate={vi.fn()} />);
     await screen.findByText("来源：WAN · test-wan");
-    const heatmap = screen.getByRole("region", { name: "终端活跃度" });
-    expect(within(heatmap).getByRole("status")).toHaveTextContent(
-      "未接入终端活跃度",
-    );
-    expect(within(heatmap).queryByRole("img")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "编辑布局" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("list", { name: "仪表盘组件" }),
+    ).toBeInTheDocument();
+    const devices = screen.getByRole("listitem", { name: "设备观察" });
+    expect(within(devices).getByText("test-client")).toBeInTheDocument();
+    expect(within(devices).getByText("192.0.2.20")).toBeInTheDocument();
+    expect(within(devices).getByText("ARP 已观测")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "终端活跃度" }),
+    ).not.toBeInTheDocument();
     const traffic = screen.getByRole("region", { name: "WAN 流量历史" });
     expect(
       within(traffic).getByText("WAN · test-wan", { selector: ".viz-source" }),
+    ).toBeInTheDocument();
+    expect(within(traffic).getByRole("img")).toBeInTheDocument();
+    expect(
+      within(traffic).getByRole("table", { hidden: true }),
     ).toBeInTheDocument();
     expect(screen.queryByText("演示数据")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(
@@ -129,11 +146,23 @@ describe("production visualization entry points", () => {
     );
     expect(screen.queryByText("WAN · synthetic-wan")).not.toBeInTheDocument();
   });
-  it("keeps the overview heatmap explicitly marked as demo in demo mode", () => {
+  it("labels demo history and actual supplied demo device observations without inventing a device heatmap", () => {
     state.mode = "demo";
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
     renderPanel(<OverviewPage navigate={vi.fn()} />);
-    const heatmap = screen.getByRole("region", { name: "终端活跃度" });
-    expect(within(heatmap).getByText("演示数据")).toBeInTheDocument();
-    expect(within(heatmap).getByRole("img")).toBeInTheDocument();
+    const devices = screen.getByRole("listitem", { name: "设备观察" });
+    expect(within(devices).getByText("演示数据")).toBeInTheDocument();
+    expect(within(devices).getByText("test-client")).toBeInTheDocument();
+    const traffic = screen.getByRole("region", { name: "WAN 流量历史" });
+    expect(within(traffic).getByText("演示数据")).toBeInTheDocument();
+    expect(within(traffic).getByRole("img")).toBeInTheDocument();
+    expect(
+      within(traffic).getByRole("table", { hidden: true }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "终端活跃度" }),
+    ).not.toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
