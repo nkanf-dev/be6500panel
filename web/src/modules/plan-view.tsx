@@ -1,4 +1,4 @@
-import { CheckCircle2, FileCheck2, Lock, TriangleAlert } from "lucide-react";
+import { FileCheck2, Lock, TriangleAlert } from "lucide-react";
 import {
   Badge,
   Button,
@@ -38,10 +38,10 @@ export function PlanView({
             <FileCheck2 size={18} />
             <div>
               <strong>{plan.summary}</strong>
-              <span>只读计划</span>
+              <span>仅预览 · 未执行任何变更</span>
             </div>
           </div>
-          <ol className="plan-steps">
+          <ol className="plan-steps" aria-label="拟议步骤">
             {plan.steps.map((step, index) => (
               <li key={`${step.module}-${index}`}>
                 <span className="step-index">{index + 1}</span>
@@ -52,7 +52,7 @@ export function PlanView({
                   </div>
                   <p>{step.detail}</p>
                 </div>
-                <CheckCircle2 size={15} className="text-success" />
+                <span className="text-muted text-xs">拟议步骤</span>
               </li>
             ))}
           </ol>
@@ -70,7 +70,9 @@ export function PlanView({
             </div>
           )}
           <div className="plan-footer">
-            <span className="text-muted text-xs">执行能力未接入</span>
+            <span className="text-muted text-xs">
+              此预览不能应用；实际配置请在节点与运行管理中操作
+            </span>
             <Button disabled size="small">
               <Lock size={13} />
               应用计划
@@ -81,7 +83,7 @@ export function PlanView({
         <EmptyState
           icon={<FileCheck2 size={26} />}
           title="等待校验"
-          detail="提交配置以生成计划"
+          detail="校验策略以生成只读预览，不保存或应用运行配置"
         />
       )}
     </Panel>

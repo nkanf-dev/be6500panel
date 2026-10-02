@@ -1,4 +1,5 @@
 import { useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import {
   Button,
   ErrorState,
@@ -22,6 +23,13 @@ export function NativeConfigEditor({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>();
   const [saved, setSaved] = useState(false);
+  const [replaceAction, setReplaceAction] = useState<"reload" | "create">();
+  const dirty = config !== original && !saved;
+  const requestReplacement = (action: "reload" | "create") => {
+    if (dirty) setReplaceAction(action);
+    else if (action === "reload") void fetchConfig();
+    else createConfig();
+  };
   const stale =
     generation !== undefined &&
     runtime.status !== undefined &&
@@ -75,7 +83,7 @@ export function NativeConfigEditor({
           <Button
             size="small"
             disabled={!runtime.enabled || loading || runtime.pending}
-            onClick={() => void fetchConfig()}
+            onClick={() => requestReplacement("reload")}
           >
             {generation !== undefined ? "重新载入配置" : "载入配置"}
           </Button>
@@ -88,7 +96,7 @@ export function NativeConfigEditor({
             <Button
               type="button"
               disabled={!runtime.enabled || runtime.pending || loading}
-              onClick={createConfig}
+              onClick={() => requestReplacement("create")}
             >
               新建原生配置
             </Button>
@@ -164,6 +172,41 @@ export function NativeConfigEditor({
           </div>
         </div>
       </form>
+      <Dialog.Root
+        open={replaceAction !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setReplaceAction(undefined);
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="command-dialog">
+            <div className="config-form">
+              <Dialog.Title>丢弃未保存的原生配置？</Dialog.Title>
+              <Dialog.Description>
+                当前编辑尚未
+                Commit。继续会替换本地文本，不会更改已保存的运行配置。
+              </Dialog.Description>
+              <div className="form-actions">
+                <Dialog.Close asChild>
+                  <Button type="button">保留编辑</Button>
+                </Dialog.Close>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const action = replaceAction;
+                    setReplaceAction(undefined);
+                    if (action === "reload") void fetchConfig();
+                    else if (action === "create") createConfig();
+                  }}
+                >
+                  {replaceAction === "create" ? "丢弃并新建" : "丢弃并载入"}
+                </Button>
+              </div>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </Panel>
   );
 }

@@ -28,6 +28,16 @@ func (s *Server) ModuleList() []core.Module {
 			}
 		case "proxy", "frpc":
 			if s.runtime != nil {
+				for j := range m.Capabilities {
+					capability := &m.Capabilities[j]
+					if capability.ID == "apply" || capability.ID == "observe" {
+						capability.Supported = true
+						capability.Reason = ""
+						if capability.ID == "apply" {
+							capability.Title = "原生配置与启停"
+						}
+					}
+				}
 				m.Capabilities = append(m.Capabilities, core.Capability{ID: "runtime", Title: "运行控制", Supported: true})
 			}
 		}

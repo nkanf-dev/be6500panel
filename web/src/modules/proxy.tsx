@@ -12,6 +12,7 @@ import { CapturePanel } from "./proxy/capture-panel";
 import { ConnectionAnalysis } from "./proxy/connection-analysis";
 import { ProxyDiagnostics } from "./proxy/diagnostics";
 import { ProxyPlanPreview } from "./proxy-plan-preview";
+import { ProxySetupGuidance } from "./proxy/setup-guidance";
 
 export function ProxyPage() {
   const runtime = useRuntime("sing-box");
@@ -57,7 +58,7 @@ export function ProxyPage() {
             runtime.refresh();
           }}
         >
-          刷新节点
+          刷新代理状态
         </Button>
       </div>
       {resource.error !== undefined && (
@@ -68,6 +69,13 @@ export function ProxyPage() {
       )}
       {tab === "nodes" ? (
         <>
+          <ProxySetupGuidance
+            runtime={runtime}
+            nodes={nodes}
+            busy={importing || runtime.pending}
+            onRuntime={() => setTab("runtime")}
+            onCapture={() => setTab("capture")}
+          />
           <NodeSelector
             nodes={nodes}
             runtime={runtime}

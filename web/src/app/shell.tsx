@@ -127,7 +127,13 @@ export function Shell({
           {!collapsed && (
             <span>
               <strong>本地工作空间</strong>
-              <small>{health?.readOnly ? "观察模式" : "控制模式"}</small>
+              <small>
+                {!health
+                  ? "权限读取中"
+                  : health.readOnly
+                    ? "配置只读模式"
+                    : "配置控制模式"}
+              </small>
             </span>
           )}
         </div>
@@ -199,7 +205,13 @@ export function Shell({
                   ? "Host"
                   : "连接中"}
             </Badge>
-            <Badge tone={health?.readOnly === false ? "primary" : "neutral"}>{health?.readOnly === false ? "Full control" : "观察"}</Badge>
+            <Badge tone={health?.readOnly === false ? "primary" : "neutral"}>
+              {!health
+                ? "配置权限未知"
+                : health.readOnly
+                  ? "配置只读"
+                  : "配置控制已启用"}
+            </Badge>
             <span
               className={cn(
                 "connection-indicator",
