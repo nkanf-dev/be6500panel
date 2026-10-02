@@ -155,18 +155,26 @@ func TestStageIsPrivateAndNeverWritesLive(t *testing.T) {
 	}
 }
 func TestInvalidCandidatesRemainDraftsAndCannotCommit(t *testing.T) {
-	for _, text := range []string{"config interface 'lan'\n option ipaddr 'not-an-ip'\n", "config dropbear\n option Port '70000'\n", "config x\n option macaddr 'not-a-mac'\n", "config x\n option thing 'unterminated\n", "config x\n option thing 'ok'\nexec 'touch /tmp/oops'\n"} {
-		t.Run(text, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, module, text string
+	}{
+		{"interface-address", "network", "config interface 'lan'\n option ipaddr 'not-an-ip'\n"},
+		{"ssh-port", "dropbear", "config dropbear\n option Port '70000'\n"},
+		{"device-address", "network", "config device 'lan_device'\n option macaddr 'not-a-mac'\n"},
+		{"unterminated-string", "network", "config x\n option thing 'unterminated\n"},
+		{"non-native-command", "network", "config x\n option thing 'ok'\nexec 'touch /tmp/oops'\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
 			m := openFixture(t, f)
-			before := readFixture(t, f, "network")
-			d := stage(t, m, "network", text)
+			before := readFixture(t, f, tc.module)
+			d := stage(t, m, tc.module, tc.text)
 			if d.Valid || len(d.Errors) == 0 {
 				t.Fatal("invalid candidate accepted")
 			}
 			_, e := commit(t, m, d, true)
 			errorCode(t, e, "invalid_candidate")
-			if readFixture(t, f, "network") != before || len(f.reloads) != 0 {
+			if readFixture(t, f, tc.module) != before || len(f.reloads) != 0 {
 				t.Fatal("invalid candidate applied")
 			}
 		})
