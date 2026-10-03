@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ProxyPolicySummarySchema } from "../modules/proxy/policy-contracts";
 
 export const HealthSchema = Schema.Struct({
   status: Schema.Literal("ok"),
@@ -252,6 +253,7 @@ export const ProxyNodesSchema = Schema.Struct({
     }),
   ),
   diagnostics: Schema.Array(ProxyDiagnosticSchema),
+  policySummary: Schema.optional(ProxyPolicySummarySchema),
   selectedNodeId: Schema.String,
 });
 export const ProxySelectSchema = Schema.Struct({
@@ -308,6 +310,7 @@ export type ProxyImportInput =
   | { content: string; url?: never };
 export type ProxySelectInput = {
   nodeId: string;
+  acknowledgedRevision?: string;
   ipv6: IPv6Policy;
   failure: "direct";
   ports: { mixed: number; tproxy: number; dns: number };

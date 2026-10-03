@@ -28,12 +28,14 @@ export function Shell({
   onLogout,
   authRequired,
   children,
+  recoveryBanner,
 }: {
   page: PageId;
   navigate: (id: PageId) => void;
   onLogout: () => void;
   authRequired: boolean;
   children: ReactNode;
+  recoveryBanner?: ReactNode;
 }) {
   const [commandOpen, setCommandOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -128,7 +130,11 @@ export function Shell({
             <span>
               <strong>控制中心</strong>
               <small>
-                {!health ? "正在连接网关" : health.mode === "demo" ? "演示环境" : "已连接网关"}
+                {!health
+                  ? "正在连接网关"
+                  : health.mode === "demo"
+                    ? "演示环境"
+                    : "已连接网关"}
               </small>
             </span>
           )}
@@ -168,6 +174,7 @@ export function Shell({
         <Navigation />
       </aside>
       <div className="console-main">
+        {recoveryBanner}
         <header className="topbar">
           <div className="topbar-left">
             <Button
@@ -207,7 +214,11 @@ export function Shell({
                   : "连接中"}
             </Badge>
             <Badge tone={health?.mode === "host" ? "primary" : "neutral"}>
-              {!health ? "连接网关中" : health.mode === "demo" ? "演示环境" : "已连接网关"}
+              {!health
+                ? "连接网关中"
+                : health.mode === "demo"
+                  ? "演示环境"
+                  : "已连接网关"}
             </Badge>
             <span
               className={cn(

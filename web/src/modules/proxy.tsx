@@ -104,7 +104,10 @@ export function ProxyPage() {
       ) : tab === "analysis" ? (
         <ConnectionAnalysis />
       ) : tab === "diagnostics" ? (
-        <ProxyDiagnostics diagnostics={nodes?.diagnostics} />
+        <ProxyDiagnostics
+          diagnostics={nodes?.diagnostics}
+          policySummary={nodes?.policySummary}
+        />
       ) : (
         <ProxyPlanPreview />
       )}

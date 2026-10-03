@@ -11,7 +11,18 @@ import { errorMessage } from "../lib/api";
 import { ThemeProvider } from "../theme";
 
 vi.mock("./shell", () => ({
-  Shell: ({ children }: { children: ReactNode }) => <>{children}</>,
+  Shell: ({
+    children,
+    recoveryBanner,
+  }: {
+    children: ReactNode;
+    recoveryBanner?: ReactNode;
+  }) => (
+    <>
+      {recoveryBanner}
+      {children}
+    </>
+  ),
 }));
 vi.mock("./pages", () => ({
   ModulePage: () => {
@@ -79,6 +90,8 @@ beforeEach(() => {
       );
     if (url === "/api/modules")
       return Promise.resolve(respond({ modules: [] }));
+    if (url === "/api/configuration/status")
+      return Promise.resolve(respond({ enabled: true, generation: 1 }));
     if (url === "/api/router")
       return Promise.resolve(jsonResponse(routerSnapshot));
     if (url === "/api/system")
@@ -146,7 +159,7 @@ describe("SSE failure reconciliation", () => {
     sessionExpired = true;
     act(() => source.onerror?.());
     expect(
-      await screen.findByRole("heading", { name: "登录控制台" }),
+      await screen.findByRole("heading", { name: "登录控制中心" }),
     ).toBeInTheDocument();
     expect(source.close).toHaveBeenCalled();
     expect(

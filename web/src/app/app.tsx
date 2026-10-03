@@ -10,6 +10,8 @@ import { Shell } from "./shell";
 import { ModulePage } from "./pages";
 import { clearConfigurationSession } from "../components/configuration";
 import { clearRuntimeEditorSession } from "../modules/runtime/editor-session";
+import { GlobalRecoveryProvider } from "../components/configuration/GlobalRecoveryProvider";
+import { GlobalRecoveryBanner } from "../components/configuration/GlobalRecoveryBanner";
 
 export function App() {
   const [session, setSession] = useState<Session>();
@@ -46,6 +48,7 @@ export function App() {
   const logout = async () => {
     try {
       const nextSession = await runRequest(api.logout());
+      window.dispatchEvent(new Event("be6500panel:logout"));
       clearConfigurationSession();
       clearRuntimeEditorSession();
       setSession(nextSession);
@@ -71,14 +74,17 @@ export function App() {
         <Login onLogin={setSession} />
       ) : (
         <ConsoleProvider onUnauthorized={onUnauthorized}>
-          <Shell
-            page={page}
-            navigate={navigate}
-            authRequired={session.authRequired}
-            onLogout={logout}
-          >
-            <ModulePage page={page} navigate={navigate} />
-          </Shell>
+          <GlobalRecoveryProvider>
+            <Shell
+              page={page}
+              navigate={navigate}
+              authRequired={session.authRequired}
+              onLogout={logout}
+              recoveryBanner={<GlobalRecoveryBanner />}
+            >
+              <ModulePage page={page} navigate={navigate} />
+            </Shell>
+          </GlobalRecoveryProvider>
         </ConsoleProvider>
       )}
     </Tooltip.Provider>
