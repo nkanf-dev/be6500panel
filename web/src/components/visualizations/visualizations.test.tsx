@@ -10,7 +10,7 @@ const renderChart = (Component: typeof TrafficTrend, demo = true) => render(<The
 describe('visualization public contract', () => {
   it.each(components)('never replaces unavailable telemetry with samples (%s)', Component => {
     renderChart(Component, false);
-    expect(screen.getByText(Component === TrafficTrend ? '未采样' : '未接入', { selector: '.viz-source' })).toBeTruthy();
+    expect(screen.getByText(Component === TrafficTrend ? '未采样' : Component === ActivityHeatmap ? '数据源：系统流量统计 (trafficd)' : '未接入', { selector: '.viz-source' })).toBeTruthy();
     expect(screen.queryByText('演示数据')).toBeNull();
     expect(screen.queryByRole('img')).toBeNull();
     expect(screen.queryByRole('table')).toBeNull();
@@ -42,7 +42,7 @@ describe('visualization public contract', () => {
   });
   it('filters heatmap by a neutral sample device', () => {
     renderChart(ActivityHeatmap);
-    fireEvent.change(screen.getByLabelText('终端'), { target: { value: '终端 B' } });
+    fireEvent.change(screen.getByLabelText('终端'), { target: { value: 'sample-2' } });
     expect(screen.getByText('24 条')).toBeTruthy();
     const table = screen.getByRole('table', { hidden: true });
     expect(within(table).queryAllByText('终端 A')).toHaveLength(0);

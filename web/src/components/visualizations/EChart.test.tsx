@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '../../theme';
 import { EChart } from './EChart';
 
-const mocks = vi.hoisted(() => ({ init: vi.fn(), setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn(), disconnect: vi.fn() }));
+const mocks = vi.hoisted(() => ({ init: vi.fn(), setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn(), on: vi.fn(), disconnect: vi.fn() }));
 vi.mock('./echarts-runtime', () => ({ init: mocks.init }));
 vi.mock('./chart-theme', () => ({ readChartPalette: () => ({ rx: 'rgb(24, 86, 180)' }) }));
 let hidden = false;
@@ -17,7 +17,7 @@ beforeEach(() => {
   localStorage.clear();
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(680);
   vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
-  mocks.init.mockReturnValue({ setOption: mocks.setOption, resize: mocks.resize, dispose: mocks.dispose });
+  mocks.init.mockReturnValue({ setOption: mocks.setOption, resize: mocks.resize, dispose: mocks.dispose, on: mocks.on });
   vi.stubGlobal('ResizeObserver', class {
     constructor(callback: () => void) { resizeCallback = callback; }
     observe() {} disconnect = mocks.disconnect;
@@ -72,4 +72,22 @@ describe('lazy ECharts lifecycle', () => {
     expect(await screen.findByText('图表暂不可用 · 数据表仍可查看')).toBeTruthy();
     expect(screen.getByRole('img', { name: 'sample trend' })).toBeTruthy();
   });
+  it('forwards bounded data metadata to the latest callback without recreating the chart', async () => {
+    const first = vi.fn();
+    const next = vi.fn();
+    const view = render(<ThemeProvider defaultMode="light"><EChart option={option} label="sample heatmap" onDataClick={first} /></ThemeProvider>);
+    await waitFor(() => expect(mocks.init).toHaveBeenCalledTimes(1));
+    expect(mocks.on).toHaveBeenCalledWith('click', expect.any(Function));
+    const listener = mocks.on.mock.calls[0][1] as (value: unknown) => void;
+    act(() => listener({ value: [3, 2, 100], componentType: 'series', seriesType: 'heatmap', name: 'not forwarded' }));
+    expect(first).toHaveBeenCalledWith({ value: [3, 2, 100], componentType: 'series', seriesType: 'heatmap' });
+    view.rerender(<ThemeProvider defaultMode="light"><EChart option={option} label="sample heatmap" onDataClick={next} /></ThemeProvider>);
+    act(() => listener({ value: [1, 0, 0], componentType: 'series', seriesType: 'heatmap' }));
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(mocks.init).toHaveBeenCalledTimes(1);
+    view.unmount();
+    act(() => listener({ value: [1, 0, 0] }));
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
 });

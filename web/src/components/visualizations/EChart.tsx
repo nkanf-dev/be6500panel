@@ -4,9 +4,12 @@ import type { EChartsType } from 'echarts/core';
 import { useTheme } from '../../theme';
 import { readChartPalette, type ChartPalette } from './chart-theme';
 
-interface Props { option: (palette: ChartPalette) => EChartsOption; label: string; height?: number }
-export function EChart({ option, label, height = 280 }: Props) {
+export interface ChartDataClick { value: unknown; componentType?: string; seriesType?: string }
+interface Props { option: (palette: ChartPalette) => EChartsOption; label: string; height?: number; onDataClick?: (point: ChartDataClick) => void }
+export function EChart({ option, label, height = 280, onDataClick }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const clickHandler = useRef(onDataClick);
+  useEffect(() => { clickHandler.current = onDataClick; }, [onDataClick]);
   const { resolvedTheme } = useTheme();
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -37,6 +40,11 @@ export function EChart({ option, label, height = 280 }: Props) {
         const runtime = await import('./echarts-runtime');
         if (disposed || !visible()) return;
         chart = runtime.init(element, undefined, { renderer: 'canvas' });
+        chart.on('click', (point: unknown) => {
+          if (disposed || !point || typeof point !== 'object') return;
+          const data = point as { value?: unknown; componentType?: string; seriesType?: string };
+          clickHandler.current?.({ value: data.value, componentType: data.componentType, seriesType: data.seriesType });
+        });
         paint();
       } catch {
         if (!disposed) { setError(true); setLoading(false); }
