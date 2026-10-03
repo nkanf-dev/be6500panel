@@ -527,9 +527,11 @@ export function CapturePanel({
             <p>
               {strings.dialogs.captureBody(
                 selected
-                  .map(
-                    (mac) =>
-                      choices.find((item) => item.mac === mac)?.hostname || mac,
+                  .map((mac) =>
+                    labels.displayName(
+                      mac,
+                      choices.find((item) => item.mac === mac)?.hostname,
+                    ),
                   )
                   .join("、"),
               )}
@@ -543,7 +545,7 @@ export function CapturePanel({
                 const device = choices.find((item) => item.mac === mac);
                 return (
                   <li key={mac}>
-                    {device?.hostname || "未命名设备"} ·{" "}
+                    {labels.displayName(mac, device?.hostname)} ·{" "}
                     <span className="mono">{mac}</span> ·{" "}
                     <span className="mono">
                       {device?.ip || strings.states.waitingCurrentAddress}
