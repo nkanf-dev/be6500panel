@@ -428,18 +428,20 @@ func TestStorageAdmissionDeadlineDenialIsSupervisedAndRetryable(t *testing.T) {
 	a := newStorageAdmissionFixture()
 	m := openStorageAdmission(t, f, a, func(o *Options) { o.ConfirmationTimeout = 100 * time.Millisecond })
 	d := stage(t, m, "network", strings.ReplaceAll(testNetwork, "192.168.31.1", "192.168.32.1"))
-	op, err := commit(t, m, d, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	privateBefore := storageAdmissionFiles(t, f.data)
-	liveBefore := storageAdmissionLive(t, f)
+	// Arm recovery denial before the commit. Slow fsync must not let the short
+	// deadline pass and complete rollback before this test injects its failure.
 	a.setFailure(func(r storageAdmissionRequest) error {
 		if r.Recovery {
 			return errors.New("synthetic recovery budget unavailable")
 		}
 		return nil
 	})
+	op, err := commit(t, m, d, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateBefore := storageAdmissionFiles(t, f.data)
+	liveBefore := storageAdmissionLive(t, f)
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	for {
@@ -492,8 +494,15 @@ func TestStorageAdmissionRestartRecoveryUsesRecoveryForCompletion(t *testing.T) 
 	})
 	o := f.options()
 	o.StorageAdmission = a.admit
-	_, err = New(o)
-	errorCode(t, err, "rollback_failed")
+	blocked, err := New(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := blocked.Status()
+	if status.Enabled || status.ErrorCode != "rollback_failed" || status.Operation == nil || status.Operation.ID != op.ID || !status.Operation.CanRollback {
+		t.Fatalf("denied restart recovery became unreachable: %#v", status)
+	}
+	blocked.Close()
 	if !reflect.DeepEqual(privateBefore, storageAdmissionFiles(t, f.data)) || !reflect.DeepEqual(liveBefore, storageAdmissionLive(t, f)) {
 		t.Fatal("denied restart recovery lost journal or modified live files")
 	}

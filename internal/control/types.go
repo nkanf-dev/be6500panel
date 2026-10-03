@@ -82,11 +82,23 @@ type Operation struct {
 	Deadline       *time.Time `json:"deadline,omitempty"`
 	ChangedModules []string   `json:"changedModules"`
 }
+
+// OperationStatus reports the retained journal without private documents. Phase
+// is authoritative: a missing PendingCommit never proves restoration succeeded.
+// Action flags are advisory; each mutation still checks journal ID and generation.
+type OperationStatus struct {
+	Operation
+	Phase       string `json:"phase"`
+	ErrorCode   string `json:"errorCode,omitempty"`
+	CanConfirm  bool   `json:"canConfirm"`
+	CanRollback bool   `json:"canRollback"`
+}
 type Status struct {
-	Enabled       bool           `json:"enabled"`
-	Generation    uint64         `json:"generation"`
-	PendingCommit *PendingCommit `json:"pendingCommit,omitempty"`
-	ErrorCode     string         `json:"errorCode,omitempty"`
+	Enabled       bool             `json:"enabled"`
+	Generation    uint64           `json:"generation"`
+	PendingCommit *PendingCommit   `json:"pendingCommit,omitempty"`
+	ErrorCode     string           `json:"errorCode,omitempty"`
+	Operation     *OperationStatus `json:"operation,omitempty"`
 }
 
 // Error is safe for an authenticated API response. It never contains config or command output.

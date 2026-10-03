@@ -112,21 +112,28 @@ func New(o Options) (*Manager, error) {
 		if j.Phase != "committed" && j.Phase != "rolled_back" {
 			// An interrupted or unconfirmed transaction is never trusted after restart.
 			if _, err = m.rollbackLocked(ctx); err != nil {
-				return fail(err)
+				// Keep a valid journal reachable through Status and Rollback. The
+				// normal mutation guard stays disabled until recovery succeeds.
+				m.logger.Error("Startup configuration recovery needs retry", "code", "rollback_failed", "operation", j.Operation.ID)
+			} else {
+				recovered = true
 			}
-			recovered = true
 		}
 	} else if !os.IsNotExist(err) {
 		return fail(failure("journal_corrupt", "Cannot load rollback journal; changes are disabled."))
 	}
-	if _, err = m.syncGeneration(); err != nil {
-		return fail(err)
+	// Do not accept partially recovered live files as a new generation. Recovery
+	// owns the prior snapshot and state completion writes until it succeeds.
+	if m.recoveryError == "" {
+		if _, err = m.syncGeneration(); err != nil {
+			return fail(err)
+		}
+		m.storageRecovery = recovered
+		if err = m.saveState(); err != nil {
+			return fail(err)
+		}
+		m.storageRecovery = false
 	}
-	m.storageRecovery = recovered
-	if err = m.saveState(); err != nil {
-		return fail(err)
-	}
-	m.storageRecovery = false
 	m.wg.Add(1)
 	go m.deadlineLoop()
 	return m, nil
@@ -177,7 +184,25 @@ func (m *Manager) pending() *PendingCommit {
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return Status{Enabled: !m.closed && m.recoveryError == "", Generation: m.disk.Generation, PendingCommit: m.pending(), ErrorCode: m.recoveryError}
+	errorCode := m.recoveryError
+	available := !m.closed && m.ctx.Err() == nil
+	if !available {
+		errorCode = "closed"
+	}
+	s := Status{Enabled: available && m.recoveryError == "", Generation: m.disk.Generation, PendingCommit: m.pending(), ErrorCode: errorCode}
+	if m.journal != nil {
+		j := m.journal
+		s.Operation = &OperationStatus{
+			Operation: cloneOperation(j.Operation),
+			Phase:     j.Phase,
+			ErrorCode: errorCode,
+			CanConfirm: available && m.recoveryError == "" && j.Phase == "pending" &&
+				j.Operation.Deadline != nil && time.Now().Before(*j.Operation.Deadline),
+			CanRollback: available && (j.Phase == "applying" || j.Phase == "pending" || j.Phase == "rolling_back" ||
+				j.Phase == "committed" && m.disk.Generation == j.Operation.Generation),
+		}
+	}
+	return s
 }
 func (m *Manager) syncGeneration() (map[string]snapshot, error) {
 	live, fingerprint, err := m.readLive()
@@ -820,12 +845,15 @@ func (m *Manager) rollbackLocked(ctx context.Context) (Operation, error) {
 		m.recoveryError = "rollback_failed"
 		return cloneOperation(j.Operation), err
 	}
+	previousOperation := cloneOperation(j.Operation)
 	j.Phase = "rolled_back"
 	j.Operation.State = "rolled_back"
 	j.Operation.Generation = generation
 	j.Operation.Deadline = nil
 	if err = m.saveJournal(); err != nil {
 		j.Phase = "rolling_back"
+		// A terminal result is only true once the journal is durable.
+		j.Operation = previousOperation
 		m.recoveryError = "rollback_failed"
 		return cloneOperation(j.Operation), err
 	}
