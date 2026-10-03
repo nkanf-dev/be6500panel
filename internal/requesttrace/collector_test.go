@@ -407,3 +407,24 @@ func TestNativeResolverFailureIsMeasured(t *testing.T) {
 	_ = socket.Close()
 	<-done
 }
+
+func TestRejectedCONNECTHasKnownFailureButUnknownInterval(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "CONNECT" {
+			t.Error("wrong method", r.Method)
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer proxy.Close()
+	c := fixtureCollector("https://origin.invalid/generate_204")
+	c.provider = func(context.Context) (ProxyEndpoint, error) {
+		return ProxyEndpoint{address: strings.TrimPrefix(proxy.URL, "http://")}, nil
+	}
+	trace := runFixture(t, c, "proxy")
+	if trace.Outcome != "failed" || trace.FailurePhase == nil || *trace.FailurePhase != "connect" || trace.ErrorCode != "proxy_connect_failed" {
+		t.Fatalf("CONNECT rejection mislabeled: %+v", trace)
+	}
+	complete(t, phase(t, trace, "tcp"))
+	unknown(t, phase(t, trace, "connect"))
+	unknown(t, phase(t, trace, "tls"))
+}

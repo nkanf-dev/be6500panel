@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -92,6 +93,14 @@ func (c *Collector) Run(ctx context.Context, input Input) (Trace, error) {
 	}
 	defer transport.CloseIdleConnections()
 	recorder := newRecorder(time.Now(), input.Route)
+	transport.OnProxyConnectResponse = func(_ context.Context, _ *url.URL, _ *http.Request, response *http.Response) error {
+		// A rejected CONNECT response identifies the failed stage, but the
+		// transport exposes no request-start event. Do not invent its duration.
+		if response.StatusCode != http.StatusOK {
+			recorder.failure("connect")
+		}
+		return nil
+	}
 	trace := Trace{ID: id, TargetID: target.ID, TargetLabel: target.Label, URL: target.URL, Route: input.Route, StartedAt: recorder.started.UTC(), PeerScope: "origin"}
 	if input.Route == "proxy" {
 		trace.PeerScope = "proxy"
@@ -137,6 +146,9 @@ func (c *Collector) Run(ctx context.Context, input Input) (Trace, error) {
 	default:
 		trace.Outcome = "failed"
 		trace.ErrorCode = classifyError(runErr)
+		if trace.FailurePhase != nil && *trace.FailurePhase == "connect" {
+			trace.ErrorCode = "proxy_connect_failed"
+		}
 	}
 	c.mu.Lock()
 	c.traces = append([]Trace{cloneTrace(trace)}, c.traces...)

@@ -78,6 +78,13 @@ func (r *recorder) update(id string, finish bool, err error) {
 		return
 	}
 }
+func (r *recorder) failure(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.closed {
+		r.failed = id
+	}
+}
 func (r *recorder) begin(id string)          { r.update(id, false, nil) }
 func (r *recorder) end(id string, err error) { r.update(id, true, err) }
 func (r *recorder) hooks() *httptrace.ClientTrace {
@@ -141,8 +148,8 @@ func (r *recorder) result(failed bool) ([]Phase, *string, *string) {
 				name = p.ID
 			}
 		}
-		if r.failed == "request" {
-			name = "request"
+		if r.failed == "request" || r.failed == "connect" {
+			name = r.failed
 		}
 		failure = &name
 	}
