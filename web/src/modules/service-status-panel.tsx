@@ -36,6 +36,7 @@ export function useServiceStatus() {
   const [data, setData] = useState<ServiceStatusSnapshot>();
   const [error, setError] = useState<unknown>();
   const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   const [actionError, setActionError] = useState<unknown>();
   const [actionResult, setActionResult] = useState<ServiceActionResult>();
@@ -63,7 +64,7 @@ export function useServiceStatus() {
       if (!current || controller) return;
       const requestController = new AbortController();
       controller = requestController;
-      setLoading(true);
+      setFetching(true);
       try {
         const value = await loadServiceStatus(requestController.signal);
         if (current) {
@@ -79,6 +80,7 @@ export function useServiceStatus() {
         if (current) {
           controller = undefined;
           setLoading(false);
+          setFetching(false);
         }
       }
     };
@@ -148,6 +150,7 @@ export function useServiceStatus() {
     snapshot,
     error,
     loading,
+    fetching,
     refresh,
     now,
     actionPending,
@@ -367,6 +370,7 @@ export function ServiceStatusView({
   snapshot,
   error,
   loading = false,
+  fetching = false,
   onRefresh,
   onAction,
   actionPending = false,
@@ -377,6 +381,7 @@ export function ServiceStatusView({
   snapshot?: ServiceStatusSnapshot;
   error?: unknown;
   loading?: boolean;
+  fetching?: boolean;
   onRefresh?: () => void;
   onAction?: (input: ServiceActionInput) => Promise<void>;
   actionPending?: boolean;
@@ -408,6 +413,7 @@ export function ServiceStatusView({
     availableActions(selectedRow, stale).includes(selected.action) &&
     (selected.name !== "dnsmasq" || impactConfirmed) &&
     !loading &&
+    !fetching &&
     !actionPending &&
     !confirming,
   );
@@ -467,7 +473,7 @@ export function ServiceStatusView({
               type="button"
               size="small"
               onClick={onRefresh}
-              disabled={loading || actionPending || confirming}
+              disabled={loading || fetching || actionPending || confirming}
             >
               <RefreshCw size={14} className={loading ? "spin" : ""} />
               刷新观察
@@ -606,7 +612,7 @@ export function ServiceStatusView({
               key={`${service.name}-${service.instance}-${index}`}
               service={service}
               stale={stale}
-              busy={loading || actionPending || confirming}
+              busy={loading || fetching || actionPending || confirming}
               onSelect={onAction ? selectAction : undefined}
             />
           ))}

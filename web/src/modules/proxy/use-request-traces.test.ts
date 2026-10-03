@@ -10,7 +10,10 @@ import { useRequestTraces } from "./use-request-traces";
 
 const loaders = vi.hoisted(() => ({ history: vi.fn(), run: vi.fn() }));
 vi.mock("./request-trace-api", () => ({ requestTraceApi: loaders }));
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
 describe("explicit active-request hook", () => {
   it("loads only GET history, never runs on mount or history refresh", async () => {
     loaders.history.mockReturnValue(Effect.succeed(requestTraceHistoryFixture));
@@ -19,6 +22,41 @@ describe("explicit active-request hook", () => {
     act(() => result.current.refresh());
     await waitFor(() => expect(loaders.history).toHaveBeenCalledTimes(2));
     expect(loaders.run).not.toHaveBeenCalled();
+  });
+  it("retains running history and its failed-read source across pending GET polling", async () => {
+    vi.useFakeTimers();
+    const observed = { ...requestTraceHistoryFixture, running: true };
+    const pending = Effect.async<typeof observed>(() => {});
+    loaders.history
+      .mockReturnValueOnce(Effect.succeed(observed))
+      .mockReturnValueOnce(pending);
+    const { result, unmount } = renderHook(() => useRequestTraces());
+    await act(async () => {});
+    await act(async () => vi.advanceTimersByTimeAsync(1500));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.data).toBe(observed);
+    expect(result.current.running).toBe(true);
+    await act(async () => vi.advanceTimersByTimeAsync(4500));
+    expect(loaders.history).toHaveBeenCalledTimes(2);
+    const cause = new ApiError({
+      code: "history_failed",
+      message: "history unavailable",
+    });
+    loaders.history.mockReturnValueOnce(Effect.fail(cause));
+    act(() => result.current.refresh());
+    await act(async () => {});
+    loaders.history.mockReturnValueOnce(pending);
+    act(() => result.current.refresh());
+    await act(async () => {});
+    expect(result.current.data).toBe(observed);
+    expect(result.current.data?.traces[0].startedAt).toBe(
+      observed.traces[0].startedAt,
+    );
+    expect(result.current.data?.traces[0].url).toBe(observed.traces[0].url);
+    expect(result.current.error).toBe(cause);
+    expect(result.current.loading).toBe(false);
+    expect(loaders.run).not.toHaveBeenCalled();
+    unmount();
   });
   it("guards simultaneous own runs and keeps the accepted trace when the next GET fails", async () => {
     loaders.history

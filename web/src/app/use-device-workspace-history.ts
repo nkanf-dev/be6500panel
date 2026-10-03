@@ -23,7 +23,7 @@ export function workspaceHistoryRequest(
 interface HistoryState {
   key: string;
   base?: DeviceActivityHistory;
-  details: readonly DeviceActivityHistory[];
+  details: readonly (DeviceActivityHistory | undefined)[];
   loading: boolean;
   error?: unknown;
 }
@@ -62,7 +62,11 @@ export function useDeviceWorkspaceHistory(
       inFlight = true;
       setState((previous) => ({
         ...(previous.key === key ? previous : { key, details: [] }),
-        loading: true,
+        loading:
+          previous.key !== key ||
+          (!previous.base &&
+            !previous.details.some(Boolean) &&
+            previous.error === undefined),
       }));
       const read = async (mac?: string) => {
         const data = await runRequest(
@@ -93,8 +97,12 @@ export function useDeviceWorkspaceHistory(
                 : previous.key === key
                   ? previous.base
                   : undefined,
-            details: details.flatMap((detail) =>
-              detail.status === "fulfilled" ? [detail.value] : [],
+            details: details.map((detail, index) =>
+              detail.status === "fulfilled"
+                ? detail.value
+                : previous.key === key
+                  ? previous.details[index]
+                  : undefined,
             ),
             loading: false,
             error: [base, ...details].find(
@@ -125,10 +133,21 @@ export function useDeviceWorkspaceHistory(
       document.removeEventListener("visibilitychange", visible);
     };
   }, [key, range, revision]);
-  const current =
+  const current: HistoryState =
     state.key === key ? state : { key, details: [], loading: true };
+  const data = useMemo(() => {
+    const merged = mergeDeviceHistories(current.base, current.details, range);
+    // A failed source cannot make retained selected-device records look current.
+    return merged && current.error !== undefined
+      ? {
+          ...merged,
+          state: "stale" as const,
+          devices: merged.devices.map((device) => ({ ...device, stale: true })),
+        }
+      : merged;
+  }, [current.base, current.details, current.error, range]);
   return {
-    data: mergeDeviceHistories(current.base, current.details, range),
+    data,
     error: current.error,
     loading: current.loading,
     refresh,

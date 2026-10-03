@@ -29,7 +29,6 @@ export function useRequestTraces() {
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
-      setLoading(true);
       try {
         const value = await runRequest(
           requestTraceApi.history(),

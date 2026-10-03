@@ -1,33 +1,42 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Effect } from "effect";
 import { runRequest, type ApiError } from "./api";
+
+interface ResourceState<A> {
+  load: () => Effect.Effect<A, ApiError>;
+  data?: A;
+  error?: unknown;
+  loading: boolean;
+}
 export function useResource<A>(load: () => Effect.Effect<A, ApiError>) {
-  const [data, setData] = useState<A>();
-  const [error, setError] = useState<unknown>();
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<ResourceState<A>>({ load, loading: true });
   const [revision, setRevision] = useState(0);
   const reload = useCallback(() => setRevision((value) => value + 1), []);
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    setLoading(true);
+    setState((previous) =>
+      previous.load === load ? previous : { load, loading: true },
+    );
     runRequest(load(), controller.signal)
-      .then((value) => {
-        if (active) {
-          setData(value);
-          setError(undefined);
-        }
+      .then((data) => {
+        if (active) setState({ load, data, loading: false });
       })
       .catch((error) => {
-        if (active) setError(error);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
+        if (active)
+          setState((previous) => ({ ...previous, error, loading: false }));
       });
     return () => {
       active = false;
       controller.abort();
     };
   }, [load, revision]);
-  return { data, error, loading, reload };
+  const current: ResourceState<A> =
+    state.load === load ? state : { load, loading: true };
+  return {
+    data: current.data,
+    error: current.error,
+    loading: current.loading,
+    reload,
+  };
 }

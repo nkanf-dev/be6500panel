@@ -66,9 +66,13 @@ export function DeviceActivityPanel({
   );
   const hasMeasurements = devices.some((device) => device.coverageSeconds > 0);
   const stale =
-    data?.state === "stale" || devices.some((device) => device.stale);
+    data?.state === "stale" ||
+    (error !== undefined && !!data) ||
+    devices.some((device) => device.stale);
   const sourceRatesUnavailable =
-    data?.state === "stale" || data?.state === "unavailable";
+    data?.state === "stale" ||
+    data?.state === "unavailable" ||
+    error !== undefined;
   const detail = !active
     ? "等待服务连接；不会读取设备时段记录。"
     : loading && !data
@@ -86,10 +90,8 @@ export function DeviceActivityPanel({
     ? "演示数据"
     : !active
       ? "等待连接"
-      : loading
-        ? data
-          ? "刷新中"
-          : "读取中"
+      : loading && !data
+        ? "读取中"
         : error !== undefined
           ? "读取失败"
           : data

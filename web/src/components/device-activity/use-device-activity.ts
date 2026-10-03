@@ -41,9 +41,10 @@ export function useDeviceActivity(
       const currentController = new AbortController();
       controller = currentController;
       setState((previous) => ({
-        key,
-        data: previous.key === key ? previous.data : undefined,
-        loading: true,
+        ...(previous.key === key ? previous : { key }),
+        loading:
+          previous.key !== key ||
+          (previous.data === undefined && previous.error === undefined),
       }));
       try {
         const data = await loadDeviceActivity(
@@ -75,8 +76,7 @@ export function useDeviceActivity(
     };
     if (document.hidden)
       setState((previous) => ({
-        key,
-        data: previous.key === key ? previous.data : undefined,
+        ...(previous.key === key ? previous : { key }),
         loading: false,
       }));
     void load();

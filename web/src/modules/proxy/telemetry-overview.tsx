@@ -33,7 +33,7 @@ export function ProxyTelemetryOverview() {
       />
       <p className="panel-bottom text-muted text-xs" role="status">
         {data
-          ? `${data.state === "unavailable" ? "不可用" : stale ? "上次采样（已过期）" : strings.dashboard.states.live} · 来源：${data.source || "代理控制器"} · 采样时间：${data.sampledAt || "未提供"} · ${data.reason}${loading ? " · 正在刷新" : ""}`
+          ? `${data.state === "unavailable" ? "不可用" : stale ? "上次采样（已过期）" : strings.dashboard.states.live} · 来源：${data.source || "代理控制器"} · 采样时间：${data.sampledAt || "未提供"} · ${data.reason}`
           : loading
             ? "正在读取代理采样"
             : error !== undefined

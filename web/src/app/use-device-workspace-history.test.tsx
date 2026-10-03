@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useDeviceWorkspaceHistory } from "./use-device-workspace-history";
 import { activityFixture } from "../components/device-activity/activity-fixture.test-data";
@@ -7,6 +7,7 @@ import type { DeviceActivityRange } from "../lib/device-activity-contracts";
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 function install() {
   const fetch = vi.fn((url: string, _init?: RequestInit) => {
@@ -55,6 +56,78 @@ describe("bounded real device workspace history", () => {
         ),
     ).toBe(true);
     expect(queries[1].get("search")).toBe("02:00:00:00:00:0A");
+  });
+  it("keeps selected detail records and provenance stable during pending polls and failed retries", async () => {
+    vi.useFakeTimers();
+    const mac = "02:00:00:00:00:AA";
+    let fail = false;
+    let pending = false;
+    const signals: AbortSignal[] = [];
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (pending) {
+        signals.push(init?.signal as AbortSignal);
+        return new Promise<Response>(() => {});
+      }
+      if (fail && url.includes("search=02"))
+        return Promise.resolve(
+          jsonResponse(
+            {
+              error: {
+                code: "observation_unavailable",
+                message: "detail unavailable",
+              },
+            },
+            503,
+          ),
+        );
+      const data = activityFixture();
+      return Promise.resolve(
+        jsonResponse(
+          url.includes("search=02")
+            ? { ...data, devices: [{ ...data.devices[0], id: mac }] }
+            : data,
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetch);
+    const { result, unmount } = renderHook(() =>
+      useDeviceWorkspaceHistory("24h", [mac]),
+    );
+    await act(async () => {});
+    expect(result.current.loading).toBe(false);
+    const observed = result.current.data;
+    pending = true;
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.data).toBe(observed);
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(fetch).toHaveBeenCalledTimes(4);
+    pending = false;
+    fail = true;
+    act(() => result.current.refresh());
+    await act(async () => {});
+    expect(result.current.loading).toBe(false);
+    expect(result.current.data?.devices.map((device) => device.id)).toContain(
+      mac,
+    );
+    expect(result.current.data?.state).toBe("stale");
+    expect(result.current.data?.devices.every((device) => device.stale)).toBe(
+      true,
+    );
+    expect(result.current.data?.source).toBe("trafficd");
+    expect(result.current.data?.sampledAt).toBe(observed?.sampledAt);
+    const failed = result.current.error;
+    const retained = result.current.data;
+    pending = true;
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(result.current.data).toBe(retained);
+    expect(result.current.error).toBe(failed);
+    expect(result.current.loading).toBe(false);
+    await act(async () => {
+      unmount();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
   it("clears old-range history before new range arrives and cancels all old reads", async () => {
     const fetch = install();

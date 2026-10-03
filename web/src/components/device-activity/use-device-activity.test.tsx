@@ -95,6 +95,40 @@ describe("device activity read ownership", () => {
     expect(load).toHaveBeenCalledTimes(2);
     expect(result.current.data?.devices[0].samples).toHaveLength(3);
   });
+  it("keeps the observed source and failure visible while background and focus reads are pending", async () => {
+    vi.useFakeTimers();
+    const sample = { ...activityFixture(), state: "stale" as const };
+    const second = deferred();
+    const retry = deferred();
+    load
+      .mockResolvedValueOnce(sample)
+      .mockReturnValueOnce(second.promise)
+      .mockReturnValueOnce(retry.promise);
+    const { result, unmount } = renderHook(() => useDeviceActivity("24h"));
+    await act(async () => {});
+    expect(result.current.loading).toBe(false);
+    const observed = result.current.data;
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(DEVICE_ACTIVITY_REFRESH_MS),
+    );
+    expect(result.current.loading).toBe(false);
+    expect(result.current.data).toBe(observed);
+    expect(result.current.data?.source).toBe("trafficd");
+    expect(result.current.data?.state).toBe("stale");
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(DEVICE_ACTIVITY_REFRESH_MS),
+    );
+    expect(load).toHaveBeenCalledTimes(2);
+    const cause = new Error("source gone");
+    await act(async () => second.reject(cause));
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.data).toBe(observed);
+    expect(result.current.error).toBe(cause);
+    expect(result.current.data?.sampledAt).toBe(sample.sampledAt);
+    unmount();
+    expect(load.mock.calls[2][2]?.aborted).toBe(true);
+  });
   it("retains only this query on refresh failure and clears errors on read-only retry", async () => {
     load
       .mockResolvedValueOnce(activityFixture())

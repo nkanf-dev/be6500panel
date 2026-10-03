@@ -20,6 +20,7 @@ const loaders = vi.hoisted(() => ({ metrics: vi.fn(), probe: vi.fn() }));
 vi.mock("./telemetry-api", () => ({ proxyTelemetry: loaders }));
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 describe("passive proxy telemetry hook", () => {
   it("loads observed data without automatic latency probes", async () => {
@@ -72,6 +73,38 @@ describe("passive proxy telemetry hook", () => {
       }),
     );
     expect(result.current.data).toEqual(fixture);
+    unmount();
+  });
+  it("keeps the same source and failed-read provenance during pending passive and manual refresh", async () => {
+    vi.useFakeTimers();
+    const pending = Effect.async<typeof fixture>(() => {});
+    loaders.metrics
+      .mockReturnValueOnce(Effect.succeed(fixture))
+      .mockReturnValueOnce(pending);
+    const { result, unmount } = renderHook(() => useProxyTelemetry());
+    await act(async () => {});
+    const observed = result.current.data;
+    await act(async () => vi.advanceTimersByTimeAsync(4000));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.data).toBe(observed);
+    expect(result.current.data?.source).toBe("actual");
+    await act(async () => vi.advanceTimersByTimeAsync(8000));
+    expect(loaders.metrics).toHaveBeenCalledTimes(2);
+    const cause = new ApiError({
+      code: "observation_unavailable",
+      message: "core unavailable",
+    });
+    loaders.metrics.mockReturnValueOnce(Effect.fail(cause));
+    act(() => result.current.refresh());
+    await act(async () => {});
+    expect(result.current.error).toBe(cause);
+    loaders.metrics.mockReturnValueOnce(pending);
+    act(() => result.current.refresh());
+    await act(async () => {});
+    expect(result.current.data).toBe(observed);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBe(cause);
+    expect(loaders.probe).not.toHaveBeenCalled();
     unmount();
   });
   it("cancels the read effect when its consumer unmounts", async () => {

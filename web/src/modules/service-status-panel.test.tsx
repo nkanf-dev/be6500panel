@@ -310,6 +310,10 @@ describe("service status observation lifecycle", () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
     expect(loader).toHaveBeenCalledTimes(2);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.fetching).toBe(true);
+    expect(result.current.snapshot?.source).toBe("procd · /proc");
+    expect(result.current.snapshot?.sampledAt).toBe(sampledAt);
     const activeSignal = loader.mock.calls[1][0];
     unmount();
     expect(activeSignal?.aborted).toBe(true);
@@ -357,6 +361,31 @@ describe("service status observation lifecycle", () => {
     unmount();
   });
 
+  it("preserves failed snapshot provenance while a retry is pending", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const pending = deferred<ServiceStatusSnapshot>();
+    const cause = new ApiError({
+      code: "observation_unavailable",
+      message: "read failed",
+    });
+    loader
+      .mockResolvedValueOnce(snapshot())
+      .mockRejectedValueOnce(cause)
+      .mockReturnValueOnce(pending.promise);
+    const { result, unmount } = renderHook(() => useServiceStatus());
+    await act(async () => {});
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    const failed = result.current.snapshot;
+    act(() => result.current.refresh());
+    expect(result.current.loading).toBe(false);
+    expect(result.current.snapshot).toBe(failed);
+    expect(result.current.snapshot?.stale).toBe(true);
+    expect(result.current.snapshot?.source).toBe("procd · /proc");
+    expect(result.current.error).toBe(cause);
+    unmount();
+    expect(loader.mock.calls[2][0]?.aborted).toBe(true);
+  });
   it("ages retained data at fifteen seconds even when the next read is still pending", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
@@ -374,7 +403,8 @@ describe("service status observation lifecycle", () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
     expect(result.current.snapshot?.stale).toBe(true);
-    expect(result.current.loading).toBe(true);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.fetching).toBe(true);
     expect(loader).toHaveBeenCalledTimes(2);
     unmount();
   });

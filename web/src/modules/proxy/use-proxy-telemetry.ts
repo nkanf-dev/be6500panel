@@ -43,7 +43,7 @@ export function useProxyTelemetry() {
         }
       }
     };
-    setLoading(true);
+    // Refreshing compatible observations is not an initial page load.
     void load();
     return () => {
       current = false;

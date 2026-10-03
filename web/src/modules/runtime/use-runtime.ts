@@ -4,14 +4,23 @@ import { useConsole } from "../../app/console-context";
 import { api, runRequest, type ApiError } from "../../lib/api";
 import type { RuntimeService, RuntimeStatus } from "../../lib/contracts";
 
+interface Observation {
+  key: string;
+  status?: RuntimeStatus;
+  enabled: boolean;
+  loading: boolean;
+  error?: unknown;
+}
 export function useRuntime(service: RuntimeService) {
   const { health } = useConsole();
-  const [status, setStatus] = useState<RuntimeStatus>();
-  const [enabled, setEnabled] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const key = JSON.stringify([service, health?.mode]);
+  const [observation, setObservation] = useState<Observation>({
+    key,
+    enabled: false,
+    loading: true,
+  });
   const mutation = useRef(false);
   const [pending, setPending] = useState(false);
-  const [observationError, setObservationError] = useState<unknown>();
   const [error, setError] = useState<unknown>();
   const [result, setResult] = useState<string>();
   const [revision, setRevision] = useState(0);
@@ -23,24 +32,34 @@ export function useRuntime(service: RuntimeService) {
     const load = async () => {
       if (inFlight || mutation.current || document.hidden) return;
       inFlight = true;
+      setObservation((previous) =>
+        previous.key === key
+          ? previous
+          : { key, enabled: false, loading: true },
+      );
       try {
         const response = await runRequest(api.runtime(), controller.signal);
         if (active && !mutation.current) {
-          setStatus(response.services.find((item) => item.service === service));
-          setEnabled(response.enabled && health?.mode === "host");
-          setObservationError(undefined);
+          setObservation({
+            key,
+            status: response.services.find((item) => item.service === service),
+            enabled: response.enabled && health?.mode === "host",
+            loading: false,
+          });
         }
       } catch (cause) {
-        if (active) {
-          setEnabled(false);
-          setObservationError(cause);
-        }
+        if (active)
+          setObservation((previous) => ({
+            ...previous,
+            enabled: false,
+            error: cause,
+          }));
       } finally {
         inFlight = false;
-        if (active) setLoading(false);
+        if (active)
+          setObservation((previous) => ({ ...previous, loading: false }));
       }
     };
-    setLoading(true);
     void load();
     const timer = window.setInterval(() => {
       void load();
@@ -50,18 +69,33 @@ export function useRuntime(service: RuntimeService) {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [service, health?.mode, revision]);
+  }, [service, health?.mode, key, revision]);
+  const current =
+    observation.key === key
+      ? observation
+      : {
+          key,
+          enabled: false,
+          loading: true,
+          status: undefined,
+          error: undefined,
+        };
   const run = async (
     load: () => Effect.Effect<RuntimeStatus, ApiError>,
     success: string,
   ) => {
-    if (!enabled || mutation.current) return false;
+    if (!current.enabled || mutation.current) return false;
     mutation.current = true;
     setPending(true);
     setError(undefined);
     setResult(undefined);
     try {
-      setStatus(await runRequest(load()));
+      const status = await runRequest(load());
+      setObservation((previous) =>
+        previous.key === key && status.service === service
+          ? { ...previous, status }
+          : previous,
+      );
       setResult(success);
       return true;
     } catch (cause) {
@@ -75,11 +109,11 @@ export function useRuntime(service: RuntimeService) {
   };
   return {
     service,
-    status,
-    enabled,
-    loading,
+    status: current.status,
+    enabled: current.enabled,
+    loading: current.loading,
     pending,
-    error: error ?? observationError,
+    error: error ?? current.error,
     result,
     refresh,
     run,
