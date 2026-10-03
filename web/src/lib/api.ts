@@ -174,6 +174,12 @@ export const api = {
       timeoutMs: 90_000,
       body: { service },
     }),
+  runtimeRestart: (service: RuntimeService) =>
+    request("/runtime/restart", RuntimeStatusSchema, {
+      method: "POST",
+      timeoutMs: 90_000,
+      body: { service },
+    }),
   runtimeStop: (service: RuntimeService) =>
     request("/runtime/stop", RuntimeStatusSchema, {
       method: "POST",

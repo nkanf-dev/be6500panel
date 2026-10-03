@@ -1,4 +1,5 @@
 import { strings } from "../../locales/strings";
+import { useEffect, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -28,6 +29,30 @@ const stateLabels: Record<string, string> = {
 };
 export function RuntimeControls({ runtime }: { runtime: RuntimeController }) {
   const status = runtime.status;
+  const [confirming, setConfirming] = useState(false);
+  const submitting = useRef(false);
+  const canRestart =
+    runtime.enabled &&
+    !runtime.pending &&
+    !runtime.loading &&
+    !!status?.configured &&
+    !!status.artifactAvailable;
+  useEffect(() => {
+    setConfirming(false);
+  }, [runtime.service, status?.generation, status?.pid, status?.state]);
+  async function restart() {
+    if (!canRestart || submitting.current) return;
+    submitting.current = true;
+    try {
+      await runtime.run(
+        () => api.runtimeRestart(runtime.service),
+        strings.runtime.restartCompleted,
+      );
+    } finally {
+      submitting.current = false;
+      setConfirming(false);
+    }
+  }
   return (
     <Panel>
       <PanelHeader
@@ -96,7 +121,11 @@ export function RuntimeControls({ runtime }: { runtime: RuntimeController }) {
             <details className="configuration-advanced-details">
               <summary>高级诊断</summary>
               <p>{`generation ${status.generation} · ${status.version || "版本未登记"}`}</p>
-              {status.errorCode && <p>状态码：<code>{status.errorCode}</code></p>}
+              {status.errorCode && (
+                <p>
+                  状态码：<code>{status.errorCode}</code>
+                </p>
+              )}
             </details>
           )}
           {status?.recoveryPlan && (
@@ -161,10 +190,43 @@ export function RuntimeControls({ runtime }: { runtime: RuntimeController }) {
               }
             >
               停止 {runtime.service}
+            </Button>{" "}
+            <Button disabled={!canRestart} onClick={() => setConfirming(true)}>
+              {strings.runtime.restart}
             </Button>
           </div>
         </div>
       </div>
+      {confirming && (
+        <div
+          className="config-form"
+          role="alertdialog"
+          aria-label={strings.runtime.confirmRestart}
+        >
+          <p>
+            {runtime.service === "sing-box"
+              ? strings.runtime.proxyRestartImpact
+              : strings.runtime.frpcRestartImpact}
+          </p>
+          <div className="form-actions">
+            <Button
+              disabled={runtime.pending}
+              onClick={() => setConfirming(false)}
+            >
+              {strings.actions.cancel}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!canRestart}
+              onClick={() => void restart()}
+            >
+              {runtime.pending
+                ? strings.runtime.restarting
+                : strings.runtime.confirmRestart}
+            </Button>
+          </div>
+        </div>
+      )}
       <ArtifactInputs runtime={runtime} />
     </Panel>
   );

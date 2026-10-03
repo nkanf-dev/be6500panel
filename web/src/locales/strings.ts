@@ -110,6 +110,16 @@ export const strings = {
       pendingApplyCount: (count: number) => `本次待应用：${count} 台设备。`,
     },
   },
+  runtime: {
+    restart: "重启服务",
+    confirmRestart: "确认重启服务",
+    restarting: "正在重启…",
+    restartCompleted: "重启操作已完成，请核对当前进程状态。",
+    proxyRestartImpact:
+      "现有 sing-box 连接将短暂中断，独立 SSH 救援不受影响。确认重启服务？",
+    frpcRestartImpact:
+      "frpc 映射将短暂中断，独立 SSH 救援不受影响。确认重启服务？",
+  },
   visualization: {
     heatmap: {
       title: "设备活跃热力图",
