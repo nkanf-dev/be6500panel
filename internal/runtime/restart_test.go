@@ -226,14 +226,18 @@ func TestRestartSingleLaneCoversStopAndReadiness(t *testing.T) {
 	if _, err := m.Configure(context.Background(), SingBox, []byte("other"), 1); !errors.Is(err, ErrBusy) {
 		t.Fatal("configuration interleaved", err)
 	}
-	assertGone(t, original.PID)
+	status, _ := m.Status(SingBox)
+	if status.PID != original.PID || syscall.Kill(original.PID, 0) != nil {
+		t.Fatalf("cleanup stopped listener before withdrawal: %+v", status)
+	}
 	unblockCleanup()
 	select {
 	case <-readyEntered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("readiness not reached")
 	}
-	status, _ := m.Status(SingBox)
+	status, _ = m.Status(SingBox)
+	assertGone(t, original.PID)
 	if status.State != Starting || status.PID <= 0 || status.PID == original.PID {
 		t.Fatalf("not actual starting %+v", status)
 	}
@@ -294,7 +298,11 @@ func TestRestartCleanupReadinessAndLaunchFailuresRemainActual(t *testing.T) {
 			failing.Store(true)
 			status, err := m.Restart(context.Background(), FRPC)
 			expected := map[string]string{"cleanup": "cleanup_failed", "readiness": "readiness_failed", "launch": "start_failed"}[kind]
-			if err == nil || status.PID != 0 || status.State != Error || status.Desired || status.ErrorCode != expected || !status.RetryAt.IsZero() {
+			wantPID, wantDesired := 0, false
+			if kind == "cleanup" {
+				wantPID, wantDesired = original.PID, true
+			}
+			if err == nil || status.PID != wantPID || status.State != Error || status.Desired != wantDesired || status.ErrorCode != expected || !status.RetryAt.IsZero() {
 				t.Fatalf("failure actual %+v %v", status, err)
 			}
 			if kind == "cleanup" && !status.NeedsRecovery {
@@ -309,7 +317,13 @@ func TestRestartCleanupReadinessAndLaunchFailuresRemainActual(t *testing.T) {
 			if strings.Contains(string(public), "private") || strings.Contains(errString(err), "private") {
 				t.Fatalf("private lifecycle diagnostic leaked: %s %v", public, err)
 			}
-			assertGone(t, original.PID)
+			if kind == "cleanup" {
+				if err := syscall.Kill(original.PID, 0); err != nil {
+					t.Fatal("cleanup refusal killed listener", err)
+				}
+			} else {
+				assertGone(t, original.PID)
+			}
 			failing.Store(false)
 		})
 	}

@@ -146,7 +146,8 @@ func TestDesiredCaptureLifecycleConfigureStopFailureRetryAndBoot(t *testing.T) {
 
 func TestRestoreHookNotCalledBeforeReadyAndReadyOperationSerialized(t *testing.T) {
 	var calls atomic.Int32
-	var block atomic.Bool
+	var block, failRestore atomic.Bool
+	failRestore.Store(true)
 	m, opts := testManager(t, func(o *Options) {
 		o.ReadyHook = func(context.Context, string) error {
 			if block.Load() {
@@ -154,7 +155,13 @@ func TestRestoreHookNotCalledBeforeReadyAndReadyOperationSerialized(t *testing.T
 			}
 			return nil
 		}
-		o.RestoreHook = func(context.Context, string) error { calls.Add(1); return errors.New("owned resources failed") }
+		o.RestoreHook = func(context.Context, string) error {
+			calls.Add(1)
+			if failRestore.Load() {
+				return errors.New("owned resources failed")
+			}
+			return nil
+		}
 	})
 	acquireFixture(t, m, opts, SingBox, fixture)
 	accepted(t, m, SingBox, "good", 0)
@@ -172,6 +179,13 @@ func TestRestoreHookNotCalledBeforeReadyAndReadyOperationSerialized(t *testing.T
 	state, err := m.Start(context.Background(), SingBox)
 	if err != nil || state.State != Running || calls.Load() != 1 {
 		t.Fatalf("resource failure hid healthy core: %+v %v %d", state, err, calls.Load())
+	}
+	if err := m.ReadyOperation(context.Background(), SingBox, func(context.Context) error { t.Fatal("operation ran before owned-resource recovery"); return nil }); !errors.Is(err, ErrReadiness) {
+		t.Fatal(err)
+	}
+	failRestore.Store(false)
+	if state, err = m.Start(context.Background(), SingBox); err != nil || state.NeedsRecovery {
+		t.Fatal(state, err)
 	}
 	err = m.ReadyOperation(context.Background(), SingBox, func(context.Context) error {
 		if _, err := m.Stop(context.Background(), SingBox); !errors.Is(err, ErrBusy) {

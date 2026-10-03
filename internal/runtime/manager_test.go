@@ -562,12 +562,14 @@ func TestCleanupFailureNeverStartsReplacement(t *testing.T) {
 	})
 	acquireFixture(t, m, opts, SingBox, fixture)
 	accepted(t, m, SingBox, "good", 0)
-	if _, err := m.Start(context.Background(), SingBox); err != nil {
+	first, err := m.Start(context.Background(), SingBox)
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { fail.Store(false) })
 	fail.Store(true)
 	status, err := m.Configure(context.Background(), SingBox, []byte("new-good"), 1)
-	if err == nil || status.PID != 0 || status.State != Error || status.ErrorCode != "cleanup_failed" || status.Desired {
+	if err == nil || status.PID != first.PID || status.State != Error || status.ErrorCode != "cleanup_failed" || !status.Desired || !status.NeedsRecovery {
 		t.Fatalf("cleanup failure ignored: %+v %v", status, err)
 	}
 	fail.Store(false)
@@ -665,15 +667,17 @@ func TestStartRetriesRequiredCleanup(t *testing.T) {
 	})
 	acquireFixture(t, m, opts, SingBox, fixture)
 	accepted(t, m, SingBox, "good", 0)
-	if _, err := m.Start(context.Background(), SingBox); err != nil {
+	first, err := m.Start(context.Background(), SingBox)
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { fail.Store(false) })
 	fail.Store(true)
 	if _, err := m.Stop(context.Background(), SingBox); err == nil {
 		t.Fatal("cleanup failure missing")
 	}
 	status, err := m.Start(context.Background(), SingBox)
-	if err == nil || status.PID != 0 || status.ErrorCode != "cleanup_failed" {
+	if err == nil || status.PID != first.PID || status.ErrorCode != "cleanup_failed" {
 		t.Fatalf("started on stale owned resources: %+v %v", status, err)
 	}
 	fail.Store(false)
@@ -721,16 +725,21 @@ func TestCleanupPendingSurvivesOtherOperations(t *testing.T) {
 	})
 	acquireFixture(t, m, opts, SingBox, fixture)
 	accepted(t, m, SingBox, "good", 0)
-	if _, err := m.Start(context.Background(), SingBox); err != nil {
+	first, err := m.Start(context.Background(), SingBox)
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { fail.Store(false) })
 	fail.Store(true)
 	if _, err := m.Stop(context.Background(), SingBox); err == nil {
 		t.Fatal("cleanup failure missing")
 	}
-	accepted(t, m, SingBox, "new-good", 1)
+	refused, err := m.Configure(context.Background(), SingBox, []byte("new-good"), 1)
+	if err == nil || refused.Generation != first.Generation || refused.PID != first.PID || refused.ErrorCode != "cleanup_failed" {
+		t.Fatalf("pending withdrawal allowed accepted change: %+v %v", refused, err)
+	}
 	status, err := m.Start(context.Background(), SingBox)
-	if err == nil || status.PID != 0 || status.ErrorCode != "cleanup_failed" {
+	if err == nil || status.PID != first.PID || status.ErrorCode != "cleanup_failed" {
 		t.Fatalf("accepted config erased required cleanup: %+v %v", status, err)
 	}
 	fail.Store(false)

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -175,16 +176,30 @@ func TestFailedLiveChangeDoesNotMaskOrRetryCleanupFailure(t *testing.T) {
 			})
 			acquireFixture(t, manager, opts, SingBox, fixture)
 			accepted(t, manager, SingBox, "old", 0)
-			if _, err := manager.Start(context.Background(), SingBox); err != nil {
+			first, err := manager.Start(context.Background(), SingBox)
+			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { failCleanup.Store(false) })
 			before := cleanups.Load()
 			if !failedAfterReadiness {
 				failCleanup.Store(true)
 			}
 			status, err := manager.Configure(context.Background(), SingBox, []byte("new"), 1)
-			if err == nil || !errors.Is(err, ErrRecovery) || status.ErrorCode != "cleanup_failed" || status.PID != 0 || status.Desired || status.Restored || !status.NeedsRecovery || status.Generation != 3 || restores.Load() != 1 {
+			if err == nil || errors.Is(err, ErrRecovery) || status.ErrorCode != "cleanup_failed" || status.PID <= 0 || !status.Desired || status.Restored || !status.NeedsRecovery || status.Generation != 2 || restores.Load() != 1 {
 				t.Fatalf("cleanup failure masked: %+v %v", status, err)
+			}
+			if !failedAfterReadiness && status.PID != first.PID {
+				t.Fatal("old-stop lost retained original PID", status)
+			}
+			if failedAfterReadiness && status.PID == first.PID {
+				t.Fatal("candidate-stop did not retain actual candidate PID", status)
+			}
+			if syscall.Kill(status.PID, 0) != nil {
+				t.Fatal("retained process is gone", status)
+			}
+			if failedAfterReadiness {
+				assertGone(t, first.PID)
 			}
 			if failedAfterReadiness && !errors.Is(err, ErrReadiness) {
 				t.Fatal("original readiness error discarded", err)
@@ -197,12 +212,18 @@ func TestFailedLiveChangeDoesNotMaskOrRetryCleanupFailure(t *testing.T) {
 				t.Fatalf("cleanup retried implicitly: %d -> %d", before, cleanups.Load())
 			}
 			raw, _, err := manager.Config(SingBox)
-			if err != nil || string(raw) != "old" {
-				t.Fatal("recovery plan lost proven bytes", err)
+			if err != nil || string(raw) != "new" {
+				t.Fatal("refused withdrawal rewrote accepted bytes", err)
 			}
 			failCleanup.Store(false)
+			if stopped, err := manager.Stop(context.Background(), SingBox); err != nil || stopped.PID != 0 || stopped.NeedsRecovery {
+				t.Fatalf("cleanup retry failed: %+v %v", stopped, err)
+			}
+			if _, err := manager.Restore(context.Background(), SingBox, 2); err != nil {
+				t.Fatal(err)
+			}
 			if status, err := manager.Start(context.Background(), SingBox); err != nil || status.NeedsRecovery || status.State != Running {
-				t.Fatalf("cleanup retry failed: %+v %v", status, err)
+				t.Fatalf("explicit previous-config recovery failed: %+v %v", status, err)
 			}
 		})
 	}

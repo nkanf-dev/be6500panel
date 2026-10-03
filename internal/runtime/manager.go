@@ -22,8 +22,11 @@ type serviceRuntime struct {
 	state  State
 	binary string
 	// binarySHA256 is volatile provenance from a verified download, never from boot leftovers.
-	binarySHA256   [sha256.Size]byte
-	proc           *managedProcess
+	binarySHA256 [sha256.Size]byte
+	proc         *managedProcess
+	// running binds checked config/artifact provenance to proc, independently
+	// of a newer accepted manifest. It lives until that exact process reaps.
+	running        *liveSnapshot
 	desired        bool
 	restarts       int
 	retryAt        time.Time
@@ -50,6 +53,7 @@ type Manager struct {
 	closeDone    chan struct{}
 	closeErr     error
 	activeCancel context.CancelFunc
+	startingProc *managedProcess  // active lane owns this process's readiness/restore
 	probeLease   *probeLeaseState // caller owns release after its probe process is reaped
 	waitingExits int
 	wg           sync.WaitGroup
@@ -238,6 +242,7 @@ func (m *Manager) begin(ctx context.Context, id string) (context.Context, func()
 		cancel()
 		m.mu.Lock()
 		m.activeCancel = nil
+		m.startingProc = nil
 		m.mu.Unlock()
 		<-m.gate
 	}, nil
@@ -279,6 +284,9 @@ func (m *Manager) statusLocked(id string) Status {
 	if s.cleanupPending {
 		out.RecoveryPlan = append(out.RecoveryPlan, "retry_owned_resource_cleanup")
 	}
+	if s.proc != nil && s.running != nil && (s.running.binary != s.binary || s.running.disk.Current != s.disk.Current) {
+		out.RecoveryPlan = append(out.RecoveryPlan, "stop_then_start_to_apply_accepted_config")
+	}
 	if s.errorCode == "state_not_durable" {
 		out.RecoveryPlan = append(out.RecoveryPlan, "check_persistent_storage", "stop_then_start_to_apply_accepted_config")
 	}
@@ -303,6 +311,23 @@ func checkMutationGuard(ctx context.Context, guard func(context.Context) error) 
 		}
 	}
 	return ctx.Err()
+}
+
+// rejectRetainedChange prevents repeated accepted writes/downloads from
+// pruning a retained (possibly never-ready) config or growing executable count.
+// Explicit Stop/Start/Restart remain the bounded withdrawal retry paths.
+func (m *Manager) rejectRetainedChange(id string) error {
+	m.mu.Lock()
+	blocked := m.services[id].proc != nil && m.services[id].cleanupPending
+	m.mu.Unlock()
+	if blocked {
+		return errors.New("owned runtime withdrawal is required")
+	}
+	return nil
+}
+
+func runningMatchesAccepted(s *serviceRuntime) bool {
+	return s.running != nil && s.running.binary == s.binary && s.running.binarySHA256 == s.binarySHA256 && s.running.disk.Current == s.disk.Current
 }
 
 func (m *Manager) result(id string, err error) (Status, error) { s, _ := m.Status(id); return s, err }
@@ -368,10 +393,14 @@ func (m *Manager) admitChange(ctx context.Context, id string, raw []byte, rollba
 
 func snapshotRuntime(s *serviceRuntime) liveSnapshot {
 	previous := liveSnapshot{disk: s.disk, binary: s.binary, binarySHA256: s.binarySHA256, desired: s.desired}
-	if s.disk.Current != nil && s.disk.Current.Ready {
-		previous.ready = s.disk.Current
-	} else if s.disk.LastGood != nil && s.disk.LastGood.Ready {
-		previous.ready = s.disk.LastGood
+	if s.proc != nil && s.running != nil {
+		previous = *s.running
+		previous.desired = s.desired
+	}
+	if previous.disk.Current != nil && previous.disk.Current.Ready {
+		previous.ready = previous.disk.Current
+	} else if previous.disk.LastGood != nil && previous.disk.LastGood.Ready {
+		previous.ready = previous.disk.LastGood
 	}
 	return previous
 }
@@ -394,7 +423,14 @@ func (m *Manager) restartChange(ctx context.Context, id string, previous liveSna
 		originalCode = "operation_cancelled"
 	}
 	s.needsRecovery = true
+	// Refused withdrawal is not a failed activation: the exact old/candidate
+	// process is still owned. Never roll its accepted manifest or executable
+	// identity forward again, retry cleanup implicitly, or launch a duplicate.
+	retained := s.proc != nil || s.cleanupPending
 	m.mu.Unlock()
+	if retained {
+		return err
+	}
 	if !previous.desired || previous.ready == nil || previous.binary == "" {
 		m.mu.Lock()
 		s.desired = false
@@ -421,6 +457,12 @@ func (m *Manager) restartChange(ctx context.Context, id string, previous liveSna
 func (m *Manager) recoverRuntime(ctx context.Context, id string, previous liveSnapshot) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	m.mu.Lock()
+	blocked := m.services[id].proc != nil || m.services[id].cleanupPending
+	m.mu.Unlock()
+	if blocked {
+		return errors.New("owned runtime withdrawal is required")
 	}
 	// Read the immutable proven-ready bytes, not a newly checked LastGood alias.
 	opts := m.opts
@@ -456,22 +498,17 @@ func (m *Manager) recoverRuntime(ctx context.Context, id string, previous liveSn
 	m.mu.Lock()
 	s := m.services[id]
 	disk := s.disk // rollback always advances the latest committed generation
-	cleanupPending := s.cleanupPending
-	processLive := s.proc != nil
+	blocked = s.proc != nil || s.cleanupPending
 	m.mu.Unlock()
+	if blocked {
+		return errors.New("owned runtime withdrawal is required")
+	}
 	// Restore artifact metadata and config in the same manifest transaction.
 	// The candidate's artifact must not survive a successful executable rollback.
 	disk.Artifact = previous.disk.Artifact
 	next, persistErr := commitConfig(opts, id, disk, candidate, raw)
 	if persistErr != nil && !errors.Is(persistErr, ErrDurability) {
 		return errors.New("previous ready config persistence failed")
-	}
-	// A running candidate must stop before the executable/config identity changes.
-	// Failed cleanup is not retried or disguised as successful resource recovery.
-	if !cleanupPending && processLive {
-		if err := m.stopProcess(id, false); err != nil {
-			cleanupPending = true
-		}
 	}
 	m.mu.Lock()
 	s.disk = next
@@ -483,9 +520,6 @@ func (m *Manager) recoverRuntime(ctx context.Context, id string, previous liveSn
 	m.mu.Unlock()
 	if persistErr != nil {
 		return persistErr
-	}
-	if cleanupPending {
-		return errors.New("owned resource cleanup failed")
 	}
 	m.mu.Lock()
 	s.desired = true
@@ -520,6 +554,9 @@ func (m *Manager) AcquireGuarded(ctx context.Context, id string, artifact Artifa
 	}
 	defer done()
 	if err = checkMutationGuard(ctx, guard); err != nil {
+		return m.result(id, err)
+	}
+	if err = m.rejectRetainedChange(id); err != nil {
 		return m.result(id, err)
 	}
 	m.mu.Lock()
@@ -617,9 +654,13 @@ func (m *Manager) AcquireGuarded(ctx context.Context, id string, artifact Artifa
 	defer func() {
 		m.mu.Lock()
 		activeBinary := s.binary
+		runningBinary := ""
+		if s.proc != nil && s.running != nil {
+			runningBinary = s.running.binary
+		}
 		m.mu.Unlock()
 		for _, binary := range []string{oldBinary, staged} {
-			if binary != "" && binary != activeBinary {
+			if binary != "" && binary != activeBinary && binary != runningBinary {
 				_ = os.Remove(binary)
 			}
 		}
@@ -660,6 +701,9 @@ func (m *Manager) ConfigureGuarded(ctx context.Context, id string, raw []byte, e
 	}
 	defer done()
 	if err = checkMutationGuard(ctx, guard); err != nil {
+		return m.result(id, err)
+	}
+	if err = m.rejectRetainedChange(id); err != nil {
 		return m.result(id, err)
 	}
 	if len(raw) == 0 || int64(len(raw)) > m.opts.MaxConfigBytes {
@@ -739,6 +783,9 @@ func (m *Manager) RestoreGuarded(ctx context.Context, id string, expectedGenerat
 	}
 	defer done()
 	if err = checkMutationGuard(ctx, guard); err != nil {
+		return m.result(id, err)
+	}
+	if err = m.rejectRetainedChange(id); err != nil {
 		return m.result(id, err)
 	}
 	m.mu.Lock()
@@ -828,6 +875,14 @@ func (m *Manager) StartGuarded(ctx context.Context, id string, guard func(contex
 		case <-s.proc.done:
 			exitedPrevious = true
 		default:
+			if exitedPrevious {
+				break // retry bounded withdrawal before any restore or ready claim
+			}
+			if !runningMatchesAccepted(s) {
+				s.needsRecovery = true
+				m.mu.Unlock()
+				return m.result(id, errors.New("accepted runtime change requires withdrawal"))
+			}
 			m.mu.Unlock()
 			if err := m.checkReady(ctx, id); err != nil {
 				return m.result(id, err)
@@ -923,8 +978,8 @@ func (m *Manager) RestartGuarded(ctx context.Context, id string, guard func(cont
 		m.setState(id, previous, "operation_cancelled")
 		return m.result(id, err)
 	}
-	// Disable desire and cancel the old epoch first. A canceled request after
-	// cleanup must not leave a backoff watcher able to launch a replacement.
+	// Only successful withdrawal may disable desire and cancel the old epoch.
+	// A canceled request afterward must not permit a backoff replacement.
 	if err = m.stopProcess(id, true); err != nil {
 		return m.result(id, err)
 	}
@@ -983,6 +1038,10 @@ func (m *Manager) markReady(id string) error {
 	if err == nil || errors.Is(err, ErrDurability) {
 		m.mu.Lock()
 		s.disk = next
+		if s.running != nil {
+			s.running.disk = next
+			s.running.ready = next.Current
+		}
 		m.mu.Unlock()
 	}
 	return err
@@ -998,6 +1057,11 @@ func (m *Manager) startProcess(ctx context.Context, id string) error {
 		m.mu.Unlock()
 		return ErrClosed
 	}
+	if s.proc != nil || s.cleanupPending {
+		m.mu.Unlock()
+		return errors.New("owned runtime withdrawal is required")
+	}
+	running := snapshotRuntime(s)
 	binary := s.binary
 	path := configPath(m.opts, id, s.disk.Current)
 	epoch := s.epoch
@@ -1018,9 +1082,20 @@ func (m *Manager) startProcess(ctx context.Context, id string) error {
 		m.mu.Unlock()
 		return errors.New("managed process start failed")
 	}
+	watchCtx, cancelWatch := context.WithCancel(m.ctx)
 	m.mu.Lock()
 	s.proc = p // Status exposes starting/PID while the local readiness hook waits.
+	s.running = &running
+	m.startingProc = p
+	if s.cancelWatch != nil {
+		s.cancelWatch()
+	}
+	s.cancelWatch = cancelWatch
+	m.wg.Add(1)
 	m.mu.Unlock()
+	// Supervise from launch, including a candidate retained after readiness or
+	// cancellation cleanup fails. The lane prevents concurrent replacement.
+	go m.watch(watchCtx, id, p, epoch)
 	if m.opts.ReadyHook != nil {
 		readyCtx, cancelReady := context.WithTimeout(ctx, m.opts.ReadyTimeout)
 		// A leader exit wakes a cooperative hook immediately rather than waiting
@@ -1078,28 +1153,48 @@ func (m *Manager) startProcess(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return errors.Join(err, m.stopProcess(id, true))
 	}
-	watchCtx, cancelWatch := context.WithCancel(m.ctx)
 	m.mu.Lock()
-	if s.cancelWatch != nil {
-		s.cancelWatch()
-	}
-	s.cancelWatch = cancelWatch
 	s.state = Running
 	s.needsRecovery = false
 	m.mu.Unlock()
-	m.wg.Add(1)
-	go m.watch(watchCtx, id, p, epoch)
 	return nil
 }
 func (m *Manager) stopProcess(id string, disable bool) error {
 	m.mu.Lock()
 	s := m.services[id]
 	p := s.proc
+	wasCleanupPending := s.cleanupPending
+	m.mu.Unlock()
+	// CleanupHook owns only caller resources and may read Status/Config. Never
+	// hold m.mu, signal the listener, or detach its watcher before it succeeds.
+	if err := m.cleanup(id); err != nil {
+		m.mu.Lock()
+		s.state = Error
+		s.errorCode = "cleanup_failed"
+		s.needsRecovery = true
+		if p == nil {
+			// No listener can be preserved. Prevent a stale backoff watcher
+			// from starting against resources whose withdrawal was refused.
+			if s.cancelWatch != nil {
+				s.cancelWatch()
+				s.cancelWatch = nil
+			}
+			s.epoch++
+			s.desired = false
+			s.retryAt = time.Time{}
+		}
+		m.mu.Unlock()
+		return err
+	}
+	m.mu.Lock()
+	retiredBinary := ""
+	if s.running != nil {
+		retiredBinary = s.running.binary
+	}
 	if s.cancelWatch != nil {
 		s.cancelWatch()
 		s.cancelWatch = nil
 	}
-	s.proc = nil
 	s.epoch++
 	s.retryAt = time.Time{}
 	if disable {
@@ -1111,14 +1206,13 @@ func (m *Manager) stopProcess(id string, disable bool) error {
 	if p != nil {
 		p.terminate(m.opts.TermGrace)
 	}
-	if err := m.cleanup(id); err != nil {
-		m.mu.Lock()
-		s.state = Error
-		s.errorCode = "cleanup_failed"
-		s.desired = false
-		m.mu.Unlock()
-		return err
+	m.mu.Lock()
+	s.proc = nil
+	s.running = nil
+	if wasCleanupPending && retiredBinary != "" && retiredBinary != s.binary {
+		_ = os.Remove(retiredBinary) // retained from an earlier refused change
 	}
+	m.mu.Unlock()
 	state := Stopped
 	m.mu.Lock()
 	if s.disk.Current == nil {
@@ -1143,7 +1237,13 @@ func (m *Manager) cleanup(id string) error {
 		cancel()
 	}
 	m.mu.Lock()
-	m.services[id].cleanupPending = err != nil
+	s := m.services[id]
+	s.cleanupPending = err != nil
+	if err != nil {
+		s.state = Error
+		s.errorCode = "cleanup_failed"
+		s.needsRecovery = true
+	}
 	m.mu.Unlock()
 	if err != nil {
 		return errors.New("owned resource cleanup failed")
@@ -1168,6 +1268,12 @@ func (m *Manager) watch(ctx context.Context, id string, p *managedProcess, epoch
 	}
 	m.waitingExits++
 	cancelOperation := m.activeCancel
+	if m.startingProc == p {
+		// This same lane owns the new process's readiness/restore. Their
+		// done monitors already wake hooks. Do not cancel its admission;
+		// another service's operation is still preemptible on core exit.
+		cancelOperation = nil
+	}
 	m.mu.Unlock()
 	if cancelOperation != nil {
 		cancelOperation()
@@ -1188,6 +1294,10 @@ func (m *Manager) watch(ctx context.Context, id string, p *managedProcess, epoch
 		return
 	}
 	s.proc = nil
+	if s.running != nil && s.running.binary != s.binary {
+		_ = os.Remove(s.running.binary)
+	}
+	s.running = nil
 	if p.exitedAt.Sub(p.started) >= m.opts.StableAfter {
 		s.restarts = 0
 	}
@@ -1253,12 +1363,17 @@ func (m *Manager) watch(ctx context.Context, id string, p *managedProcess, epoch
 		cancelRestart()
 		m.mu.Lock()
 		m.activeCancel = nil
+		m.startingProc = nil
 		m.mu.Unlock()
 	}
 }
 
 // Close cancels downloads/checks/retries, waits for the active operation, stops
-// and reaps both process groups, then releases the private store lock. Probe
+// and reaps both process groups only after owned withdrawal succeeds. Failed
+// withdrawal retains the listener, executable and store lock, but Close is
+// terminal and cancels supervision. This cannot preserve fail-open after parent
+// exit (Linux Pdeathsig still applies); the caller must treat it as a blocked
+// shutdown, not a safe exit. There is no independent guardian here. Probe
 // leases remain caller-owned: close/reap the probe owner before runtime Close,
 // and call each lease's Release after its last process is reaped.
 func (m *Manager) Close() error {
@@ -1277,7 +1392,19 @@ func (m *Manager) Close() error {
 		m.wg.Wait()
 		// Artifacts are volatile; release their RAM only after every process reaps.
 		m.mu.Lock()
+		var retained []*managedProcess
+		retainedBinaries := make(map[string]bool)
 		for _, s := range m.services {
+			if s.proc != nil {
+				retained = append(retained, s.proc)
+				if s.binary != "" {
+					retainedBinaries[s.binary] = true
+				}
+				if s.running != nil && s.running.binary != "" {
+					retainedBinaries[s.running.binary] = true
+				}
+				continue // never unlink an executable still owned by a process
+			}
 			if s.binary != "" {
 				_ = os.Remove(s.binary)
 				s.binary = ""
@@ -1285,7 +1412,33 @@ func (m *Manager) Close() error {
 			s.binarySHA256 = [sha256.Size]byte{}
 		}
 		m.mu.Unlock()
-		m.releaseLock()
+		if len(retained) == 0 {
+			m.releaseLock()
+		} else {
+			// closeOnce admits at most one lifetime pin across all Close callers.
+			// Pin m (and its lock fd) until the retained owned children reap,
+			// even if the caller discards a failed Close result/manager. This is
+			// only ownership bookkeeping: no watcher, cleanup retry or signal.
+			go func() {
+				for _, p := range retained {
+					<-p.done
+				}
+				m.mu.Lock()
+				for binary := range retainedBinaries {
+					_ = os.Remove(binary)
+				}
+				for _, s := range m.services {
+					if s.proc != nil {
+						s.proc = nil
+						s.running = nil
+						s.binary = ""
+						s.binarySHA256 = [sha256.Size]byte{}
+					}
+				}
+				m.mu.Unlock()
+				m.releaseLock()
+			}()
+		}
 		close(m.closeDone)
 	})
 	<-m.closeDone
@@ -1350,7 +1503,7 @@ func (m *Manager) ReadyOperation(ctx context.Context, id string, operation func(
 	defer cancel()
 	m.mu.Lock()
 	s := m.services[id]
-	ready := s.state == Running && s.proc != nil
+	ready := s.state == Running && s.proc != nil && s.errorCode == "" && !s.needsRecovery && !s.cleanupPending && !s.restorePending && runningMatchesAccepted(s)
 	if ready {
 		select {
 		case <-s.proc.done:
