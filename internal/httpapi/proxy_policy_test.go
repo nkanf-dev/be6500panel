@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -107,7 +108,7 @@ func policyServer(t *testing.T) (*Server, *httptest.Server) {
 	if err := os.MkdirAll(s.dataDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := managedruntime.New(managedruntime.Options{DataDir: filepath.Join(dir, "runtime-data"), RunDir: filepath.Join(dir, "runtime-run")})
+	manager, err := managedruntime.New(managedruntime.Options{DataDir: filepath.Join(dir, "runtime-data"), RunDir: filepath.Join(dir, "runtime-run"), LocalSourceRoot: s.dataDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,5 +334,69 @@ func TestProxyPolicySelectionKeepsAuthenticationAndOriginBoundary(t *testing.T) 
 	defer res.Body.Close()
 	if res.StatusCode != 403 || decode(t, res)["error"].(map[string]any)["code"] != "origin_rejected" {
 		t.Fatal("policy acknowledgment bypassed origin check")
+	}
+}
+
+func TestProxyPolicyOnlyExplicitReviewedApplyCommitsSelection(t *testing.T) {
+	s, ts := policyServer(t)
+	stagePolicyRuleSets(t, s.dataDir)
+	// This fixed local verifier does not run a core or create network sockets.
+	verifier := []byte("#!/bin/sh\n[ \"$1\" = check ] && [ \"$2\" = -c ] && exit 0\nexit 1\n")
+	path := filepath.Join(s.dataDir, "offline-check-fixture")
+	if err := os.WriteFile(path, verifier, 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.runtime.Acquire(context.Background(), managedruntime.SingBox, managedruntime.Artifact{URL: "file://" + path, SHA256: fmt.Sprintf("%x", sha256.Sum256(verifier)), Compression: "none", Version: "offline-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := s.proxyState.subscription
+	revision := summarizeProxyPolicy(sub).Revision
+	res := request(t, ts, http.MethodPost, "/api/proxy/select", selectPolicyBody(sub.Nodes[0].ID, ""), nil)
+	if res.StatusCode != 409 || decode(t, res)["error"].(map[string]any)["code"] != "policy_acknowledgment_required" {
+		t.Fatal("available core bypassed review")
+	}
+	res = request(t, ts, http.MethodPost, "/api/proxy/select", selectPolicyBody(sub.Nodes[0].ID, revision), nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("reviewed apply HTTP %d: %s", res.StatusCode, res.Body)
+	}
+	var body struct {
+		Status      managedruntime.Status `json:"status"`
+		Diagnostics []proxy.Diagnostic    `json:"diagnostics"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Status.Configured || body.Status.Generation != 1 || body.Status.State != managedruntime.Stopped || body.Status.Desired {
+		t.Fatal("offline accepted configuration falsely reported live")
+	}
+	foundProcess := false
+	for _, diagnostic := range body.Diagnostics {
+		if diagnostic.Scope == "rule" && diagnostic.Index == 1 && diagnostic.Code == "ignored-subscription-rule" {
+			foundProcess = true
+		}
+	}
+	if !foundProcess {
+		t.Fatal("PROCESS-NAME omission missing from compiler result")
+	}
+	accepted, _, err := s.runtime.Config(managedruntime.SingBox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(accepted), "private-app") || strings.Contains(string(accepted), "process_name") || strings.Contains(string(accepted), "late.test") {
+		t.Fatal("omitted rule reached native configuration")
+	}
+	if !strings.Contains(string(accepted), "example.test") {
+		t.Fatal("supported domain rule absent")
+	}
+	saved, err := os.ReadFile(filepath.Join(s.dataDir, "proxy-selection.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selection struct {
+		NodeID string `json:"nodeId"`
+	}
+	if err := json.Unmarshal(saved, &selection); err != nil || selection.NodeID != sub.Nodes[0].ID {
+		t.Fatal("explicit apply did not save selection")
 	}
 }
