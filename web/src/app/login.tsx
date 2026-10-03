@@ -36,9 +36,9 @@ export function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         <div className="login-symbol">
           <LockKeyhole size={24} />
         </div>
-        <span className="eyebrow">LOCAL CONTROL PLANE</span>
-        <h1>登录控制台</h1>
-        <p>使用服务端设置的访问密码</p>
+        <span className="eyebrow">be6500panel · 控制中心</span>
+        <h1>登录控制中心</h1>
+        <p>输入网关控制中心的访问密码</p>
         <form onSubmit={submit}>
           <Field label="访问密码">
             <input
@@ -59,11 +59,11 @@ export function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         </form>
         <div className="login-meta">
           <LockKeyhole size={12} />
-          同源会话 · HttpOnly cookie
+          登录后管理设备、网络与服务
         </div>
       </section>
       <footer className="login-footer">
-        be6500panel · 模块化路由器控制平面
+        be6500panel · 网关控制中心
       </footer>
     </main>
   );

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use executing-plans in the assigned isolated worktree. Each task has a separate source owner and explicit offline verification. The root integrates shared wiring and runs end-to-end tests.
 
-**Goal:** Complete everyday edit/recovery/backup workflows and connect requested device/request charts to actual observations, while preserving the independent LAN rescue service.
+**Goal:** Build a professional modern gateway control center that surpasses the reference panels through complete daily workflows, detailed device management, reliable recovery and real observability, while preserving the independent LAN rescue service.
 
 **Architecture:** Existing private generations and shared storage admission remain the mutation layer. Add authoritative recovery state, typed readback/preservation for runtime forms, explicit policy-omission acknowledgment, staged maintenance backup, and read-only runtime/device collectors. Diagnostic HTTP traces are opt-in measurements, not fabricated decrypted client traffic.
 
@@ -47,12 +47,12 @@
 - [ ] Private backup download warning readable; original rescue/password/key artifacts excluded. Maintain shared storage budget on staged drafts and no automatic on-router archival growth.
 - [ ] Run synthetic tests/typecheck, commit; root native API auth/origin tests mandatory.
 
-## Task 5 — Authoritative procd/runtime observation
+## Task 5 — Authoritative procd/runtime state and controlled actions
 **Files:** new `internal/router/services.go` + parser/tests, new HTTP helper and frontend system services table. Do not edit existing adapter.go/server.go/main.go.
 - [ ] Bounded fixed read-only ubus `service list` snapshot + proc PID/exe/start/RSS verification. Report configured/registered/running/failure/unknown independently; no unknown=stopped or green based only on UCI.
 - [ ] Fixture roots never execute host commands; no arbitrary tool/service argv selected by browser. Preserve finite row count/output/time limits and avoid broad whole-router polling at high frequency.
 - [ ] Include independent rescue service observed state without reading credentials or enabling/disabling it. Rescue controls must not be exposed as a routine stop action.
-- [ ] UI shows source/time/PID/runtime/error, search/filter, genuine stale state, and a useful next action. This task is read-only, not a completed generic service action manager.
+- [ ] UI shows source/time/PID/runtime/error, search/filter, stale state and controlled service actions. Implement fixed discovered DDNS start/stop/restart/reload and DNS/DHCP reload/restart with an explicit interruption prompt and post-action readback. Managed proxy/FRPC actions use their existing runtime owner. Protect rescue/network dependencies from accidental generic stop actions.
 - [ ] Go tests/race/vet + UI tests; root wires server collection and source capability.
 
 ## Task 6 — Real device activity heatmap and charts
@@ -71,8 +71,23 @@
 - [ ] Store bounded trace ring with labels/route/status/intervals; UI real phase stacks, actual failure position, filter and table. Connection timeline remains a distinct chart, not claimed HTTP waterfall.
 - [ ] Tests fake HTTP/TLS/delayed-firstbyte/failure/cancel/proxy paths and assert no insecure TLS/no automatic probe; UI tests/typecheck.
 
+
+## Task 8 — Detailed device workspace and editable annotations
+**Files:** new `internal/deviceinfo` annotation store + HTTP helpers; new device workspace/API/alias provider; root mounts provider and page.
+- [ ] Persist per-MAC display name, note and tags with revision checks and shared storage admission. Explicit Save updates all pages through one annotation provider; retain system hostname separately.
+- [ ] Device details combine source-stamped trafficd counters, current leases/addresses, wireless signal/rate/protocol/MLO links, proxy connections/outbound observations and history. Preserve conflict/unknown/stale distinctions; MAC identity cannot be reassigned by a stale IP.
+- [ ] Add search, bounded rows, drilldown, multi-device comparison and inline note editing. Heatmap selection opens the same device details, and useful configuration shortcuts open the typed editor.
+- [ ] Test annotation persistence/conflict/atomic failures, cross-widget naming, current-IP correlation, multi-link duplicate counters, missing-source behavior and keyboard/mobile interaction.
+
+## Task 9 — Firmware-evidence field help
+**Files:** field-schema/help metadata/NativeFields help UI, module-specific evidence catalog/tests, documentation.
+- [ ] Inventory every modeled field across the six native modules. Identify actual consumers in init scripts, Lua APIs, config helpers and driver interfaces; record firmware/source path/line.
+- [ ] Explain purpose, unit, documented defaults/ranges, dependencies and apply/reload impact adjacent to the control. Detailed evidence sits in expandable help, not a default screen full of file paths.
+- [ ] Preserve editable vendor values and the actual parser rules. Derived/internal options receive precise behavior guidance, not arbitrary blanket read-only restrictions.
+- [ ] Validate catalog coverage and evidence anchors; root samples live1.0.64 scripts where the baseline1.0.43 evidence needs confirmation. The designated UI/UX lead reviews all descriptions.
+
 ## Root integration acceptance
 - [ ] Integrate each small verified commit without changing independent rescue or credentials. Shared dictionary and public/runtime schemas reconcile consciously.
 - [ ] Full Go/vet/race serialized (`-p1`), frontend typecheck/all tests/build, ARM build. Browser workflows 220nodes/128devices/largeforms/390px keyboard and screenshot review by designated expert.
 - [ ] Read-only live API verifies service/device/history/request source capability before writing any config. Deploy panel only with capture desired=false; rescue ports22/2222 remain reachable.
-- [ ] No router reboot/capture/risky WAN/WiFi changes without user confirmation. Report named workflow acceptance, unresolved dedicated adapters and actual evidence; no unsupported claim of complete superiority.
+- [ ] No router reboot/capture/risky WAN/WiFi changes without user confirmation. Report named workflow acceptance, measured improvements and the next dedicated adapters to finish. Drive the superiority target through verified task completion and keep reported results grounded in actual measurements.

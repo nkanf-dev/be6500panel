@@ -24,25 +24,26 @@ const view = () =>
       content
     </Shell>,
   );
-describe("truthful workspace control labels", () => {
-  it("does not infer control permission before health is known", () => {
+describe("professional gateway control labels", () => {
+  it("shows connection progress before the gateway responds", () => {
     view();
-    expect(screen.getByText("权限读取中")).toBeInTheDocument();
+    expect(screen.getByText("正在连接网关")).toBeInTheDocument();
     expect(screen.queryByText("控制模式")).not.toBeInTheDocument();
     expect(screen.queryByText("Full control")).not.toBeInTheDocument();
   });
-  it("names the enabled configuration capability without claiming full router parity", () => {
+  it("shows the connected gateway without implementation-mode framing", () => {
     state.health = { mode: "host", readOnly: false };
     view();
-    expect(screen.getByText("配置控制已启用")).toBeInTheDocument();
+    expect(screen.getAllByText("已连接网关")[0]).toBeInTheDocument();
     expect(screen.queryByText("Full control")).not.toBeInTheDocument();
     expect(screen.getByText("高级诊断").closest("details")).not.toHaveAttribute(
       "open",
     );
   });
-  it("keeps read-only deployment explicit", () => {
+  it("keeps connection identity independent of individual action capability", () => {
     state.health = { mode: "host", readOnly: true };
     view();
-    expect(screen.getByText("配置只读")).toBeInTheDocument();
+    expect(screen.getAllByText("已连接网关")).toHaveLength(2);
+    expect(screen.queryByText("配置只读")).not.toBeInTheDocument();
   });
 });
