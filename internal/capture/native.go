@@ -94,7 +94,7 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 	if json.Unmarshal(raw, &native) != nil {
 		return bad("capture_native_invalid")
 	}
-	input := proxy.RulesPlanInput{LANInterface: "br-lan", IPv6: d.IPv6, Failure: proxy.FailureDirect, ManagementIPs: slices.Clone(observed.ManagementIPs), RouterDNSAddresses: slices.Clone(observed.LANAddresses), ClientIPv6: d.ClientIPv6}
+	input := proxy.RulesPlanInput{LANInterface: "br-lan", IPv6: d.IPv6, Failure: proxy.FailureDirect, ManagementIPs: slices.Clone(observed.ManagementIPs), RouterDNSAddresses: captureRouterDNSAddresses(observed.LANAddresses, d.IPv6), ClientIPv6: d.ClientIPv6}
 	if len(addresses) == 1 {
 		input.ClientIPv4 = addresses[0]
 	} else {
@@ -228,6 +228,24 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 type PartialScopeError struct{}
 
 func (*PartialScopeError) Error() string { return "capture_devices_pending" }
+
+// Router DNS exceptions are only for addresses supported by the active capture
+// family. Link-local DNS stays on dnsmasq: scoped addresses cannot be safely
+// expressed by the owned exact-address NAT plan.
+func captureRouterDNSAddresses(addresses []string, ipv6 proxy.IPv6Mode) []string {
+	out := []string{}
+	for _, value := range addresses {
+		addr, err := netip.ParseAddr(value)
+		if err != nil || addr.Zone() != "" || addr.Is4In6() || !addr.IsGlobalUnicast() || addr.IsLoopback() || addr.IsLinkLocalUnicast() {
+			continue
+		}
+		if addr.Is6() && ipv6 != proxy.IPv6Follow {
+			continue
+		}
+		out = append(out, addr.String())
+	}
+	return out
+}
 
 func insideLAN(raw string, prefixes []string) bool {
 	addr, err := netip.ParseAddr(raw)
