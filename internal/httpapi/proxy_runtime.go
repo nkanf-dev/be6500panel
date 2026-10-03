@@ -21,6 +21,7 @@ import (
 )
 
 type proxyState struct {
+	mutationMu   sync.Mutex // serialize subscription replacement with reviewed selection
 	mu           sync.Mutex
 	subscription proxy.Subscription
 	selected     string
@@ -63,10 +64,11 @@ func (s *Server) proxyNodes(w http.ResponseWriter, r *http.Request) {
 		selected = ""
 	}
 	writeJSON(w, 200, struct {
-		Nodes       []proxy.PublicNode `json:"nodes"`
-		Diagnostics []proxy.Diagnostic `json:"diagnostics"`
-		Selected    string             `json:"selectedNodeId"`
-	}{p.subscription.PublicNodes(), diagnostics, selected})
+		Nodes         []proxy.PublicNode `json:"nodes"`
+		Diagnostics   []proxy.Diagnostic `json:"diagnostics"`
+		Selected      string             `json:"selectedNodeId"`
+		PolicySummary proxyPolicySummary `json:"policySummary"`
+	}{p.subscription.PublicNodes(), diagnostics, selected, summarizeProxyPolicy(p.subscription)})
 }
 func (s *Server) proxyImport(w http.ResponseWriter, r *http.Request) {
 	if !s.runtimeEnabled(w) {
@@ -105,11 +107,16 @@ func (s *Server) proxyImport(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "configuration_unavailable", "配置存储未启用")
 		return
 	}
+	p := s.proxyState
+	if !p.mutationMu.TryLock() {
+		fail(w, http.StatusConflict, "proxy_mutation_pending", "订阅或节点配置正在保存，请稍后重试")
+		return
+	}
+	defer p.mutationMu.Unlock()
 	if err = s.writePrivate(r.Context(), filepath.Join(s.dataDir, "subscription.yaml"), raw, false); err != nil {
 		fail(w, 500, "storage_failed", "订阅保存失败")
 		return
 	}
-	p := s.proxyState
 	p.mu.Lock()
 	p.subscription = sub
 	p.loadFailed = false
@@ -156,10 +163,11 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		NodeID  string              `json:"nodeId"`
-		IPv6    proxy.IPv6Mode      `json:"ipv6"`
-		Failure proxy.FailurePolicy `json:"failure"`
-		Ports   struct {
+		NodeID               string              `json:"nodeId"`
+		IPv6                 proxy.IPv6Mode      `json:"ipv6"`
+		Failure              proxy.FailurePolicy `json:"failure"`
+		AcknowledgedRevision string              `json:"acknowledgedRevision"`
+		Ports                struct {
 			Mixed  uint16 `json:"mixed"`
 			TProxy uint16 `json:"tproxy"`
 			DNS    uint16 `json:"dns"`
@@ -169,6 +177,11 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := s.proxyState
+	if !p.mutationMu.TryLock() {
+		fail(w, http.StatusConflict, "proxy_mutation_pending", "订阅或节点配置正在保存，请稍后重试")
+		return
+	}
+	defer p.mutationMu.Unlock()
 	p.mu.Lock()
 	sub := p.subscription
 	var node proxy.Node
@@ -183,6 +196,11 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 	p.mu.Unlock()
 	if !found {
 		fail(w, 404, "node_not_found", "节点不存在")
+		return
+	}
+	summary := summarizeProxyPolicy(sub)
+	if code, message := checkProxyPolicyAcknowledgment(summary, input.AcknowledgedRevision); code != "" {
+		fail(w, http.StatusConflict, code, message)
 		return
 	}
 	refs, err := s.ruleSetReferences()
@@ -207,7 +225,7 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 	if input.IPv6 == proxy.IPv6Follow {
 		dnsBind, tproxyBind = "::", "::"
 	}
-	out, err := proxy.CompileNative(proxy.CompileInput{Node: node, Rules: sub.Rules, Diagnostics: sub.Diagnostics, AcceptUnsupportedRules: true, RuleSets: refs, Endpoints: endpoints, ManagementIPs: []string{"192.168.31.1"}, IPv6: input.IPv6, Failure: input.Failure, Ports: proxy.Ports{Mixed: input.Ports.Mixed, TProxy: input.Ports.TProxy, DNS: input.Ports.DNS}, MixedListenAddress: "192.168.31.1", TProxyListenAddress: tproxyBind, DNSListenAddress: dnsBind})
+	out, err := proxy.CompileNative(proxy.CompileInput{Node: node, Rules: sub.Rules, Diagnostics: sub.Diagnostics, AcceptUnsupportedRules: input.AcknowledgedRevision == summary.Revision, RuleSets: refs, Endpoints: endpoints, ManagementIPs: []string{"192.168.31.1"}, IPv6: input.IPv6, Failure: input.Failure, Ports: proxy.Ports{Mixed: input.Ports.Mixed, TProxy: input.Ports.TProxy, DNS: input.Ports.DNS}, MixedListenAddress: "192.168.31.1", TProxyListenAddress: tproxyBind, DNSListenAddress: dnsBind})
 	if err != nil {
 		fail(w, 422, "proxy_configuration_invalid", "代理策略生成失败")
 		return
