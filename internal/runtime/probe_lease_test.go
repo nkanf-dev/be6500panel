@@ -278,6 +278,80 @@ func TestProbeLeaseLinkFailureHasNoCopyFallback(t *testing.T) {
 	}
 }
 
+func TestProbeLeaseFailedAdmissionRetainsCapIfCleanupFails(t *testing.T) {
+	m, opts := testManager(t, nil)
+	acquireFixture(t, m, opts, SingBox, fixture)
+	m.mu.Lock()
+	original := m.services[SingBox].binary
+	m.mu.Unlock()
+	originalInfo, err := os.Lstat(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(opts.RunDir, ".probe-lease-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &probeLeaseState{manager: m, dir: dir, path: filepath.Join(dir, SingBox)}
+	state.dirInfo, err = os.Lstat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := linkProbeOriginal(original, originalInfo, state); err != nil {
+		t.Fatal(err)
+	}
+	// An unknown file prevents removal of the owned directory. The exact
+	// lease link can be removed, but admission must still retain its fd/cap.
+	sentinelPath := filepath.Join(dir, "unknown-owner")
+	sentinel := []byte("keep-private-bytes")
+	if err := os.WriteFile(sentinelPath, sentinel, 0600); err != nil {
+		t.Fatal(err)
+	}
+	discardProbeLease(state)
+	if _, err := os.Lstat(state.path); !os.IsNotExist(err) {
+		t.Fatal("failed admission did not remove its own link", err)
+	}
+	body, err := os.ReadFile(sentinelPath)
+	if err != nil || !bytes.Equal(body, sentinel) {
+		t.Fatal("failed admission removed an unknown file", err)
+	}
+	m.mu.Lock()
+	retained := m.probeLease == state
+	m.mu.Unlock()
+	if !retained {
+		t.Fatal("failed admission cleanup freed the owned-inode cap")
+	}
+	fdInfo, err := state.readOnly.Stat()
+	if err != nil || !sameProbeFile(originalInfo, fdInfo) {
+		t.Fatal("failed admission lost its retained inode fd", err)
+	}
+	entries := probeRunEntries(t, opts)
+	if _, err := m.AcquireProbeLease(context.Background(), nil); !errors.Is(err, ErrBusy) {
+		t.Fatal("failed admission cleanup allowed another lease", err)
+	}
+	if !reflect.DeepEqual(entries, probeRunEntries(t, opts)) {
+		t.Fatal("capped retry created more temporary files")
+	}
+	// Remove only our deliberately unknown fixture, then finish cleanup using
+	// the retained state's ordinary Release ownership.
+	if err := os.Remove(sentinelPath); err != nil {
+		t.Fatal(err)
+	}
+	RuntimeProbeLease{state: state}.Release()
+	if _, err := state.readOnly.Stat(); !errors.Is(err, os.ErrClosed) {
+		t.Fatal("completed cleanup retained its fd", err)
+	}
+	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+		t.Fatal("completed cleanup left its directory", err)
+	}
+	m.mu.Lock()
+	occupied := m.probeLease != nil
+	m.mu.Unlock()
+	if occupied {
+		t.Fatal("confirmed cleanup did not free the cap")
+	}
+}
+
 func TestProbeLeaseReleaseRefusesReplacedOwnedPath(t *testing.T) {
 	m, opts := testManager(t, nil)
 	acquireFixture(t, m, opts, SingBox, fixture)
@@ -601,6 +675,62 @@ func TestProbeLeaseFrozenAcrossReplacementAndReleaseCap(t *testing.T) {
 	}
 	if _, err := m.AcquireProbeLease(context.Background(), nil); !errors.Is(err, ErrBusy) {
 		t.Fatal("old Release cleared new lease cap", err)
+	}
+}
+
+func TestProbeLeaseCancelledLinkedHashCleansOwnFiles(t *testing.T) {
+	m, opts := testManager(t, nil)
+	acquireFixture(t, m, opts, SingBox, fixture)
+	m.mu.Lock()
+	original := m.services[SingBox].binary
+	m.mu.Unlock()
+	originalInfo, err := os.Lstat(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := probeRunEntries(t, opts)
+	dir, err := os.MkdirTemp(opts.RunDir, ".probe-lease-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &probeLeaseState{manager: m, dir: dir, path: filepath.Join(dir, SingBox)}
+	state.dirInfo, err = os.Lstat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := linkProbeOriginal(original, originalInfo, state); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	digest := sha256.New()
+	reader := &cancelProbeReader{cancel: cancel, reader: state.readOnly}
+	if n, err := copyProbeBytes(ctx, digest, reader, m.opts.MaxUncompressedBytes); n != 0 || !errors.Is(err, context.Canceled) {
+		t.Fatal("linked hash ignored cancellation after read", n, err)
+	}
+	if !errors.Is(probeCopyError(ctx, ctx.Err()), context.Canceled) {
+		t.Fatal("lease lost cancellation error")
+	}
+	discardProbeLease(state)
+	if !reflect.DeepEqual(entries, probeRunEntries(t, opts)) {
+		t.Fatal("cancelled linked hash left temporary files")
+	}
+	if _, err := state.readOnly.Stat(); !errors.Is(err, os.ErrClosed) {
+		t.Fatal("cancelled linked hash leaked its fd", err)
+	}
+	m.mu.Lock()
+	occupied := m.probeLease != nil
+	m.mu.Unlock()
+	if occupied {
+		t.Fatal("cancelled linked hash retained the cap after confirmed cleanup")
+	}
+	afterOriginal, err := os.Lstat(original)
+	if err != nil || !sameProbeFile(originalInfo, afterOriginal) {
+		t.Fatal("cancelled linked hash changed original artifact metadata", err)
+	}
+	body, err := os.ReadFile(original)
+	if err != nil || string(body) != fixture {
+		t.Fatal("cancelled linked hash changed original artifact bytes", err)
 	}
 }
 

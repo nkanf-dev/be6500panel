@@ -128,11 +128,7 @@ func (m *Manager) AcquireProbeLease(ctx context.Context, guard func(context.Cont
 	published := false
 	defer func() {
 		if !published {
-			// Only remove the link/directory identities we created. No recursion.
-			_ = removeProbeLink(state)
-			if state.readOnly != nil {
-				_ = state.readOnly.Close()
-			}
+			discardProbeLease(state)
 		}
 	}()
 	state.dirInfo, err = os.Lstat(dir)
@@ -166,6 +162,22 @@ func (m *Manager) AcquireProbeLease(ctx context.Context, guard func(context.Cont
 	m.mu.Unlock()
 	published = true
 	return RuntimeProbeLease{state: state}, nil
+}
+
+// Failed admission also owns any link it created. If cleanup cannot confirm
+// removal, retain that state/fd and the cap, just as for a failed Release.
+// No caller lease was returned, so this exceptional state has no public retry;
+// subsequent admission remains busy until explicit recovery of the manager.
+func discardProbeLease(state *probeLeaseState) {
+	if !removeProbeLink(state) {
+		state.manager.mu.Lock()
+		state.manager.probeLease = state
+		state.manager.mu.Unlock()
+		return
+	}
+	if state.readOnly != nil {
+		_ = state.readOnly.Close()
+	}
 }
 
 // linkProbeOriginal creates only the exact lease name. Any link failure,
