@@ -68,6 +68,8 @@ type Controller struct {
 	failedPlan       *proxy.OwnedRulesPlan
 	storageAdmission storage.Admission
 	storageReserved  bool
+	// A failed off-switch write must survive observations and cleanup retries.
+	disableNotPersisted bool
 }
 
 func New(dataDir string, runner Runner) (*Controller, error) {
@@ -98,6 +100,9 @@ func New(dataDir string, runner Runner) (*Controller, error) {
 func (c *Controller) Status() Status { c.mu.Lock(); defer c.mu.Unlock(); return c.statusLocked() }
 func (c *Controller) statusLocked() Status {
 	state := Status{Active: c.active, CleanupPending: c.cleanupPending, State: "inactive", Desired: c.desired.Enabled, Clients: slices.Clone(c.clients), IPv6: c.desired.IPv6, Error: c.restoreError}
+	if c.disableNotPersisted {
+		state.Error = "capture_disable_not_persisted"
+	}
 	if state.Clients == nil {
 		state.Clients = []Client{}
 	}

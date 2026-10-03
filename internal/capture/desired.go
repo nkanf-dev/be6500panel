@@ -156,9 +156,10 @@ func (c *Controller) saveDesiredLocked(ctx context.Context, d Desired, recovery 
 	}
 	defer release()
 	if err = atomicSave(c.desiredPath, raw); err != nil {
-		// A directory sync may fail after rename committed. Treat the bytes
-		// actually on disk as authoritative so an off switch stays off here too.
-		if accepted, readErr := os.ReadFile(c.desiredPath); readErr == nil && slices.Equal(accepted, raw) {
+		// A directory sync may fail after rename committed. Read back accepted
+		// bytes, but never replace a failed off latch with saved enabled intent.
+		// Only a successful explicit save can clear that latch and its warning.
+		if accepted, readErr := os.ReadFile(c.desiredPath); !c.disableNotPersisted && readErr == nil && slices.Equal(accepted, raw) {
 			c.desired = d
 			c.clients = desiredClients(d)
 			c.restoreError = "capture_state_not_durable"
@@ -168,6 +169,7 @@ func (c *Controller) saveDesiredLocked(ctx context.Context, d Desired, recovery 
 	c.desired = d
 	c.clients = desiredClients(d)
 	c.restoreError = ""
+	c.disableNotPersisted = false
 	return nil
 }
 
@@ -184,8 +186,9 @@ func (c *Controller) Select(ctx context.Context, d Desired) (Status, error) {
 	return c.selectLocked(ctx, normalized)
 }
 
-// Disable persists the off switch before cleanup. Even failed cleanup cannot
-// silently restore the selection at the next core start or panel boot.
+// Disable latches the off switch in memory before trying to persist and clean.
+// Failed persistence requires an explicit retry before process restart. A saved
+// off switch stays off even when cleanup fails.
 func (c *Controller) Disable(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

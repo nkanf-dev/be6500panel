@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"time"
 
 	"be6500panel/internal/proxy"
 	"be6500panel/internal/storage"
@@ -94,23 +96,33 @@ func (c *Controller) selectLocked(ctx context.Context, desired Desired) (Status,
 }
 
 func (c *Controller) disableLocked(ctx context.Context, desired Desired) error {
-	raw, err := json.Marshal(desired)
-	if err != nil {
-		return err
+	// Latch off before any admission or write. The last saved intent may still
+	// be enabled if storage fails, but no in-process refresh may restore it.
+	// Keep the prior selection and observations until the write succeeds.
+	c.desired.Enabled = false
+	c.disableNotPersisted = true
+	c.failedPlan = nil
+	raw, persistErr := json.Marshal(desired)
+	if persistErr == nil {
+		var release func()
+		release, persistErr = c.admitStorageLocked(ctx, temporaryStorageBytes(raw), true)
+		if persistErr == nil {
+			defer release()
+			c.storageReserved = true
+			defer func() { c.storageReserved = false }()
+			persistErr = c.saveDesiredLocked(ctx, desired, true)
+		}
 	}
-	release, err := c.admitStorageLocked(ctx, temporaryStorageBytes(raw), true)
-	if err != nil {
-		return errors.Join(err, c.cleanupLocked(ctx))
+	// A canceled HTTP request must not abandon owned hooks. Like failed Apply
+	// rollback, cleanup uses an independent, bounded context.
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cleanupErr := c.cleanupLocked(cleanupCtx)
+	if persistErr != nil {
+		return errors.Join(fmt.Errorf("capture_disable_not_persisted: retry disable before process restart: %w", persistErr), cleanupErr)
 	}
-	defer release()
-	c.storageReserved = true
-	defer func() { c.storageReserved = false }()
-	if err := c.saveDesiredLocked(ctx, desired, true); err != nil {
-		return errors.Join(err, c.cleanupLocked(ctx))
-	}
-	if err := c.cleanupLocked(ctx); err != nil {
+	if cleanupErr != nil {
 		c.restoreError = "capture_cleanup_failed"
-		return err
 	}
-	return nil
+	return cleanupErr
 }
