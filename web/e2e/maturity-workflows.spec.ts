@@ -173,12 +173,10 @@ test.describe("maturity workflows · synthetic source fixture", () => {
     });
     await navigate(page, "overview");
     await expect(
-      page
-        .locator('[data-widget-id="deviceActivity"]')
-        .getByRole("button", {
-          name: "查看设备 fixture 客厅电脑",
-          exact: true,
-        }),
+      page.locator('[data-widget-id="deviceActivity"]').getByRole("button", {
+        name: "查看设备 fixture 客厅电脑",
+        exact: true,
+      }),
     ).toBeVisible();
     await navigate(page, "devices");
     await expect(
@@ -288,21 +286,15 @@ test.describe("maturity workflows · synthetic source fixture", () => {
       exact: true,
     });
     await expect(table.locator("tbody tr")).toHaveCount(6);
-    const dns = table
-      .locator("tbody tr")
-      .filter({
-        has: page.getByRole("cell", { name: "DNS 解析", exact: true }),
-      });
-    const connect = table
-      .locator("tbody tr")
-      .filter({
-        has: page.getByRole("cell", { name: "CONNECT 隧道", exact: true }),
-      });
-    const tls = table
-      .locator("tbody tr")
-      .filter({
-        has: page.getByRole("cell", { name: "目标服务 TLS 握手", exact: true }),
-      });
+    const dns = table.locator("tbody tr").filter({
+      has: page.getByRole("cell", { name: "DNS 解析", exact: true }),
+    });
+    const connect = table.locator("tbody tr").filter({
+      has: page.getByRole("cell", { name: "CONNECT 隧道", exact: true }),
+    });
+    const tls = table.locator("tbody tr").filter({
+      has: page.getByRole("cell", { name: "目标服务 TLS 握手", exact: true }),
+    });
     for (const row of [dns, connect]) {
       await expect(row.locator("td").nth(3)).toHaveText("未观测");
       for (const column of [4, 5, 6])
