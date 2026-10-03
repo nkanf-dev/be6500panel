@@ -289,6 +289,18 @@ func (m *Manager) statusLocked(id string) Status {
 	}
 	return out
 }
+
+// checkMutationGuard runs only after admission and before any mutation work.
+// A successful guard may cancel the operation, so check context again afterward.
+func checkMutationGuard(ctx context.Context, guard func(context.Context) error) error {
+	if guard != nil {
+		if err := guard(ctx); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
 func (m *Manager) result(id string, err error) (Status, error) { s, _ := m.Status(id); return s, err }
 func (m *Manager) setState(id string, state State, code string) {
 	m.mu.Lock()
@@ -490,11 +502,20 @@ func (m *Manager) recoverRuntime(ctx context.Context, id string, previous liveSn
 // activating it. An existing accepted config is checked with the new artifact.
 // A failed download/check never stops the previous running core.
 func (m *Manager) Acquire(ctx context.Context, id string, artifact Artifact) (Status, error) {
+	return m.AcquireGuarded(ctx, id, artifact, nil)
+}
+
+// AcquireGuarded checks caller-owned state inside the shared mutation lane before
+// artifact acquisition. The guard may read status but must not mutate the manager.
+func (m *Manager) AcquireGuarded(ctx context.Context, id string, artifact Artifact, guard func(context.Context) error) (Status, error) {
 	ctx, done, err := m.begin(ctx, id)
 	if err != nil {
 		return m.resultSafe(id, err)
 	}
 	defer done()
+	if err = checkMutationGuard(ctx, guard); err != nil {
+		return m.result(id, err)
+	}
 	m.mu.Lock()
 	s := m.services[id]
 	previous := s.state
@@ -609,11 +630,20 @@ func (m *Manager) resultSafe(id string, err error) (Status, error) {
 // Configure uses compare-and-swap generation. Failed checks preserve the old
 // manifest, generation, process and config. Accepted changes increment once.
 func (m *Manager) Configure(ctx context.Context, id string, raw []byte, expectedGeneration uint64) (Status, error) {
+	return m.ConfigureGuarded(ctx, id, raw, expectedGeneration, nil)
+}
+
+// ConfigureGuarded checks caller-owned state inside the shared mutation lane before
+// configuration staging. The guard may read status but must not mutate the manager.
+func (m *Manager) ConfigureGuarded(ctx context.Context, id string, raw []byte, expectedGeneration uint64, guard func(context.Context) error) (Status, error) {
 	ctx, done, err := m.begin(ctx, id)
 	if err != nil {
 		return m.resultSafe(id, err)
 	}
 	defer done()
+	if err = checkMutationGuard(ctx, guard); err != nil {
+		return m.result(id, err)
+	}
 	if len(raw) == 0 || int64(len(raw)) > m.opts.MaxConfigBytes {
 		return m.result(id, errors.New("invalid configuration size"))
 	}
@@ -678,11 +708,21 @@ func (m *Manager) Configure(ctx context.Context, id string, raw []byte, expected
 // Restore verifies and accepts the last-good private config as a new generation.
 // It never moves generation backwards, so stale clients cannot overwrite it.
 func (m *Manager) Restore(ctx context.Context, id string, expectedGeneration uint64) (Status, error) {
+	return m.RestoreGuarded(ctx, id, expectedGeneration, nil)
+}
+
+// RestoreGuarded checks caller-owned state inside the shared mutation lane before
+// last-good configuration reads. The guard may read status but must not mutate
+// the manager.
+func (m *Manager) RestoreGuarded(ctx context.Context, id string, expectedGeneration uint64, guard func(context.Context) error) (Status, error) {
 	ctx, done, err := m.begin(ctx, id)
 	if err != nil {
 		return m.resultSafe(id, err)
 	}
 	defer done()
+	if err = checkMutationGuard(ctx, guard); err != nil {
+		return m.result(id, err)
+	}
 	m.mu.Lock()
 	s := m.services[id]
 	disk := s.disk
@@ -747,11 +787,21 @@ func (m *Manager) Restore(ctx context.Context, id string, expectedGeneration uin
 }
 
 func (m *Manager) Start(ctx context.Context, id string) (Status, error) {
+	return m.StartGuarded(ctx, id, nil)
+}
+
+// StartGuarded checks caller-owned state inside the shared mutation lane before
+// verification or process and resource changes. The guard may read status but
+// must not mutate the manager.
+func (m *Manager) StartGuarded(ctx context.Context, id string, guard func(context.Context) error) (Status, error) {
 	ctx, done, err := m.begin(ctx, id)
 	if err != nil {
 		return m.resultSafe(id, err)
 	}
 	defer done()
+	if err = checkMutationGuard(ctx, guard); err != nil {
+		return m.result(id, err)
+	}
 	m.mu.Lock()
 	s := m.services[id]
 	exitedPrevious := s.cleanupPending
@@ -827,12 +877,7 @@ func (m *Manager) RestartGuarded(ctx context.Context, id string, guard func(cont
 		return m.resultSafe(id, err)
 	}
 	defer done()
-	if guard != nil {
-		if err = guard(ctx); err != nil {
-			return m.result(id, err)
-		}
-	}
-	if err = ctx.Err(); err != nil {
+	if err = checkMutationGuard(ctx, guard); err != nil {
 		return m.result(id, err)
 	}
 	m.mu.Lock()
