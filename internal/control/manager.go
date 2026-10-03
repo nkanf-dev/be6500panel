@@ -380,6 +380,22 @@ func (m *Manager) validateNativeSet(ctx context.Context, candidates map[string]s
 		if issues := validateReferences(candidates, combined); len(issues) > 0 {
 			return issues
 		}
+		// Removing a namespace can also break references in documents that were
+		// not selected. Assess the full accepted baseline without revalidating
+		// inherited vendor references that were already unknown before this edit.
+		currentDocuments := make([]Document, 0, len(modules))
+		selectedDocuments := make([]Document, 0, len(candidates))
+		for _, module := range modules {
+			currentDocuments = append(currentDocuments, Document{Module: module, Content: live[module].Content})
+			if content, selected := candidates[module]; selected {
+				selectedDocuments = append(selectedDocuments, Document{Module: module, Content: content})
+			}
+		}
+		for _, draft := range PreviewDocuments(currentDocuments, selectedDocuments) {
+			if len(draft.Dependencies) > 0 {
+				return draft.Dependencies
+			}
+		}
 	}
 	var candidateBytes int64
 	for _, text := range combined {
