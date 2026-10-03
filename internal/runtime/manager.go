@@ -809,6 +809,74 @@ func (m *Manager) Start(ctx context.Context, id string) (Status, error) {
 	err = m.startProcess(ctx, id)
 	return m.result(id, err)
 }
+
+// Restart verifies the current accepted config before replacing a process.
+// Unlike Start it always stops the old process and owned resources. The entire
+// preflight/stop/start sequence owns one mutation lane, so no configuration or
+// retry operation can interleave between the checked record and its activation.
+func (m *Manager) Restart(ctx context.Context, id string) (Status, error) {
+	ctx, done, err := m.begin(ctx, id)
+	if err != nil {
+		return m.resultSafe(id, err)
+	}
+	defer done()
+	m.mu.Lock()
+	s := m.services[id]
+	if s.disk.Current == nil {
+		m.mu.Unlock()
+		return m.result(id, ErrNotConfigured)
+	}
+	if s.binary == "" {
+		m.mu.Unlock()
+		return m.result(id, ErrNoArtifact)
+	}
+	binary, record, previous := s.binary, s.disk.Current, s.state
+	m.mu.Unlock()
+	m.setState(id, Checking, "")
+	if err = m.verifyAccepted(ctx, id, binary, record); err != nil {
+		code := "config_check_failed"
+		if ctx.Err() != nil {
+			code = "operation_cancelled"
+		}
+		m.setState(id, previous, code)
+		return m.result(id, err)
+	}
+	if err = ctx.Err(); err != nil {
+		m.setState(id, previous, "operation_cancelled")
+		return m.result(id, err)
+	}
+	// Disable desire and cancel the old epoch first. A canceled request after
+	// cleanup must not leave a backoff watcher able to launch a replacement.
+	if err = m.stopProcess(id, true); err != nil {
+		return m.result(id, err)
+	}
+	if err = ctx.Err(); err != nil {
+		m.setState(id, Stopped, "operation_cancelled")
+		return m.result(id, err)
+	}
+	m.mu.Lock()
+	s.desired = true
+	s.restarts = 0
+	s.retryAt = time.Time{}
+	s.epoch++
+	m.mu.Unlock()
+	err = m.startProcess(ctx, id)
+	if err != nil {
+		// Cancellation can arrive between the preceding check and startProcess's
+		// first check. Preserve actual stopped/error state, with no desired retry.
+		m.mu.Lock()
+		if s.proc == nil {
+			s.desired = false
+			s.retryAt = time.Time{}
+			if s.errorCode == "" && ctx.Err() != nil {
+				s.errorCode = "operation_cancelled"
+			}
+		}
+		m.mu.Unlock()
+	}
+	return m.result(id, err)
+}
+
 func (m *Manager) Stop(ctx context.Context, id string) (Status, error) {
 	_, done, err := m.begin(ctx, id)
 	if err != nil {
