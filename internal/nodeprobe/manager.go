@@ -16,15 +16,18 @@ type probeSession interface {
 }
 type sessionFactory func(context.Context, CoreLease, []proxy.Node, string) (probeSession, error)
 type Manager struct {
-	mu           sync.Mutex
-	cfg          Config
-	ctx          context.Context
-	cancel       context.CancelFunc
-	closed       bool
-	running      bool
-	revision     string
-	job          *Job
-	results      []Result
+	mu       sync.Mutex
+	cfg      Config
+	ctx      context.Context
+	cancel   context.CancelFunc
+	closed   bool
+	running  bool
+	revision string
+	job      *Job
+	results  []Result
+	// Same-revision observations outside the latest job survive single/page
+	// probes. The public view remains bounded to MaxNodes (newest job first).
+	cached       []Result
 	jobCancel    context.CancelFunc
 	done         chan struct{}
 	startSession sessionFactory
@@ -72,7 +75,15 @@ func (m *Manager) Snapshot() Snapshot {
 	return view
 }
 func (m *Manager) snapshotLocked() Snapshot {
-	view := Snapshot{Revision: m.revision, Target: Target, Running: m.running, Results: append([]Result{}, m.results...), Limits: Limits{MaxNodes, Concurrency, Timeout.Milliseconds()}}
+	results := append([]Result{}, m.results...)
+	remaining := MaxNodes - len(results)
+	if remaining > len(m.cached) {
+		remaining = len(m.cached)
+	}
+	if remaining > 0 {
+		results = append(results, m.cached[:remaining]...)
+	}
+	view := Snapshot{Revision: m.revision, Target: Target, Running: m.running, Results: results, Limits: Limits{MaxNodes, Concurrency, Timeout.Milliseconds()}}
 	if m.job != nil {
 		job := *m.job
 		view.Job = &job
@@ -158,6 +169,22 @@ func (m *Manager) Start(requestCtx context.Context, in StartInput) (Snapshot, er
 	}
 	ctx, cancel := context.WithTimeout(m.ctx, JobTimeout)
 	m.jobCancel = cancel
+	previous := m.snapshotLocked().Results
+	m.cached = nil
+	selected := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		selected[n.ID] = true
+	}
+	if m.revision == set.Revision && len(nodes) < MaxNodes {
+		for _, result := range previous {
+			if !selected[result.NodeID] && result.MeasuredAt != nil {
+				m.cached = append(m.cached, result)
+				if len(m.cached) == MaxNodes-len(nodes) {
+					break
+				}
+			}
+		}
+	}
 	m.running = true
 	m.revision = set.Revision
 	m.done = make(chan struct{})
@@ -318,6 +345,7 @@ func (m *Manager) Invalidate(revision string) {
 	} else {
 		m.job = nil
 		m.results = []Result{}
+		m.cached = nil
 	}
 	// Keep the old job revision until cleanup so Snapshot hides the stale results.
 	if !m.running {

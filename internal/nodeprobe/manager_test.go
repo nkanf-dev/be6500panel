@@ -204,3 +204,34 @@ func TestCloseDuringLeaseDoesNotDeadlock(t *testing.T) {
 		t.Fatal("close left admission live")
 	}
 }
+
+func TestSingleAndPageProbesRetainBoundedSameRevisionMeasurements(t *testing.T) {
+	m, _, _, _, _ := managerFixture(t, 300)
+	ids := make([]string, 256)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("node-%d", i)
+	}
+	if _, err := m.Start(context.Background(), StartInput{NodeIDs: ids, Revision: "rev-one"}); err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, m)
+	if _, err := m.Start(context.Background(), StartInput{NodeIDs: []string{"node-299"}, Revision: "rev-one"}); err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, m)
+	view := m.Snapshot()
+	if len(view.Results) != MaxNodes || view.Job.Total != 1 || view.Job.Completed != 1 || view.Results[0].NodeID != "node-299" || view.Results[1].NodeID != "node-0" || view.Results[1].DelayMS == nil {
+		t.Fatal("same revision evidence lost or unbounded")
+	}
+	if _, err := m.Start(context.Background(), StartInput{NodeIDs: []string{"node-0"}, Revision: "rev-one"}); err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, m)
+	seen := map[string]bool{}
+	for _, result := range m.Snapshot().Results {
+		if seen[result.NodeID] {
+			t.Fatal("duplicate cached observation")
+		}
+		seen[result.NodeID] = true
+	}
+}
