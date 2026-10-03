@@ -63,6 +63,8 @@ test.describe("maturity workflows · synthetic source fixture", () => {
     await expect(
       heatmap.getByRole("heading", { name: "设备活跃热力图", exact: true }),
     ).toBeVisible();
+    // EChart intentionally initializes only when its chart host enters the viewport.
+    await heatmap.locator(".viz-canvas").scrollIntoViewIfNeeded();
     await expect(heatmap.locator("canvas")).toHaveCount(1);
     await expect(
       diagnostic.getByRole("button", { name: "发起诊断测试", exact: true }),
