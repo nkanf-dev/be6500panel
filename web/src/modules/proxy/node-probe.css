@@ -1,0 +1,97 @@
+.node-probe-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.node-probe-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.node-probe-guidance,
+.node-probe-error {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.node-probe-progress,
+.node-probe-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.node-probe-progress {
+  font-size: 12px;
+}
+.node-probe-stop {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--card));
+}
+.node-probe-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+.node-probe-badge {
+  flex-shrink: 0;
+  min-width: 72px;
+  min-height: 32px;
+  margin-right: 8px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.node-probe-badge:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+}
+.node-probe-badge-unknown {
+  color: var(--muted-foreground);
+}
+.node-probe-badge-pending {
+  color: var(--primary);
+  animation: node-probe-pulse 1.4s ease-in-out infinite;
+}
+.node-probe-badge-fast {
+  color: var(--success, #16a34a);
+  background: color-mix(in srgb, var(--success, #16a34a) 10%, var(--card));
+}
+.node-probe-badge-medium {
+  color: var(--warning, #d97706);
+  background: color-mix(in srgb, var(--warning, #d97706) 10%, var(--card));
+}
+.node-probe-badge-slow {
+  color: color-mix(in srgb, var(--danger) 70%, var(--warning));
+  background: color-mix(in srgb, var(--danger) 10%, var(--card));
+}
+.node-probe-badge-failure {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--card));
+}
+.node-probe-tooltip {
+  max-width: min(420px, calc(100vw - 32px));
+  overflow-wrap: anywhere;
+}
+@keyframes node-probe-pulse {
+  50% {
+    filter: brightness(1.15);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .node-probe-badge-pending,
+  .node-probe-controls .spin,
+  .node-probe-badge .spin {
+    animation: none;
+  }
+}
+@media (max-width: 640px) {
+  .node-probe-actions > .button {
+    flex: 1 1 auto;
+  }
+  .node-probe-progress {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+}
