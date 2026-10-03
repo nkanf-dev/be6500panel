@@ -74,6 +74,14 @@ func TestProbeLeasePreservesLiveRuntimeAndPrivateBytes(t *testing.T) {
 	service := m.services[SingBox]
 	proc, disk, epoch, original := service.proc, service.disk, service.epoch, service.binary
 	m.mu.Unlock()
+	originalInfo, err := os.Lstat(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBytes, err := os.ReadFile(original)
+	if err != nil {
+		t.Fatal(err)
+	}
 	data := probeDataSnapshot(t, opts.DataDir)
 	calls := hooks.Load()
 	lease, err := m.AcquireProbeLease(context.Background(), func(context.Context) error {
@@ -88,7 +96,7 @@ func TestProbeLeasePreservesLiveRuntimeAndPrivateBytes(t *testing.T) {
 	}
 	defer lease.Release()
 	if !filepath.IsAbs(lease.Path()) || lease.Path() == original || filepath.Dir(filepath.Dir(lease.Path())) != m.opts.RunDir {
-		t.Fatal("lease is not a separate private runtime copy")
+		t.Fatal("lease is not a separate private runtime path")
 	}
 	body, err := os.ReadFile(lease.Path())
 	if err != nil || string(body) != fixture {
@@ -99,6 +107,21 @@ func TestProbeLeasePreservesLiveRuntimeAndPrivateBytes(t *testing.T) {
 		if err != nil || info.Mode().Perm() != 0700 {
 			t.Fatal("lease permissions are not private", err)
 		}
+	}
+	linkedInfo, err := os.Lstat(lease.Path())
+	if err != nil || !sameProbeFile(originalInfo, linkedInfo) {
+		t.Fatal("lease allocated another executable inode or changed artifact metadata", err)
+	}
+	// SameFile proves one backing inode, not an RSS or startup-memory bound.
+	if !os.SameFile(originalInfo, linkedInfo) {
+		t.Fatal("lease did not share the original executable inode")
+	}
+	fdInfo, err := lease.state.readOnly.Stat()
+	if err != nil || !sameProbeFile(originalInfo, fdInfo) {
+		t.Fatal("lease did not retain the opened executable inode", err)
+	}
+	if _, err := lease.state.readOnly.Write([]byte("not-writable")); err == nil {
+		t.Fatal("lease fd was not read-only")
 	}
 	for _, text := range []string{fmt.Sprint(lease), fmt.Sprintf("%+v", lease), fmt.Sprintf("%#v", lease)} {
 		if strings.Contains(text, opts.RunDir) || strings.Contains(text, lease.Path()) || strings.Contains(text, "good-private") {
@@ -115,12 +138,189 @@ func TestProbeLeasePreservesLiveRuntimeAndPrivateBytes(t *testing.T) {
 	if !unchanged || hooks.Load() != calls || !reflect.DeepEqual(data, probeDataSnapshot(t, opts.DataDir)) {
 		t.Fatal("lease changed process, private state, flash, or resource hooks")
 	}
-	// The probe job does not hold the shared lane after the bounded copy.
+	afterOriginal, err := os.Lstat(original)
+	if err != nil || !sameProbeFile(originalInfo, afterOriginal) {
+		t.Fatal("lease changed original artifact inode, size, mode, or mtime", err)
+	}
+	afterBytes, err := os.ReadFile(original)
+	if err != nil || !bytes.Equal(originalBytes, afterBytes) {
+		t.Fatal("lease changed original artifact bytes", err)
+	}
+	// The probe job does not hold the shared lane after the bounded hash.
 	_, done, err := m.begin(context.Background(), FRPC)
 	if err != nil {
 		t.Fatal("lease kept the mutation lane", err)
 	}
 	done()
+}
+
+func TestProbeLeaseZeroValueRelease(t *testing.T) {
+	var lease RuntimeProbeLease
+	lease.Release()
+	lease.Release()
+	if lease.Path() != "" {
+		t.Fatal("zero lease exposed a path")
+	}
+}
+
+func TestProbeLeasePreservesSharedModeAndReleaseOnlyOwnName(t *testing.T) {
+	m, opts := testManager(t, nil)
+	acquireFixture(t, m, opts, SingBox, fixture)
+	m.mu.Lock()
+	original := m.services[SingBox].binary
+	m.mu.Unlock()
+	// A valid executable need not be 0700. Chmodding the link to 0700 would
+	// silently change this same-inode active artifact, so exercise another mode.
+	if err := os.Chmod(original, 0500); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Lstat(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := m.AcquireProbeLease(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(lease.Release)
+	linked, err := os.Lstat(lease.Path())
+	if err != nil || !sameProbeFile(before, linked) || linked.Mode().Perm() != 0500 {
+		t.Fatal("lease changed shared executable permissions or inode", err)
+	}
+	lease.Release()
+	after, err := os.Lstat(original)
+	if err != nil || !sameProbeFile(before, after) {
+		t.Fatal("same-inode release removed or changed the active artifact", err)
+	}
+	body, err := os.ReadFile(original)
+	if err != nil || string(body) != fixture {
+		t.Fatal("release changed the active artifact bytes", err)
+	}
+	if _, err := lease.state.readOnly.Stat(); !errors.Is(err, os.ErrClosed) {
+		t.Fatal("release retained an unnecessary fd", err)
+	}
+	entries := probeRunEntries(t, opts)
+	if len(entries) != 1 || entries[0] != filepath.Base(original) {
+		t.Fatal("release left temporary files", entries)
+	}
+	m.mu.Lock()
+	occupied := m.probeLease != nil
+	m.mu.Unlock()
+	if occupied {
+		t.Fatal("release did not free the one-lease cap")
+	}
+}
+
+func TestProbeLeaseLinkFailureHasNoCopyFallback(t *testing.T) {
+	m, opts := testManager(t, nil)
+	acquireFixture(t, m, opts, SingBox, fixture)
+	m.mu.Lock()
+	original := m.services[SingBox].binary
+	m.mu.Unlock()
+	originalInfo, err := os.Lstat(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(opts.RunDir, ".probe-lease-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(dir) })
+	state := &probeLeaseState{manager: m, dir: dir, path: filepath.Join(dir, SingBox)}
+	state.dirInfo, err = os.Lstat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Existing name forces os.Link to fail. Neither copying nor chmodding an
+	// existing destination is permitted; the error must stay path-independent.
+	sentinel := []byte("other-owner-private-bytes")
+	if err := os.WriteFile(state.path, sentinel, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(state.path) })
+	before, err := os.Lstat(state.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := linkProbeOriginal(original, originalInfo, state); !errors.Is(err, ErrProbeLease) || err.Error() != ErrProbeLease.Error() {
+		t.Fatal("failed hard link did not return fixed public error", err)
+	}
+	if state.readOnly != nil || state.file != nil {
+		t.Fatal("failed link claimed an unowned file or fd")
+	}
+	if removeProbeLink(state) {
+		t.Fatal("failed link cleanup removed an unowned destination")
+	}
+	after, err := os.Lstat(state.path)
+	if err != nil || !sameProbeFile(before, after) {
+		t.Fatal("failed link changed destination inode, size, mode, or mtime", err)
+	}
+	body, err := os.ReadFile(state.path)
+	if err != nil || !bytes.Equal(body, sentinel) {
+		t.Fatal("failed link fell back to copying executable bytes", err)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 1 || entries[0].Name() != SingBox {
+		t.Fatal("failed link allocated temporary files", err)
+	}
+	if err := os.Remove(state.path); err != nil {
+		t.Fatal(err)
+	}
+	// A missing source also creates nothing and permits empty owned-dir cleanup.
+	if err := linkProbeOriginal(filepath.Join(opts.RunDir, "missing-private-source"), originalInfo, state); !errors.Is(err, ErrProbeLease) {
+		t.Fatal("missing-source hard link was accepted", err)
+	}
+	if !removeProbeLink(state) {
+		t.Fatal("failed link leaked its empty owned directory")
+	}
+	afterOriginal, err := os.Lstat(original)
+	if err != nil || !sameProbeFile(originalInfo, afterOriginal) {
+		t.Fatal("failed link changed original artifact", err)
+	}
+}
+
+func TestProbeLeaseReleaseRefusesReplacedOwnedPath(t *testing.T) {
+	m, opts := testManager(t, nil)
+	acquireFixture(t, m, opts, SingBox, fixture)
+	lease, err := m.AcquireProbeLease(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(lease.Path()); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := []byte("unowned-replacement")
+	if err := os.WriteFile(lease.Path(), sentinel, 0600); err != nil {
+		t.Fatal(err)
+	}
+	lease.Release()
+	body, err := os.ReadFile(lease.Path())
+	if err != nil || !bytes.Equal(body, sentinel) {
+		t.Fatal("release removed another owner's replacement", err)
+	}
+	m.mu.Lock()
+	retained := m.probeLease == lease.state
+	m.mu.Unlock()
+	if !retained {
+		t.Fatal("failed release freed the owned-inode cap")
+	}
+	if _, err := lease.state.readOnly.Stat(); err != nil {
+		t.Fatal("failed release lost its retained inode fd", err)
+	}
+	if _, err := m.AcquireProbeLease(context.Background(), nil); !errors.Is(err, ErrBusy) {
+		t.Fatal("failed release permitted another owned inode", err)
+	}
+	// Test owns the adversarial replacement; remove only that fixture and close
+	// the deliberately retained fd. sync.Once must not retry unowned deletion.
+	if err := os.Remove(lease.Path()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Dir(lease.Path())); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.state.readOnly.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lease.Release()
 }
 
 func TestProbeLeaseGzipUsesVerifiedUncompressedProvenance(t *testing.T) {
@@ -258,6 +458,12 @@ func TestProbeLeaseRejectsUntrustedAndUnsafeOriginals(t *testing.T) {
 			if !reflect.DeepEqual(entries, probeRunEntries(t, opts)) || !reflect.DeepEqual(data, probeDataSnapshot(t, opts.DataDir)) || !reflect.DeepEqual(before, after) || hooks.Load() != 0 {
 				t.Fatal("rejected lease wrote files/state or ran hooks")
 			}
+			m.mu.Lock()
+			occupied := m.probeLease != nil
+			m.mu.Unlock()
+			if occupied {
+				t.Fatal("rejected lease occupied the one-lease cap")
+			}
 		})
 	}
 }
@@ -303,15 +509,28 @@ func TestProbeLeaseAdmissionRejectsWithoutWork(t *testing.T) {
 func TestProbeLeaseFrozenAcrossReplacementAndReleaseCap(t *testing.T) {
 	m, opts := testManager(t, nil)
 	acquireFixture(t, m, opts, SingBox, fixture)
+	accepted(t, m, SingBox, "good-private-config", 0)
+	if _, err := m.Start(context.Background(), SingBox); err != nil {
+		t.Fatal(err)
+	}
 	m.mu.Lock()
 	original := m.services[SingBox].binary
+	originalSHA := m.services[SingBox].binarySHA256
 	m.mu.Unlock()
+	originalInfo, err := os.Lstat(original)
+	if err != nil {
+		t.Fatal(err)
+	}
 	lease, err := m.AcquireProbeLease(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(lease.Release)
 	copyOfLease := lease
+	linkedInfo, err := os.Lstat(lease.Path())
+	if err != nil || !os.SameFile(originalInfo, linkedInfo) {
+		t.Fatal("lease was not a hard link to the active artifact", err)
+	}
 	entries := probeRunEntries(t, opts)
 	if _, err := m.AcquireProbeLease(context.Background(), nil); !errors.Is(err, ErrBusy) {
 		t.Fatal("second lease exceeded RAM cap", err)
@@ -330,7 +549,23 @@ func TestProbeLeaseFrozenAcrossReplacementAndReleaseCap(t *testing.T) {
 	}
 	m.mu.Lock()
 	current := m.services[SingBox].binary
+	currentSHA := m.services[SingBox].binarySHA256
 	m.mu.Unlock()
+	currentInfo, err := os.Lstat(current)
+	if err != nil || current == original || os.SameFile(originalInfo, currentInfo) {
+		t.Fatal("manager replacement did not publish a fresh executable inode", err)
+	}
+	if originalSHA != sha256.Sum256([]byte(fixture)) || currentSHA != sha256.Sum256([]byte(newBody)) {
+		t.Fatal("manager replacement did not retain verified binary provenance")
+	}
+	linkedInfo, err = os.Lstat(lease.Path())
+	if err != nil || !sameProbeFile(originalInfo, linkedInfo) {
+		t.Fatal("manager wrote or chmodded the published leased inode", err)
+	}
+	fdBytes := make([]byte, len(fixture))
+	if n, err := lease.state.readOnly.ReadAt(fdBytes, 0); err != nil || n != len(fdBytes) || string(fdBytes) != fixture {
+		t.Fatal("leased fd lost old bytes after manager unlink", n, err)
+	}
 	sentinel := filepath.Join(opts.RunDir, "unrelated-private-file")
 	if err := os.WriteFile(sentinel, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
@@ -341,6 +576,9 @@ func TestProbeLeaseFrozenAcrossReplacementAndReleaseCap(t *testing.T) {
 		go func() { defer wg.Done(); copyOfLease.Release() }()
 	}
 	wg.Wait()
+	if _, err := lease.state.readOnly.Stat(); !errors.Is(err, os.ErrClosed) {
+		t.Fatal("release did not close the retained fd", err)
+	}
 	for _, path := range []string{lease.Path(), filepath.Dir(lease.Path())} {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatal("release did not remove own lease", err)
@@ -444,7 +682,7 @@ func TestProbeLeaseRecoveryRestoresDigestAndCloseClearsProvenance(t *testing.T) 
 	if !cleared {
 		t.Fatal("closed binary retained provenance")
 	}
-	// Caller owns release; runtime Close must not delete a still-owned copy.
+	// Caller owns release; runtime Close must not delete a still-owned link.
 	if _, err := os.Lstat(lease.Path()); err != nil {
 		t.Fatal("runtime closed caller-owned lease", err)
 	}

@@ -15,10 +15,18 @@ import (
 // private executable path, configuration, or process arguments to callers.
 var ErrProbeLease = errors.New("verified probe executable is unavailable")
 
-// RuntimeProbeLease owns a frozen, checksum-verified sing-box executable copy
-// in the manager's private RAM RunDir. Path is private process input, not a
-// public API field: callers must never serialize or log it. A copied lease
-// shares the same release ownership. Its zero value is safe to release.
+// RuntimeProbeLease owns a checksum-verified hard link to the sing-box
+// executable in the manager's private RAM RunDir. Path is private process
+// input, not a public API field: callers must never serialize or log it. A
+// copied lease value shares release ownership. Its zero value is safe to release.
+//
+// Frozen means lifetime against manager replacement/unlink: acquireArtifact
+// creates a fresh inode, and the manager never writes or chmods a published
+// executable. The link adds no executable copy. It is not an OS content seal:
+// an external privileged writer can change bytes shared with the active core.
+// Unlike a private copy, an accidental external write through either name
+// affects both. Such writes are outside this contract, as they were for the copy.
+// Saving file pages does not bound a temporary core's RSS or startup peak.
 //
 // The probe owner must stop and reap every process using Path before Release.
 // Root must close that owner before closing the runtime manager. The manager
@@ -31,12 +39,13 @@ type RuntimeProbeLease struct {
 }
 
 type probeLeaseState struct {
-	once    sync.Once
-	manager *Manager
-	path    string
-	dir     string
-	file    os.FileInfo
-	dirInfo os.FileInfo
+	once     sync.Once
+	manager  *Manager
+	path     string
+	dir      string
+	file     os.FileInfo
+	dirInfo  os.FileInfo
+	readOnly *os.File // held until Release, or while failed removal keeps the cap
 }
 
 // Path returns an absolute private executable path valid until Release. It is
@@ -51,19 +60,21 @@ func (l RuntimeProbeLease) Path() string {
 func (RuntimeProbeLease) String() string   { return "RuntimeProbeLease{private}" }
 func (RuntimeProbeLease) GoString() string { return "RuntimeProbeLease{private}" }
 
-// Release removes only this lease's copy, not the active artifact or another
-// job's files. It is safe for concurrent calls and copied lease values. If the
-// owned file cannot be removed, keep the cap occupied rather than permit RAM
-// growth. Release does not acquire the runtime mutation lane or change status.
+// Release removes only this lease's link and directory, not the active
+// artifact's name or another job's files. It is safe for concurrent calls and
+// copied lease values. If removal fails, keep the fd and cap occupied rather
+// than permit owned-inode growth. Release does not acquire the runtime mutation
+// lane or change status.
 func (l RuntimeProbeLease) Release() {
 	if l.state == nil {
 		return
 	}
 	s := l.state
 	s.once.Do(func() {
-		if !removeProbeCopy(s) {
+		if !removeProbeLink(s) {
 			return
 		}
+		_ = s.readOnly.Close()
 		s.manager.mu.Lock()
 		if s.manager.probeLease == s {
 			s.manager.probeLease = nil
@@ -74,7 +85,7 @@ func (l RuntimeProbeLease) Release() {
 
 // AcquireProbeLease is fixed to sing-box. Admission and the caller's read-only
 // guard run before filesystem work. The shared lane covers only this bounded
-// checksum/copy, never the caller's probe job. Guard errors must be safe public
+// link/checksum, never the caller's probe job. Guard errors must be safe public
 // errors, just as for the other Guarded manager methods.
 func (m *Manager) AcquireProbeLease(ctx context.Context, guard func(context.Context) error) (RuntimeProbeLease, error) {
 	ctx, done, err := m.begin(ctx, SingBox)
@@ -107,9 +118,8 @@ func (m *Manager) AcquireProbeLease(ctx context.Context, guard func(context.Cont
 	if err := ctx.Err(); err != nil {
 		return RuntimeProbeLease{}, err
 	}
-	if err := checkRunSpace(m.opts); err != nil {
-		return RuntimeProbeLease{}, ErrProbeLease
-	}
+	// No second executable is allocated, so the artifact-copy capacity check
+	// does not apply. Directory/link allocation failures still fail closed.
 	dir, err := os.MkdirTemp(m.opts.RunDir, ".probe-lease-*")
 	if err != nil {
 		return RuntimeProbeLease{}, ErrProbeLease
@@ -118,38 +128,30 @@ func (m *Manager) AcquireProbeLease(ctx context.Context, guard func(context.Cont
 	published := false
 	defer func() {
 		if !published {
-			// No other files are owned here; never recursively remove this tree.
-			_ = os.Remove(state.path)
-			_ = os.Remove(dir)
+			// Only remove the link/directory identities we created. No recursion.
+			_ = removeProbeLink(state)
+			if state.readOnly != nil {
+				_ = state.readOnly.Close()
+			}
 		}
 	}()
 	state.dirInfo, err = os.Lstat(dir)
 	if err != nil || !state.dirInfo.IsDir() || state.dirInfo.Mode().Perm() != 0700 || !privateProbeRoot(m.opts.RunDir) {
 		return RuntimeProbeLease{}, ErrProbeLease
 	}
-	output, err := os.OpenFile(state.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0700)
-	if err != nil {
-		return RuntimeProbeLease{}, ErrProbeLease
+	if err := linkProbeOriginal(binary, original, state); err != nil {
+		return RuntimeProbeLease{}, err
 	}
-	defer output.Close()
-	if err := output.Chmod(0700); err != nil {
-		return RuntimeProbeLease{}, ErrProbeLease
-	}
+	// Hash the opened linked inode, not the original pathname. Never chmod a
+	// hard link: its mode belongs to the same inode as the active executable.
 	digest := sha256.New()
-	n, err := copyProbeBytes(ctx, io.MultiWriter(output, digest), source, m.opts.MaxUncompressedBytes)
+	n, err := copyProbeBytes(ctx, digest, state.readOnly, m.opts.MaxUncompressedBytes)
 	if err != nil {
 		return RuntimeProbeLease{}, probeCopyError(ctx, err)
 	}
 	var got [sha256.Size]byte
 	copy(got[:], digest.Sum(nil))
-	if n != original.Size() || got != want || !probeOriginalUnchanged(source, original, binary, m.opts) {
-		return RuntimeProbeLease{}, ErrProbeLease
-	}
-	state.file, err = output.Stat()
-	if err != nil || !state.file.Mode().IsRegular() || state.file.Mode().Perm() != 0700 || state.file.Size() != n {
-		return RuntimeProbeLease{}, ErrProbeLease
-	}
-	if err := output.Close(); err != nil {
+	if n != original.Size() || got != want || !probeLinkUnchanged(state) || !probeOriginalUnchanged(source, original, binary, m.opts) {
 		return RuntimeProbeLease{}, ErrProbeLease
 	}
 	if err := ctx.Err(); err != nil {
@@ -164,6 +166,44 @@ func (m *Manager) AcquireProbeLease(ctx context.Context, guard func(context.Cont
 	m.mu.Unlock()
 	published = true
 	return RuntimeProbeLease{state: state}, nil
+}
+
+// linkProbeOriginal creates only the exact lease name. Any link failure,
+// including EXDEV, fails closed; there is no executable-copy fallback.
+func linkProbeOriginal(binary string, original os.FileInfo, state *probeLeaseState) error {
+	if err := os.Link(binary, state.path); err != nil {
+		return ErrProbeLease
+	}
+	// Record the name we created for failure cleanup before opening it.
+	var err error
+	state.file, err = os.Lstat(state.path)
+	if err != nil || !sameProbeFile(original, state.file) {
+		return ErrProbeLease
+	}
+	state.readOnly, err = os.OpenFile(state.path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return ErrProbeLease
+	}
+	opened, err := state.readOnly.Stat()
+	if err != nil || !sameProbeFile(original, opened) {
+		return ErrProbeLease
+	}
+	return nil
+}
+
+// Read back the fd, exact path and private directory identities after hashing.
+// The original fd/path/root are rechecked separately before publication.
+func probeLinkUnchanged(state *probeLeaseState) bool {
+	opened, err := state.readOnly.Stat()
+	if err != nil || !sameProbeFile(state.file, opened) {
+		return false
+	}
+	current, err := os.Lstat(state.path)
+	if err != nil || !sameProbeFile(state.file, current) {
+		return false
+	}
+	dir, err := os.Lstat(state.dir)
+	return err == nil && dir.IsDir() && dir.Mode().Perm() == 0700 && os.SameFile(state.dirInfo, dir)
 }
 
 // verifiedArtifactDigest is used only immediately after acquireArtifact has
@@ -294,19 +334,19 @@ func probeCopyError(ctx context.Context, err error) error {
 	return ErrProbeLease
 }
 
-func removeProbeCopy(s *probeLeaseState) bool {
+func removeProbeLink(s *probeLeaseState) bool {
 	// Refuse replaced directories and files rather than delete another owner's
 	// contents. os.Remove, unlike RemoveAll, cannot recurse into unknown files.
 	dir, err := os.Lstat(s.dir)
 	if os.IsNotExist(err) {
 		return true
 	}
-	if err != nil || !dir.IsDir() || !os.SameFile(s.dirInfo, dir) {
+	if err != nil || !dir.IsDir() || s.dirInfo == nil || !os.SameFile(s.dirInfo, dir) {
 		return false
 	}
 	file, err := os.Lstat(s.path)
 	if err == nil {
-		if !file.Mode().IsRegular() || !os.SameFile(s.file, file) || os.Remove(s.path) != nil {
+		if s.file == nil || !os.SameFile(s.file, file) || os.Remove(s.path) != nil {
 			return false
 		}
 	} else if !os.IsNotExist(err) {
