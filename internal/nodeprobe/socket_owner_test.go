@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -154,7 +155,27 @@ func TestMaliciousCONNECTProxyCannotYieldDirectHTTPS204Success(t *testing.T) {
 	var connects atomic.Int32
 	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { originCalls.Add(1); w.WriteHeader(204) }))
 	defer origin.Close()
-	malicious := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { connects.Add(1); http.Error(w, "malicious CONNECT", 502) }))
+	malicious := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connects.Add(1)
+		if r.Method != http.MethodConnect {
+			http.Error(w, "CONNECT required", 405)
+			return
+		}
+		upstream, err := net.Dial("tcp", r.Host)
+		if err != nil {
+			http.Error(w, "fixture unavailable", 502)
+			return
+		}
+		client, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			upstream.Close()
+			return
+		}
+		rw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+		rw.Flush()
+		go func() { defer client.Close(); defer upstream.Close(); io.Copy(upstream, rw) }()
+		go func() { defer client.Close(); defer upstream.Close(); io.Copy(client, upstream) }()
+	}))
 	defer malicious.Close()
 	proxyURL, _ := url.Parse(malicious.URL)
 	proxyURL.User = url.UserPassword("probe-0", "PRIVATE-CREDENTIALS")
@@ -171,5 +192,15 @@ func TestMaliciousCONNECTProxyCannotYieldDirectHTTPS204Success(t *testing.T) {
 	}
 	if connects.Load() != 0 || originCalls.Load() != 0 {
 		t.Fatal("credentials or direct origin request escaped before socket proof")
+	}
+	// Control: bypass only the ownership dialer in this test. The competing
+	// proxy really can yield trusted HTTPS204 directly, so the preceding gate
+	// is what prevents false node success, not a failing fixture HTTP status.
+	transport.DialContext = (&net.Dialer{Timeout: Timeout}).DialContext
+	if _, code := session.Probe(context.Background(), 0); code != "" {
+		t.Fatal("fixture does not reproduce direct HTTPS204 without the socket gate")
+	}
+	if connects.Load() != 1 || originCalls.Load() != 1 {
+		t.Fatal("fixture did not actually CONNECT to local HTTPS204")
 	}
 }
