@@ -229,7 +229,7 @@ func installedState(name string, names map[string]bool, err error) string {
 	return "absent"
 }
 func protectedService(name string) bool {
-	return name == "rescue" || name == "be6500-rescue" || name == "be6500panel" || name == "dropbear"
+	return name == "rescue" || name == "be6500-rescue" || name == "be6500panel" || name == "dropbear" || name == "network" || name == "wifi" || name == "firewall"
 }
 func (o *ServiceObserver) rootPath(path string, resolveLeaf bool) (string, error) {
 	full := filepath.Join(o.adapter.root, filepath.FromSlash(strings.TrimPrefix(path, "/")))

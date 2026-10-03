@@ -409,3 +409,16 @@ func TestServiceBareCommandRequiresUniqueResolvedIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestServiceManagementDependenciesAreProtected(t *testing.T) {
+	for _, name := range []string{"be6500-rescue", "dropbear", "be6500panel", "network", "wifi", "firewall"} {
+		if !protectedService(name) {
+			t.Fatalf("%s lacks protected tag", name)
+		}
+	}
+	for _, name := range []string{"ddns", "dnsmasq", "trafficd"} {
+		if protectedService(name) {
+			t.Fatalf("%s incorrectly tagged protected", name)
+		}
+	}
+}
