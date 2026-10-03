@@ -24,6 +24,8 @@ import {
 } from "../components/configuration";
 import { LogsPanel } from "./logs";
 import { useEffect, useState } from "react";
+import { ServiceStatusPanel } from "./service-status-panel";
+import { MaintenanceBackupPanel } from "../components/maintenance";
 
 export function SystemPage() {
   const { system, systemError, connection, capabilities, refresh, refreshing } =
@@ -53,6 +55,8 @@ export function SystemPage() {
           {[
             { id: "resources", label: "系统资源", icon: Cpu },
             { id: "diagnostics", label: "诊断与日志", icon: FileText },
+            { id: "services", label: "服务管理", icon: Terminal },
+            { id: "backup", label: "备份与导入", icon: FileText },
             { id: "configuration", label: "系统配置", icon: Terminal },
             { id: "management", label: "SSH 配置", icon: Terminal },
             { id: "changes", label: "配置变更", icon: FileText },
@@ -76,7 +80,11 @@ export function SystemPage() {
       {systemError !== undefined && (
         <ErrorState message={errorMessage(systemError)} onRetry={refresh} />
       )}
-      {tab === "configuration" ? (
+      {tab === "backup" ? (
+        <MaintenanceBackupPanel onOpenConfiguration={() => setTab("changes")} />
+      ) : tab === "services" ? (
+        <ServiceStatusPanel />
+      ) : tab === "configuration" ? (
         <ConfigurationEditor module="system" />
       ) : tab === "management" ? (
         <ConfigurationEditor module="dropbear" />
@@ -92,7 +100,9 @@ export function SystemPage() {
                   subtitle="最近一次系统快照"
                   action={
                     <Badge tone={connection === "live" ? "success" : "warning"}>
-                      {connection === "live" ? "实时" : strings.dashboard.states.previous}
+                      {connection === "live"
+                        ? "实时"
+                        : strings.dashboard.states.previous}
                     </Badge>
                   }
                 />
@@ -245,7 +255,9 @@ export function SystemPage() {
                             ) : (
                               <Circle size={13} />
                             )}
-                            {capability.supported ? "支持" : strings.dashboard.states.unavailable}
+                            {capability.supported
+                              ? "支持"
+                              : strings.dashboard.states.unavailable}
                           </span>
                         </td>
                         <td className="text-muted wrap">
