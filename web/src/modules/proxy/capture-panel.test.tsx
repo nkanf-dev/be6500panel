@@ -858,4 +858,34 @@ describe("device observation failures", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(mutations("POST")).toHaveLength(1);
   });
+  it("explains failed off persistence on reopen without hiding pending cleanup or starting capture", async () => {
+    const fixture = setup({
+      capture: {
+        ...initialCapture,
+        desired: false,
+        active: false,
+        clients: [
+          { mac: second.mac, ip: second.ip, hostname: second.hostname },
+        ],
+        error: "capture_disable_not_persisted",
+        cleanupPending: true,
+        state: "cleanup-pending",
+      },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByText(/磁盘上的旧启用设置可能仍在/),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText(/保存成功前不要重启面板或路由器/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/不能视为已撤回/)).toBeInTheDocument();
+    expect(
+      fixture.fetch.mock.calls.every(([, init]) => init.method === "GET"),
+    ).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "审阅客户端接管" }),
+    ).toBeDisabled();
+  });
 });

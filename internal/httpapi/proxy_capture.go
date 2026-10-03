@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 
 	"be6500panel/internal/capture"
 	"be6500panel/internal/proxy"
@@ -26,16 +27,29 @@ func (s *Server) proxyCapture(w http.ResponseWriter, r *http.Request) {
 			status, err = s.capture.Reconcile(r.Context())
 		}
 		if err != nil {
-			s.logger.Warn("Capture state needs recovery", "code", "capture_reconcile_failed", "module", "proxy")
+			code := status.Error
+			if !strings.HasPrefix(code, "capture_") || len(code) > 80 {
+				code = "capture_observation_failed"
+			}
+			s.logger.Warn("Capture verification requires attention", "code", code, "module", "proxy")
 		}
 		writeJSON(w, 200, status)
 		return
 	}
 	if r.Method == http.MethodDelete {
 		if err := s.capture.Disable(r.Context()); err != nil {
-			fail(w, 500, "cleanup_failed", "接管规则撤回失败")
+			status := s.capture.Status()
+			code, message := "cleanup_failed", "接管清理尚未完成，请重试撤回并检查当前状态"
+			if status.Error == "capture_disable_not_persisted" {
+				code, message = status.Error, "已停止自动恢复接管，但关闭状态尚未保存；请重试撤回。保存成功前不要重启面板或路由器。"
+			}
+			writeJSON(w, 500, struct {
+				Error   apiError       `json:"error"`
+				Capture capture.Status `json:"capture"`
+			}{apiError{Code: code, Message: message}, status})
 			return
 		}
+		s.logger.Info("Selected-device capture withdrawn", "code", "capture_disabled", "module", "proxy")
 		writeJSON(w, 200, s.capture.Status())
 		return
 	}

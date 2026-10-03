@@ -328,7 +328,9 @@ export function CapturePanel({
             message={
               capture.error === "capture_devices_pending"
                 ? "部分已选设备尚未解析到当前 LAN 地址；未解析设备不会接管，也不会使用过期 IP。 · capture_devices_pending"
-                : capture.error
+                : capture.error === "capture_disable_not_persisted"
+                  ? "已停止自动恢复接管，但关闭状态尚未保存。请重试禁用；保存成功前不要重启面板或路由器，磁盘上的旧启用设置可能仍在。"
+                  : capture.error
             }
           />
         )}
