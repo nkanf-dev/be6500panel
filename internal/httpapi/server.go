@@ -50,35 +50,36 @@ type Config struct {
 	StorageAdmission  storage.Admission
 }
 type Server struct {
-	system            *modules.System
-	network           modules.Network
-	sampler           *core.Sampler
-	registry          *core.Registry
-	coordinator       *core.Coordinator
-	auth              *auth
-	heartbeat         time.Duration
-	logger            *slog.Logger
-	logs              *core.LogBuffer
-	static            http.Handler
-	ctx               context.Context
-	cancel            context.CancelFunc
-	closeOnce         sync.Once
-	router            *router.Adapter
-	runtime           *managedruntime.Manager
-	control           *control.Manager
-	dataDir           string
-	proxyState        *proxyState
-	capture           *capture.Controller
-	traffic           *traffic.Collector
-	trafficError      string
-	telemetry         *telemetry.Collector
-	deviceTelemetry   *devicetelemetry.Collector
-	requestTraces     *requesttrace.Collector
-	services          *router.ServiceObserver
-	deviceAnnotations http.Handler
-	maintenance       *maintenance.Service
-	storageAdmission  storage.Admission
-	desiredMu         sync.Mutex
+	system                *modules.System
+	network               modules.Network
+	sampler               *core.Sampler
+	registry              *core.Registry
+	coordinator           *core.Coordinator
+	auth                  *auth
+	heartbeat             time.Duration
+	logger                *slog.Logger
+	logs                  *core.LogBuffer
+	static                http.Handler
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	closeOnce             sync.Once
+	router                *router.Adapter
+	runtime               *managedruntime.Manager
+	control               *control.Manager
+	dataDir               string
+	proxyState            *proxyState
+	capture               *capture.Controller
+	traffic               *traffic.Collector
+	trafficError          string
+	telemetry             *telemetry.Collector
+	deviceTelemetry       *devicetelemetry.Collector
+	requestTraces         *requesttrace.Collector
+	services              *router.ServiceObserver
+	deviceAnnotations     http.Handler
+	deviceAnnotationStore *deviceannotations.Store
+	maintenance           *maintenance.Service
+	storageAdmission      storage.Admission
+	desiredMu             sync.Mutex
 }
 
 func New(cfg Config) (*Server, error) {
@@ -99,7 +100,7 @@ func New(cfg Config) (*Server, error) {
 		cfg.Logger = slog.New(core.NewRingHandler(slog.Default().Handler(), cfg.Logs))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, traffic: cfg.Traffic, trafficError: cfg.TrafficError, telemetry: cfg.Telemetry, deviceTelemetry: cfg.DeviceTelemetry, requestTraces: cfg.RequestTraces, services: cfg.Services, deviceAnnotations: DeviceAnnotationsHandler(cfg.DeviceAnnotations), maintenance: cfg.Maintenance, storageAdmission: cfg.StorageAdmission, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel}, nil
+	return &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, traffic: cfg.Traffic, trafficError: cfg.TrafficError, telemetry: cfg.Telemetry, deviceTelemetry: cfg.DeviceTelemetry, requestTraces: cfg.RequestTraces, services: cfg.Services, deviceAnnotations: DeviceAnnotationsHandler(cfg.DeviceAnnotations), deviceAnnotationStore: cfg.DeviceAnnotations, maintenance: cfg.Maintenance, storageAdmission: cfg.StorageAdmission, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel}, nil
 }
 func (s *Server) Close() {
 	s.closeOnce.Do(func() {
@@ -149,7 +150,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case DeviceAnnotationsPath:
 		s.deviceAnnotations.ServeHTTP(w, r)
 	case "/api/devices/activity":
-		DeviceActivity(w, r, s.deviceTelemetry)
+		DeviceActivityWithAnnotations(w, r, s.deviceTelemetry, s.deviceAnnotationStore)
 	case "/api/proxy/request-traces":
 		HandleRequestTraces(w, r, s.requestTraces)
 	case "/api/system/services":

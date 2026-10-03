@@ -2,6 +2,7 @@ package devicetelemetry
 
 import (
 	"context"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -24,6 +25,21 @@ func ValidateQuery(name string, maxPoints, limit int, search string) error {
 // Groups summarize every matched device before the returned top-row limit.
 // Gaps serialize as null bytes, measured zero bytes retain real coverage.
 func (c *Collector) Query(ctx context.Context, name string, maxPoints, limit int, search string) (History, error) {
+	return c.QueryWithSearchText(ctx, name, maxPoints, limit, search, nil)
+}
+
+// QueryWithSearchText augments identity/source matching with bounded caller-owned
+// labels. It does not mutate observations or return the extra search text. The
+// caller snapshots annotations before the collector lock; no callback runs here.
+func (c *Collector) QueryWithSearchText(ctx context.Context, name string, maxPoints, limit int, search string, additional map[string]string) (History, error) {
+	if len(additional) > 256 {
+		return History{}, ErrQuery
+	}
+	for id, text := range additional {
+		if len(id) != 17 || len(text) > 8192 || !utf8.ValidString(text) {
+			return History{}, ErrQuery
+		}
+	}
 	if err := ValidateQuery(name, maxPoints, limit, search); err != nil {
 		return History{}, err
 	}
@@ -73,6 +89,10 @@ func (c *Collector) Query(ctx context.Context, name string, maxPoints, limit int
 	}
 	groups := map[string]*Group{}
 	search = strings.ToLower(strings.TrimSpace(search))
+	exactMAC := ""
+	if parsed, err := net.ParseMAC(search); err == nil && len(parsed) == 6 {
+		exactMAC = strings.ToUpper(parsed.String())
+	}
 	for id, d := range c.devices {
 		if err := ctx.Err(); err != nil {
 			return History{}, err
@@ -87,8 +107,12 @@ func (c *Collector) Query(ctx context.Context, name string, maxPoints, limit int
 			addresses = append(addresses, counter.Address)
 		}
 		sort.Strings(addresses)
-		text := strings.ToLower(id + " " + o.Name + " " + o.Interface + " " + strings.Join(addresses, " "))
-		if search != "" && !strings.Contains(text, search) {
+		text := strings.ToLower(id + " " + o.Name + " " + o.Interface + " " + strings.Join(addresses, " ") + " " + additional[strings.ToUpper(id)])
+		if exactMAC != "" {
+			if strings.ToUpper(id) != exactMAC {
+				continue
+			}
+		} else if search != "" && !strings.Contains(text, search) {
 			continue
 		}
 		h.MatchedCount++
