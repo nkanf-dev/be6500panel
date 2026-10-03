@@ -278,6 +278,18 @@ export const ProxyCaptureSchema = Schema.Struct({
   error: Schema.optional(Schema.String),
   state: Schema.optional(Schema.String),
   cleanupPending: Schema.optional(Schema.Boolean),
+  scopeState: Schema.optional(
+    Schema.Literal("current", "changed", "unresolved"),
+  ),
+  installedClients: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        mac: Schema.String,
+        ip: Schema.String,
+        hostname: Schema.String,
+      }),
+    ),
+  ),
   clientIPv4: Schema.optional(Schema.String),
   clientIPv6: Schema.optional(Schema.String),
   commands: Schema.Number,

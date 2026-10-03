@@ -104,17 +104,19 @@ export function CapturePanel({
       : "状态未知"
     : capture.cleanupPending
       ? strings.states.cleaningPending
-      : capture.active && capture.state === "partial"
-        ? strings.states.partialActive
-        : capture.error
-          ? "接管异常"
-          : capture.active
-            ? strings.states.active
-            : desired
-              ? "已暂停"
-              : retained
-                ? "已停用（选择保留）"
-                : strings.states.notCaptured;
+      : capture.state === "scope-changed"
+        ? "旧规则范围仍生效"
+        : capture.active && capture.state === "partial"
+          ? strings.states.partialActive
+          : capture.error
+            ? "接管异常"
+            : capture.active
+              ? strings.states.active
+              : desired
+                ? "已暂停"
+                : retained
+                  ? "已停用（选择保留）"
+                  : strings.states.notCaptured;
 
   useEffect(() => {
     setConfirming(undefined);
@@ -273,7 +275,9 @@ export function CapturePanel({
                   ? " · 实时规则已生效"
                   : !client.ip
                     ? " · 等待当前地址"
-                    : " · 实时接管未生效"}
+                    : capture?.state === "scope-changed"
+                      ? " · 当前期望范围尚未核验，旧规则范围见下方"
+                      : " · 实时接管未生效"}
               </li>
             ))}
           </ul>
@@ -295,14 +299,39 @@ export function CapturePanel({
           实时接管：
           {capture?.active &&
           !capture.cleanupPending &&
-          capture.state === "partial"
-            ? "仅已解析设备的接管规则已生效；其余设备等待当前地址（不代表互联网连通性已验证）"
-            : capture?.active && !capture.cleanupPending && !capture.error
-              ? "接管规则已生效（不代表互联网连通性已验证）"
-              : capture
-                ? "未确认生效"
-                : "状态未知"}
+          capture.state === "scope-changed"
+            ? "旧规则范围已通过核验，当前期望范围已变化或暂时无法解析；规则并未因刷新而撤回。"
+            : capture?.active &&
+                !capture.cleanupPending &&
+                capture.state === "partial"
+              ? "仅已解析设备的接管规则已生效；其余设备等待当前地址（不代表互联网连通性已验证）"
+              : capture?.active && !capture.cleanupPending && !capture.error
+                ? "接管规则已生效（不代表互联网连通性已验证）"
+                : capture
+                  ? "未确认生效"
+                  : "状态未知"}
         </p>
+        {capture?.state === "scope-changed" &&
+        capture.installedClients?.length ? (
+          <section
+            aria-label="已核验的旧规则范围"
+            className="configuration-inline-warning"
+          >
+            <h3>已核验的旧规则范围</h3>
+            <p>
+              这些是已安装规则的准确 IP /
+              MAC，不是当前设备地址。可先撤回接管，再审阅并应用新的设备范围；不要把地址变化当作规则已停用。
+            </p>
+            <ul>
+              {capture.installedClients.map((client) => (
+                <li key={`${client.mac}-${client.ip}`}>
+                  <span className="mono">{client.mac || "旧版 IP 范围"}</span> ·{" "}
+                  <span className="mono">{client.ip}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         {capture && (
           <details>
             <summary>高级诊断</summary>
@@ -330,7 +359,11 @@ export function CapturePanel({
                 ? "部分已选设备尚未解析到当前 LAN 地址；未解析设备不会接管，也不会使用过期 IP。 · capture_devices_pending"
                 : capture.error === "capture_disable_not_persisted"
                   ? "已停止自动恢复接管，但关闭状态尚未保存。请重试禁用；保存成功前不要重启面板或路由器，磁盘上的旧启用设置可能仍在。"
-                  : capture.error
+                  : capture.error === "capture_scope_changed_apply_required"
+                    ? "当前设备地址或端点范围已变化；旧规则可能仍在，请先撤回接管后再审阅应用。"
+                    : capture.error === "capture_endpoint_unresolved"
+                      ? "当前节点端点暂时无法解析。旧规则范围单独核验，不会把一次解析失败视为规则已撤回。"
+                      : capture.error
             }
           />
         )}

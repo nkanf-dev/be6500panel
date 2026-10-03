@@ -888,4 +888,35 @@ describe("device observation failures", () => {
       screen.getByRole("button", { name: "审阅客户端接管" }),
     ).toBeDisabled();
   });
+  it("keeps current desired IP separate from verified old installed rules when scope changes", async () => {
+    setup({
+      capture: {
+        ...initialCapture,
+        desired: true,
+        active: true,
+        state: "scope-changed",
+        scopeState: "changed",
+        commands: 38,
+        cleanupPending: false,
+        error: "capture_scope_changed_apply_required",
+        clients: [
+          { mac: second.mac, ip: "192.0.2.31", hostname: second.hostname },
+        ],
+        installedClients: [{ mac: second.mac, ip: "192.0.2.21", hostname: "" }],
+      },
+    });
+    await waitFor(() =>
+      expect(screen.getByText("旧规则范围仍生效")).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/规则并未因刷新而撤回/)).toBeInTheDocument();
+    const installed = screen.getByRole("region", {
+      name: "已核验的旧规则范围",
+    });
+    expect(within(installed).getByText("192.0.2.21")).toBeInTheDocument();
+    expect(within(installed).queryByText("192.0.2.31")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "已保存的接管选择" }),
+    ).toHaveTextContent("192.0.2.31");
+    expect(screen.queryByText(/实时规则已生效/)).not.toBeInTheDocument();
+  });
 });
