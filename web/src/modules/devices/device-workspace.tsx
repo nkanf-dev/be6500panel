@@ -49,6 +49,8 @@ export interface DeviceWorkspaceProps {
   onSelectDevice?: (mac: string | undefined) => void;
   /** Exact MACs needed for detail/compare history. Bound to eight and never causes writes. */
   onSelectedDevicesChange?: (macs: readonly string[]) => void;
+  /** Search the full bounded collector as well as local labels and leases. */
+  onSearchChange?: (query: string) => void;
   onConfigure?: (module: "dhcp" | "firewall", mac: string) => void;
   /** Root-owned confirmed network actions can be mounted for this MAC. */
   renderActions?: (device: WorkspaceDevice) => ReactNode;
@@ -68,6 +70,7 @@ export function DeviceWorkspace({
   selectedMAC,
   onSelectDevice,
   onSelectedDevicesChange,
+  onSearchChange,
   onConfigure,
   renderActions,
 }: DeviceWorkspaceProps) {
@@ -191,8 +194,13 @@ export function DeviceWorkspace({
               aria-label="搜索设备"
               placeholder="搜索备注、名称、MAC、IP、标签…"
               value={query}
+              maxLength={64}
               onChange={(event) => {
-                setQuery(event.target.value);
+                const next = Array.from(event.target.value)
+                  .slice(0, 64)
+                  .join("");
+                setQuery(next);
+                onSearchChange?.(next);
                 setPage(0);
               }}
             />
@@ -246,8 +254,19 @@ export function DeviceWorkspace({
           <PanelHeader
             title="设备管理"
             subtitle="按 MAC 汇总设备 · 自定义名称与备注 · 详情与对比"
-            action={<Badge>{inventory.length} 个设备</Badge>}
+            action={
+              <Badge>
+                {inventory.length} 个已载入 / 源统计{" "}
+                {activity?.deviceCount ?? inventory.length}
+              </Badge>
+            }
           />
+          {activity?.truncated && (
+            <p className="device-source-note">
+              设备源还有未载入的记录。搜索名称、MAC 或 IP
+              可从完整统计源查找；备注和标签同时按本地记录筛选。
+            </p>
+          )}
           {selected &&
             !pageDevices.some((device) => device.mac === selected) && (
               <div className="device-pinned-selection">

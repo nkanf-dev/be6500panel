@@ -116,4 +116,62 @@ describe("bounded real device workspace history", () => {
       "02:00:00:00:00:01",
     ]);
   });
+  it("searches the complete collector while preserving bounded exact selected-MAC queries", async () => {
+    const fetch = install();
+    const expectedMAC = "02:00:00:00:00:AA";
+    fetch.mockImplementation((_url: string) => {
+      const data = activityFixture("24h");
+      return Promise.resolve(
+        jsonResponse({
+          ...data,
+          deviceCount: 128,
+          matchedCount: 1,
+          truncated: false,
+          devices: [{ ...data.devices[0], id: expectedMAC, name: "device128" }],
+        }),
+      );
+    });
+    const { result } = renderHook(() =>
+      useDeviceWorkspaceHistory("24h", [expectedMAC], "device128"),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const queries = fetch.mock.calls.map(
+      ([url]) => new URL(url, "http://local").searchParams,
+    );
+    expect(queries).toHaveLength(2);
+    expect(queries[0].get("search")).toBe("device128");
+    expect(queries[0].get("limit")).toBe("64");
+    expect(queries[1].get("search")).toBe(expectedMAC);
+    expect(queries[1].get("limit")).toBe("1");
+    expect(result.current.data?.deviceCount).toBe(128);
+    expect(result.current.data?.devices.map((d) => d.id)).toEqual([
+      expectedMAC,
+    ]);
+    expect(
+      fetch.mock.calls.every(([, init]) => !init || init.method === "GET"),
+    ).toBe(true);
+  });
+  it("bounds source text search to64codepoints and invalidates old search evidence", async () => {
+    const fetch = install();
+    fetch.mockImplementation(() =>
+      Promise.resolve(jsonResponse(activityFixture("24h"))),
+    );
+    const { result, rerender } = renderHook(
+      ({ search }) => useDeviceWorkspaceHistory("24h", [], search),
+      { initialProps: { search: "old" } },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let signal: AbortSignal | undefined;
+    fetch.mockImplementation((_url: string, init?: RequestInit) => {
+      signal = init?.signal as AbortSignal;
+      return new Promise<Response>(() => {});
+    });
+    rerender({ search: "界".repeat(70) });
+    expect(result.current.data).toBeUndefined();
+    await waitFor(() => expect(signal).toBeDefined());
+    const latest = new URL(fetch.mock.calls.at(-1)![0], "http://local")
+      .searchParams;
+    expect(Array.from(latest.get("search")!)).toHaveLength(64);
+    expect(latest.get("limit")).toBe("64");
+  });
 });

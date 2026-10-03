@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { EChartsOption } from "echarts";
 import { ChartFrame } from "../../components/visualizations/ChartFrame";
 import { EChart } from "../../components/visualizations/EChart";
@@ -11,6 +11,43 @@ import {
 import { bytes } from "../../lib/format";
 import { useDeviceLabels } from "./device-labels";
 import type { WorkspaceDevice } from "./device-model";
+
+function DeviceChartDisclosure({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  const [compact, setCompact] = useState(
+    () => window.matchMedia?.("(max-width: 640px)").matches ?? false,
+  );
+  const [expanded, setExpanded] = useState(!compact);
+  useEffect(() => {
+    const media = window.matchMedia?.("(max-width: 640px)");
+    if (!media) return;
+    const change = () => {
+      setCompact(media.matches);
+      setExpanded(!media.matches);
+    };
+    change();
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, []);
+  return (
+    <details
+      className="device-chart-disclosure"
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary>
+        {title}
+        <span>{expanded ? "收起图表" : "展开图表"}</span>
+      </summary>
+      {(expanded || !compact) && children}
+    </details>
+  );
+}
 
 export function DeviceHistoryCharts({
   devices,
@@ -168,59 +205,65 @@ export function DeviceHistoryCharts({
   );
   return (
     <div className="device-chart-stack">
-      <ChartFrame
+      <DeviceChartDisclosure
         title={devices.length > 1 ? "设备流量对比" : "设备流量趋势"}
-        subtitle={`同一时间范围 · ${resolutionSeconds} 秒桶 · 原始 trafficd RX / TX 方向`}
-        demo={false}
-        hasData={observed}
-        source={source || "trafficd"}
-        unavailable="所选范围尚无有效计数差值。刷新采样后可查看流量趋势。"
-        summary={`${devices.length} 个设备 · 缺测与重置保持空隙，不补零。`}
-        columns={[
-          "设备",
-          "MAC",
-          "时间",
-          "RX 字节",
-          "TX 字节",
-          "有效秒数",
-          "RX B/s",
-          "TX B/s",
-        ]}
-        rows={rows}
-        hint="RX / TX 为固件计数器方向；按有效覆盖秒数计算速率。"
       >
-        <EChart
-          option={option}
-          label="所选设备 RX 与 TX 实测速率曲线，缺测为空隙，下方有同源数据表"
-          height={280}
-        />
-      </ChartFrame>
-      <ChartFrame
-        title="设备活动热力图"
-        subtitle="设备 × 时间 · RX + TX 实测速率 B/s"
-        demo={false}
-        hasData={observed}
-        source={source || "trafficd"}
-        unavailable="等待所选设备的有效流量采样。"
-        summary="深色表示较高的实测流量速率；未采样的格子留空。"
-        columns={[
-          "设备",
-          "MAC",
-          "时间",
-          "RX 字节",
-          "TX 字节",
-          "有效秒数",
-          "RX B/s",
-          "TX B/s",
-        ]}
-        rows={rows}
-      >
-        <EChart
-          option={heatOption}
-          label="所选设备实际流量速率热力图，下方有字节与覆盖秒数表"
-          height={Math.max(220, values.length * 34 + 110)}
-        />
-      </ChartFrame>
+        <ChartFrame
+          title={devices.length > 1 ? "设备流量对比" : "设备流量趋势"}
+          subtitle={`同一时间范围 · ${resolutionSeconds} 秒桶 · 原始 trafficd RX / TX 方向`}
+          demo={false}
+          hasData={observed}
+          source={source || "trafficd"}
+          unavailable="所选范围尚无有效计数差值。刷新采样后可查看流量趋势。"
+          summary={`${devices.length} 个设备 · 缺测与重置保持空隙，不补零。`}
+          columns={[
+            "设备",
+            "MAC",
+            "时间",
+            "RX 字节",
+            "TX 字节",
+            "有效秒数",
+            "RX B/s",
+            "TX B/s",
+          ]}
+          rows={rows}
+          hint="RX / TX 为固件计数器方向；按有效覆盖秒数计算速率。"
+        >
+          <EChart
+            option={option}
+            label="所选设备 RX 与 TX 实测速率曲线，缺测为空隙，下方有同源数据表"
+            height={280}
+          />
+        </ChartFrame>
+      </DeviceChartDisclosure>
+      <DeviceChartDisclosure title="设备活动热力图">
+        <ChartFrame
+          title="设备活动热力图"
+          subtitle="设备 × 时间 · RX + TX 实测速率 B/s"
+          demo={false}
+          hasData={observed}
+          source={source || "trafficd"}
+          unavailable="等待所选设备的有效流量采样。"
+          summary="深色表示较高的实测流量速率；未采样的格子留空。"
+          columns={[
+            "设备",
+            "MAC",
+            "时间",
+            "RX 字节",
+            "TX 字节",
+            "有效秒数",
+            "RX B/s",
+            "TX B/s",
+          ]}
+          rows={rows}
+        >
+          <EChart
+            option={heatOption}
+            label="所选设备实际流量速率热力图，下方有字节与覆盖秒数表"
+            height={Math.max(220, values.length * 34 + 110)}
+          />
+        </ChartFrame>
+      </DeviceChartDisclosure>
       <div className="table-scroll">
         <table className="data-table">
           <caption>所选设备 · 同一时间范围数据汇总</caption>

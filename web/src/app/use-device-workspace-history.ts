@@ -10,12 +10,13 @@ import { canonicalMAC, mergeDeviceHistories } from "../modules/devices";
 export function workspaceHistoryRequest(
   range: DeviceActivityRange,
   mac?: string,
+  search = "",
 ) {
   const query = new URLSearchParams({
     range,
     maxPoints: "288",
     limit: mac ? "1" : "64",
-    search: mac ?? "",
+    search: mac ?? search,
   });
   return request(`/devices/activity?${query}`, DeviceActivityHistorySchema);
 }
@@ -30,6 +31,7 @@ interface HistoryState {
 export function useDeviceWorkspaceHistory(
   range: DeviceActivityRange,
   selected: readonly string[],
+  search = "",
 ) {
   const macs = useMemo(
     () =>
@@ -42,7 +44,8 @@ export function useDeviceWorkspaceHistory(
         .sort(),
     [selected],
   );
-  const key = JSON.stringify([range, macs]);
+  const boundedSearch = Array.from(search.trim()).slice(0, 64).join("");
+  const key = JSON.stringify([range, macs, boundedSearch]);
   const [state, setState] = useState<HistoryState>({
     key,
     details: [],
@@ -63,7 +66,7 @@ export function useDeviceWorkspaceHistory(
       }));
       const read = async (mac?: string) => {
         const data = await runRequest(
-          workspaceHistoryRequest(range, mac),
+          workspaceHistoryRequest(range, mac, boundedSearch),
           controller.signal,
         );
         if (data.range !== range)

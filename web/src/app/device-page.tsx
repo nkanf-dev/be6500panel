@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useConsole } from "./console-context";
 import { useDeviceWorkspaceHistory } from "./use-device-workspace-history";
 import { DeviceWorkspace, useDeviceLabels } from "../modules/devices";
@@ -28,7 +28,13 @@ export function DevicePage() {
       previous.join("|") === macs.join("|") ? previous : macs,
     );
   }, []);
-  const activity = useDeviceWorkspaceHistory(range, selected);
+  const [search, setSearch] = useState("");
+  const [sourceSearch, setSourceSearch] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSourceSearch(search), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+  const activity = useDeviceWorkspaceHistory(range, selected, sourceSearch);
   const [configuration, setConfiguration] = useState<"dhcp" | "firewall">();
   return (
     <div className="page-stack">
@@ -59,6 +65,7 @@ export function DevicePage() {
             selectedMAC={selectedDeviceMAC}
             onSelectDevice={selectDevice}
             onSelectedDevicesChange={changeSelected}
+            onSearchChange={setSearch}
             onConfigure={(module) => setConfiguration(module)}
           />
           <DeviceActivityPanel

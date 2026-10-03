@@ -181,7 +181,7 @@ export function DeviceActivityPanel({
       <p className="device-activity-note">
         {demo
           ? "演示模式：以下为固定、中立的字节样本，不代表路由器设备。"
-          : "最近最多 7 天的内存记录，服务重启后清空；不是持久化历史，也不会补齐启用前的时段。"}
+          : "最近最多 7 天的内存记录，服务重启后清空。新启动服务正在积累历史时段采样；未采样的时段留空，不补零。"}
       </p>
       <p className="device-activity-note">
         RX / TX 沿用厂商计数方向，尚未核验为下载 /

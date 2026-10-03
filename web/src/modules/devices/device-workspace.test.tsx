@@ -330,4 +330,27 @@ describe("device workspace", () => {
       ).expectedRevision,
     ).toBe(6);
   });
+  it("forwards bounded search to the complete source and distinguishes loaded rows from total", async () => {
+    const search = vi.fn();
+    mount({
+      activity: {
+        ...history,
+        deviceCount: 128,
+        matchedCount: 128,
+        truncated: true,
+      },
+      onSearchChange: search,
+    });
+    expect(screen.getByText(/已载入 \/ 源统计 128/)).toBeInTheDocument();
+    expect(screen.getByText(/完整统计源查找/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索设备" }), {
+      target: { value: "device128" },
+    });
+    expect(search).toHaveBeenLastCalledWith("device128");
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索设备" }), {
+      target: { value: "x".repeat(80) },
+    });
+    expect(search).toHaveBeenLastCalledWith("x".repeat(64));
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });
