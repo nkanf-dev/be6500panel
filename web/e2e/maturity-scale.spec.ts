@@ -193,8 +193,13 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
     const rows = inventory.locator(".device-list tbody tr");
     const search = workspace.getByLabel("搜索设备", { exact: true });
     await expect(rows).toHaveCount(25);
-    await expect(inventory.locator(".device-source-note")).toContainText(
-      "64 / 128 个匹配设备",
+    await expect(
+      inventory
+        .locator(".device-source-note")
+        .filter({ hasText: "流量列表当前显示" }),
+    ).toContainText("64 / 128 个匹配设备");
+    await expect(inventory.locator(".panel-header")).toContainText(
+      "源统计 128",
     );
     await expect
       .poll(() =>
