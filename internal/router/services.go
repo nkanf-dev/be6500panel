@@ -418,7 +418,7 @@ func parseServiceList(data []byte) ([]serviceInstance, error) {
 				}
 				if len(command) > 0 {
 					instance.command = command[0]
-					if !filepath.IsAbs(instance.command) || !safeString(instance.command, 512) || filepath.Clean(instance.command) != instance.command {
+					if !safeString(instance.command, 512) || filepath.Clean(instance.command) != instance.command || (!filepath.IsAbs(instance.command) && !validServiceName(instance.command)) {
 						return nil, errServiceInvalid
 					}
 				}
@@ -596,6 +596,34 @@ func (o *ServiceObserver) executable(path string) (string, error) {
 	}
 	return resolved, nil
 }
+
+// procd on stock RN02 also reports bare executable names. Resolve those only
+// through fixed system directories, retaining the same resolved /proc identity
+// proof. Missing/ambiguous names leave this row unknown, not the entire list.
+func (o *ServiceObserver) reportedExecutable(command string) (string, error) {
+	if filepath.IsAbs(command) {
+		return o.executable(command)
+	}
+	if !validServiceName(command) {
+		return "", errServiceInvalid
+	}
+	resolved := ""
+	for _, directory := range []string{"/usr/sbin", "/usr/bin", "/sbin", "/bin"} {
+		candidate, err := o.executable(directory + "/" + command)
+		if err != nil {
+			continue
+		}
+		if resolved != "" && resolved != candidate {
+			return "", errServiceInvalid
+		}
+		resolved = candidate
+	}
+	if resolved == "" {
+		return "", os.ErrNotExist
+	}
+	return resolved, nil
+}
+
 func (o *ServiceObserver) verifyProcess(ctx context.Context, row *ServiceState, instance serviceInstance, uptime float64, ticks uint64) {
 	if instance.pid <= 0 {
 		if instance.exitCode != nil && *instance.exitCode != 0 {
@@ -636,7 +664,7 @@ func (o *ServiceObserver) verifyProcess(ctx context.Context, row *ServiceState, 
 		row.ErrorCode = "command_unavailable"
 		return
 	}
-	expected, err := o.executable(instance.command)
+	expected, err := o.reportedExecutable(instance.command)
 	if err != nil {
 		row.ErrorCode = "executable_unavailable"
 		return

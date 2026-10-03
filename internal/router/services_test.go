@@ -164,7 +164,7 @@ func TestServicePIDReuseDuringObservation(t *testing.T) {
 	}
 }
 func TestServiceParserBoundsAndRejectsMaliciousOutput(t *testing.T) {
-	for _, data := range []string{`null`, `[]`, `{} {}`, `{"../bad":{}}`, `{"a":{"instances":{"bad/name":{}}}}`, `{"a":{"instances":{"main":{"pid":1,"pid":2}}}}`, `{"a":{"instances":{"main":{"pid":-1}}}}`, `{"a":{"instances":{"main":{"running":null}}}}`, `{"a":{"instances":{"main":{"command":["/a/../b"]}}}}`, `{"a":{"instances":{"main":{"command":["relative"]}}}}`, `{"a":{},"a":{}}`} {
+	for _, data := range []string{`null`, `[]`, `{} {}`, `{"../bad":{}}`, `{"a":{"instances":{"bad/name":{}}}}`, `{"a":{"instances":{"main":{"pid":1,"pid":2}}}}`, `{"a":{"instances":{"main":{"pid":-1}}}}`, `{"a":{"instances":{"main":{"running":null}}}}`, `{"a":{"instances":{"main":{"command":["/a/../b"]}}}}`, `{"a":{"instances":{"main":{"command":["unsafe/path"]}}}}`, `{"a":{},"a":{}}`} {
 		if _, err := parseServiceList([]byte(data)); err == nil {
 			t.Fatalf("accepted %q", data)
 		}
@@ -347,5 +347,65 @@ func TestServicePIDReuseBetweenSnapshotsKeepsIdentityUnknown(t *testing.T) {
 	}
 	if len(o.identities) > serviceRows {
 		t.Fatal("unbounded identities")
+	}
+}
+
+func TestServiceVendorBareCommandsDoNotRejectEntireObservation(t *testing.T) {
+	root := serviceRoot(t)
+	fixtureFile(t, root, serviceFixture, `{"dnsmasq":{"instances":{"main":{"running":true,"pid":42,"command":["dnsmasq","--secret=PRIVATE-ARG"]}}},"miio_client":{"instances":{"main":{"running":true,"pid":91,"command":["miio_client","PRIVATE-TOKEN"]}}},"be6500-rescue":{"instances":{"main":{"running":false,"exit_code":7}}}}`)
+	fixtureFile(t, root, "/proc/91/stat", statFixture(91, "S", 2000))
+	fixtureFile(t, root, "/proc/91/status", "Pid: 91\nVmRSS: 2 kB\n")
+	snapshot, err := NewServiceObserver(root).Snapshot(context.Background())
+	if err != nil || snapshot.Stale || snapshot.SampledAt == nil {
+		t.Fatal(snapshot, err)
+	}
+	row := serviceRow(t, snapshot, "dnsmasq")
+	if row.ProcessState != "running" || row.PID != 42 || row.Executable != "/usr/sbin/dnsmasq" {
+		t.Fatal(row)
+	}
+	missing := serviceRow(t, snapshot, "miio_client")
+	if missing.ProcessState != "unknown" || missing.ErrorCode != "executable_unavailable" || missing.PID != 0 {
+		t.Fatal(missing)
+	}
+	raw, _ := json.Marshal(snapshot)
+	if strings.Contains(string(raw), "PRIVATE-") {
+		t.Fatal("vendor argv leaked")
+	}
+	if !serviceRow(t, snapshot, "be6500-rescue").Protected {
+		t.Fatal("rescue protection lost")
+	}
+}
+func TestServiceBareCommandRequiresUniqueResolvedIdentity(t *testing.T) {
+	for _, kind := range []string{"ambiguous", "wrong_executable", "outside_root"} {
+		t.Run(kind, func(t *testing.T) {
+			root := serviceRoot(t)
+			fixtureFile(t, root, serviceFixture, `{"dnsmasq":{"instances":{"main":{"running":true,"pid":42,"command":["dnsmasq"]}}}}`)
+			switch kind {
+			case "ambiguous":
+				fixtureFile(t, root, "/usr/bin/dnsmasq", "different synthetic executable")
+			case "wrong_executable":
+				os.Remove(filepath.Join(root, "proc/42/exe"))
+				if err := os.Symlink("../../usr/sbin/other", filepath.Join(root, "proc/42/exe")); err != nil {
+					t.Fatal(err)
+				}
+			case "outside_root":
+				outside := filepath.Join(t.TempDir(), "executable")
+				if err := os.WriteFile(outside, []byte("host"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				os.Remove(filepath.Join(root, "usr/sbin/dnsmasq"))
+				if err := os.Symlink(outside, filepath.Join(root, "usr/sbin/dnsmasq")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshot, err := NewServiceObserver(root).Snapshot(context.Background())
+			if err != nil || snapshot.Stale {
+				t.Fatal(snapshot, err)
+			}
+			row := serviceRow(t, snapshot, "dnsmasq")
+			if row.ProcessState != "unknown" || row.PID != 0 || row.Executable != "" {
+				t.Fatal(kind, row)
+			}
+		})
 	}
 }
