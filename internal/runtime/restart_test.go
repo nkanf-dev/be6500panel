@@ -551,3 +551,43 @@ func TestRestartCanceledAfterCleanupDisablesExistingBackoff(t *testing.T) {
 		t.Fatalf("stale backoff watcher relaunched: %+v %v", status, err)
 	}
 }
+
+func TestRestartGuardRunsInsideLaneBeforeAnyStateOrProcessChange(t *testing.T) {
+	var cleanup, readiness, restore atomic.Int32
+	m, opts := testManager(t, func(o *Options) {
+		o.CleanupHook = func(context.Context, string) error { cleanup.Add(1); return nil }
+		o.ReadyHook = func(context.Context, string) error { readiness.Add(1); return nil }
+		o.RestoreHook = func(context.Context, string) error { restore.Add(1); return nil }
+	})
+	original := restartRunning(t, m, opts, SingBox)
+	m.mu.Lock()
+	epoch := m.services[SingBox].epoch
+	m.mu.Unlock()
+	cleanBefore, readyBefore, restoreBefore := cleanup.Load(), readiness.Load(), restore.Load()
+	refusal := errors.New("pending native configuration")
+	calls := 0
+	state, err := m.RestartGuarded(context.Background(), SingBox, func(ctx context.Context) error {
+		calls++
+		if err := m.ResourceOperation(ctx, FRPC, func(context.Context) error { return nil }); !errors.Is(err, ErrBusy) {
+			t.Fatalf("guard outside shared lane: %v", err)
+		}
+		return refusal
+	})
+	if !errors.Is(err, refusal) || calls != 1 {
+		t.Fatal(state, err, calls)
+	}
+	restartReadback(t, m, SingBox, original)
+	if state.PID != original.PID || state.State != original.State || cleanup.Load() != cleanBefore || readiness.Load() != readyBefore || restore.Load() != restoreBefore {
+		t.Fatal(state)
+	}
+	m.mu.Lock()
+	afterEpoch := m.services[SingBox].epoch
+	m.mu.Unlock()
+	if epoch != afterEpoch {
+		t.Fatal("guard refusal changed watcher epoch")
+	}
+	next, err := m.RestartGuarded(context.Background(), SingBox, func(context.Context) error { return nil })
+	if err != nil || next.PID == original.PID || next.State != Running {
+		t.Fatal(next, err)
+	}
+}

@@ -815,11 +815,26 @@ func (m *Manager) Start(ctx context.Context, id string) (Status, error) {
 // preflight/stop/start sequence owns one mutation lane, so no configuration or
 // retry operation can interleave between the checked record and its activation.
 func (m *Manager) Restart(ctx context.Context, id string) (Status, error) {
+	return m.RestartGuarded(ctx, id, nil)
+}
+
+// RestartGuarded checks caller-owned configuration state after acquiring the
+// shared lane and before changing a process or even starting verification. The
+// guard must not call manager mutations; read-only status checks are safe.
+func (m *Manager) RestartGuarded(ctx context.Context, id string, guard func(context.Context) error) (Status, error) {
 	ctx, done, err := m.begin(ctx, id)
 	if err != nil {
 		return m.resultSafe(id, err)
 	}
 	defer done()
+	if guard != nil {
+		if err = guard(ctx); err != nil {
+			return m.result(id, err)
+		}
+	}
+	if err = ctx.Err(); err != nil {
+		return m.result(id, err)
+	}
 	m.mu.Lock()
 	s := m.services[id]
 	if s.disk.Current == nil {

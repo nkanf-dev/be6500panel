@@ -170,6 +170,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.runtimeAction(w, r, true)
 	case "/api/runtime/stop":
 		s.runtimeAction(w, r, false)
+	case "/api/runtime/restart":
+		s.runtimeRestart(w, r)
 	case "/api/runtime/restore":
 		s.runtimeRestore(w, r)
 	case "/api/proxy/nodes":
@@ -266,7 +268,7 @@ var routes = map[string]string{
 	"/api/devices/activity": "GET", "/api/proxy/request-traces": "GET", "/api/system/services": "GET", "/api/system/services/action": "POST",
 	"/api/proxy/metrics": "GET", "/api/proxy/probe": "POST", "/api/traffic/history": "GET",
 
-	"/api/router": "GET", "/api/runtime": "GET", "/api/runtime/acquire": "POST", "/api/runtime/configure": "POST", "/api/runtime/config": "GET", "/api/runtime/start": "POST", "/api/runtime/stop": "POST", "/api/runtime/restore": "POST",
+	"/api/router": "GET", "/api/runtime": "GET", "/api/runtime/acquire": "POST", "/api/runtime/configure": "POST", "/api/runtime/config": "GET", "/api/runtime/start": "POST", "/api/runtime/stop": "POST", "/api/runtime/restart": "POST", "/api/runtime/restore": "POST",
 	"/api/proxy/nodes": "GET", "/api/proxy/import": "POST", "/api/proxy/select": "POST", "/api/proxy/capture": "GET",
 	"/api/configuration": "GET", "/api/configuration/stage": "POST", "/api/configuration/drafts": "GET", "/api/configuration/commit": "POST", "/api/configuration/confirm": "POST", "/api/configuration/rollback": "POST", "/api/configuration/status": "GET",
 	"/api/logs": "GET", "/api/health": "GET", "/api/modules": "GET", "/api/system": "GET", "/api/network": "GET", "/api/devices": "GET", "/api/frpc": "GET", "/api/events": "GET", "/api/proxy/plan": "POST", "/api/frpc/plan": "POST", "/api/operations/apply": "POST", "/api/session": "GET", "/api/session/login": "POST", "/api/session/logout": "POST",

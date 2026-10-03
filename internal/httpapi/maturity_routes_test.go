@@ -20,7 +20,7 @@ func TestMaturityRoutesRequireSession(t *testing.T) {
 			t.Fatalf("%s: %s", path, res.Status)
 		}
 	}
-	for _, path := range []string{"/api/proxy/request-traces", "/api/system/services/action", DeviceAnnotationsPath} {
+	for _, path := range []string{"/api/proxy/request-traces", "/api/system/services/action", "/api/runtime/restart", DeviceAnnotationsPath} {
 		res := request(t, ts, "POST", path, `{}`, nil)
 		if res.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("%s: %s", path, res.Status)
