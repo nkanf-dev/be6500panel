@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="brandBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c94a20"/>
+      <stop offset="100%" stop-color="#a63410"/>
+    </linearGradient>
+  </defs>
+  <!-- 品牌圆角 Squircle 容器：暖焦糖/砖红色底色，在深浅色浏览器标签栏中均有极致反差 -->
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#brandBg)"/>
+
+  <!-- 天线：加粗克制，16px 极限低分辨率下依然清晰可辨 -->
+  <line x1="20" y1="12" x2="20" y2="24" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round"/>
+  <line x1="32" y1="8" x2="32" y2="24" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round"/>
+  <line x1="44" y1="12" x2="44" y2="24" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round"/>
+
+  <!-- 路由器机身：现代饱满圆角长条 -->
+  <rect x="10" y="24" width="44" height="25" rx="5.5" fill="#ffffff"/>
+
+  <!-- 前面板状态指示槽：深色下沉凹槽 + 极简 LED 点阵 -->
+  <rect x="15" y="38" width="34" height="4" rx="2" fill="#a63410"/>
+  <circle cx="19" cy="31" r="2.2" fill="#c94a20"/>
+  <circle cx="26" cy="31" r="2.2" fill="#c94a20"/>
+  <circle cx="33" cy="31" r="2.2" fill="#c94a20"/>
+  <circle cx="44" cy="31" r="2.2" fill="#10b981"/>
+</svg>
