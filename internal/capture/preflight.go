@@ -422,15 +422,24 @@ func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
 	if c.plan == nil {
 		return c.statusLocked(), nil
 	}
-	err := c.observeLocked(ctx)
+	err := c.observeStatusLocked(ctx)
 	if err != nil {
-		c.cleanupPending = true
-		return c.statusLocked(), err
+		c.restoreError = "capture_observation_failed"
+	} else if c.restoreError == "capture_observation_failed" {
+		c.restoreError = ""
 	}
-	c.active = true
-	c.cleanupPending = false
-	return c.statusLocked(), nil
+	return c.statusLocked(), err
 }
+
+// Resource proof and desired-scope drift are separate. A failed read is not
+// clean inactivity; retain ownership and cleanup uncertainty, not Active proof.
+func (c *Controller) observeStatusLocked(ctx context.Context) error {
+	err := c.observeLocked(ctx)
+	c.active = err == nil
+	c.cleanupPending = err != nil || c.cleanupFailed
+	return err
+}
+
 func (c *Controller) observeLocked(ctx context.Context) error {
 	missing := false
 	var pending error

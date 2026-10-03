@@ -23,16 +23,18 @@ import (
 
 type Runner func(context.Context, []string) ([]byte, error)
 type Status struct {
-	Desired        bool           `json:"desired"`
-	Clients        []Client       `json:"clients"`
-	IPv6           proxy.IPv6Mode `json:"ipv6,omitempty"`
-	Error          string         `json:"error,omitempty"`
-	Active         bool           `json:"active"`
-	ClientIPv4     string         `json:"clientIPv4,omitempty"`
-	ClientIPv6     string         `json:"clientIPv6,omitempty"`
-	Commands       int            `json:"commands"`
-	CleanupPending bool           `json:"cleanupPending"`
-	State          string         `json:"state"`
+	Desired          bool           `json:"desired"`
+	Clients          []Client       `json:"clients"`                    // Fresh desired-device observations, not proof of installed scope.
+	InstalledClients []Client       `json:"installedClients,omitempty"` // Exact saved ownership; Active proves its resources.
+	ScopeState       string         `json:"scopeState,omitempty"`       // current, changed, or unresolved desired scope.
+	IPv6             proxy.IPv6Mode `json:"ipv6,omitempty"`
+	Error            string         `json:"error,omitempty"`
+	Active           bool           `json:"active"`
+	ClientIPv4       string         `json:"clientIPv4,omitempty"`
+	ClientIPv6       string         `json:"clientIPv6,omitempty"`
+	Commands         int            `json:"commands"`
+	CleanupPending   bool           `json:"cleanupPending"`
+	State            string         `json:"state"`
 }
 
 // CommandError contains only internally compiled network argv and bounded kernel
@@ -60,6 +62,8 @@ type Controller struct {
 	plan             *proxy.OwnedRulesPlan
 	active           bool
 	cleanupPending   bool
+	cleanupFailed    bool // Observation cannot erase an actual failed cleanup.
+	scopeState       string
 	desiredPath      string
 	desired          Desired
 	clients          []Client
@@ -99,7 +103,7 @@ func New(dataDir string, runner Runner) (*Controller, error) {
 }
 func (c *Controller) Status() Status { c.mu.Lock(); defer c.mu.Unlock(); return c.statusLocked() }
 func (c *Controller) statusLocked() Status {
-	state := Status{Active: c.active, CleanupPending: c.cleanupPending, State: "inactive", Desired: c.desired.Enabled, Clients: slices.Clone(c.clients), IPv6: c.desired.IPv6, Error: c.restoreError}
+	state := Status{Active: c.active, CleanupPending: c.cleanupPending, State: "inactive", Desired: c.desired.Enabled, Clients: slices.Clone(c.clients), ScopeState: c.scopeState, IPv6: c.desired.IPv6, Error: c.restoreError}
 	if c.disableNotPersisted {
 		state.Error = "capture_disable_not_persisted"
 	}
@@ -110,6 +114,7 @@ func (c *Controller) statusLocked() Status {
 		state.State = "suspended"
 	}
 	if c.plan != nil {
+		state.InstalledClients = installedClients(c.plan.Ownership)
 		state.ClientIPv4 = c.plan.Ownership.ClientIPv4
 		state.ClientIPv6 = c.plan.Ownership.ClientIPv6
 		if state.ClientIPv4 == "" && len(c.plan.Ownership.ClientIPv4s) > 0 {
@@ -123,7 +128,9 @@ func (c *Controller) statusLocked() Status {
 			state.State = "cleanup-pending"
 		} else if c.active {
 			state.State = "active"
-			if c.restoreError == "capture_devices_pending" {
+			if c.scopeState == "changed" || c.scopeState == "unresolved" {
+				state.State = "scope-changed"
+			} else if c.restoreError == "capture_devices_pending" {
 				state.State = "partial"
 			}
 		} else {
@@ -131,6 +138,25 @@ func (c *Controller) statusLocked() Status {
 		}
 	}
 	return state
+}
+
+// installedClients describes saved ownership even when its kernel resources are
+// missing or uncertain. Never bind fresh device observations to these old IPs.
+func installedClients(own proxy.RulesOwnership) []Client {
+	addresses := append(slices.Clone(own.ClientIPv4s), own.ClientIPv6s...)
+	if own.ClientIPv4 != "" {
+		addresses = append(addresses, own.ClientIPv4)
+	}
+	if own.ClientIPv6 != "" {
+		addresses = append(addresses, own.ClientIPv6)
+	}
+	slices.Sort(addresses)
+	addresses = slices.Compact(addresses)
+	clients := make([]Client, 0, len(addresses))
+	for _, address := range addresses {
+		clients = append(clients, Client{IP: address, MAC: own.ClientMACs[address]})
+	}
+	return clients
 }
 
 // Apply accepts compiler input, never caller-supplied command arrays.
@@ -176,6 +202,11 @@ func (c *Controller) applyLocked(ctx context.Context, input proxy.RulesPlanInput
 	}
 	c.active = true
 	c.cleanupPending = false
+	c.cleanupFailed = false
+	c.scopeState = ""
+	if c.desired.Enabled {
+		c.scopeState = "current"
+	}
 	c.restoreError = ""
 	return c.statusLocked(), nil
 }
@@ -197,14 +228,18 @@ func (c *Controller) cleanupLocked(ctx context.Context) error {
 		}
 	}
 	if pending != nil {
+		c.cleanupFailed = true
 		return pending
 	} // Live hooks may remain. Never report clean inactivity.
 	if err := os.Remove(c.path); err != nil && !os.IsNotExist(err) {
+		c.cleanupFailed = true
 		return fmt.Errorf("capture journal removal failed: %w", err)
 	}
 	c.plan = nil
 	c.active = false
 	c.cleanupPending = false
+	c.cleanupFailed = false
+	c.scopeState = ""
 	return nil
 }
 func resourceAbsent(a []string, out []byte, err error) bool {

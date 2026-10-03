@@ -608,8 +608,8 @@ func TestReconcileReadErrorRetainsUnknownLiveState(t *testing.T) {
 		return []byte("permission denied"), errors.New("exit status 1")
 	}
 	s, err := c.Reconcile(context.Background())
-	if err == nil || !s.Active || !s.CleanupPending || s.State != "cleanup-pending" {
-		t.Fatalf("false clean inactivity: %+v %v", s, err)
+	if err == nil || s.Active || !s.CleanupPending || s.State != "cleanup-pending" {
+		t.Fatalf("uncertain kernel must retain ownership without claiming verified activity: %+v %v", s, err)
 	}
 }
 func TestPolicyRuleReadyRequiresExactScope(t *testing.T) {

@@ -64,10 +64,13 @@ func TestRestoreResolvesDHCPChangeAndUnresolvedNeverUsesStaleIP(t *testing.T) {
 		t.Fatal(err)
 	}
 	observation.Devices[0].IP = "192.0.2.20"
+	c.runner = savedPlanRunner(t, *c.plan)
 	state, err := c.ReconcileDesired(context.Background())
-	if err == nil || state.Active || !state.Desired || state.Error != "capture_scope_changed_apply_required" {
-		t.Fatalf("drift did not withdraw: %+v %v", state, err)
+	// GET proves the old installed scope. Only the mutation lane may replace it.
+	if err == nil || !state.Active || state.CleanupPending || !state.Desired || state.State != "scope-changed" || state.Error != "capture_scope_changed_apply_required" {
+		t.Fatalf("read-only drift observation hid installed rules: %+v %v", state, err)
 	}
+	c.runner = idleRunner
 	state, err = c.Refresh(context.Background())
 	if err != nil || !state.Active || state.Clients[0].IP != "192.0.2.20" {
 		t.Fatalf("DHCP refresh failed: %+v %v", state, err)
@@ -243,9 +246,13 @@ func TestReadOnlyReconcileAndBoundedBackgroundFailureRetry(t *testing.T) {
 	}
 	baseline := calls
 	observation.Devices[0].IP = "192.0.2.20"
-	if _, err := c.ReconcileDesired(context.Background()); err == nil {
-		t.Fatal("drift not observed")
+	mutationRunner := c.runner
+	c.runner = savedPlanRunner(t, *c.plan)
+	state, err := c.ReconcileDesired(context.Background())
+	if err == nil || !state.Active || state.CleanupPending || state.State != "scope-changed" {
+		t.Fatal("drift observation did not prove saved resources", state, err)
 	}
+	c.runner = mutationRunner
 	if calls != baseline {
 		t.Fatal("GET observation mutated rules")
 	}

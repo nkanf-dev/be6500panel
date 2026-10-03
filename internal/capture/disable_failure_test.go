@@ -72,6 +72,9 @@ func assertNoOffIntentApply(t *testing.T, c *Controller) {
 			if !isReadCommand(args) {
 				before++
 			}
+			if c.plan != nil {
+				return savedPlanRunner(t, *c.plan)(ctx, args)
+			}
 			return original(ctx, args)
 		}
 		state, err := c.ReconcileDesired(context.Background())

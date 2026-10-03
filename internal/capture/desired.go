@@ -248,53 +248,64 @@ func (c *Controller) restoreBuiltLocked(ctx context.Context, input proxy.RulesPl
 func (c *Controller) ReconcileDesired(ctx context.Context) (Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.builder == nil || (!c.desired.Enabled && len(c.desired.Devices) == 0) {
-		return c.statusLocked(), nil
-	}
-	d := c.desired
-	d.Devices = slices.Clone(d.Devices)
-	input, clients, err := c.builder(ctx, d)
-	c.clients = slices.Clone(clients)
-	if !c.desired.Enabled {
-		return c.statusLocked(), nil
-	}
+	var scopeErr error
 	var partial *PartialScopeError
-	pendingDevices := errors.As(err, &partial)
+	c.scopeState = ""
+	if c.desired.Enabled || len(c.desired.Devices) > 0 {
+		if c.builder == nil {
+			c.clients = desiredClients(c.desired)
+			if c.desired.Enabled {
+				scopeErr = errors.New("capture_configuration_unavailable")
+			}
+		} else {
+			d := c.desired
+			d.Devices = slices.Clone(d.Devices)
+			input, clients, buildErr := c.builder(ctx, d)
+			c.clients = slices.Clone(clients)
+			if c.desired.Enabled {
+				pendingDevices := errors.As(buildErr, &partial)
+				if buildErr != nil && !pendingDevices {
+					scopeErr = buildErr
+				} else if expected, err := proxy.PlanOwnedRules(input); err != nil {
+					scopeErr = errors.New("capture_native_scope_invalid")
+				} else if c.plan != nil {
+					c.scopeState = "current"
+					if !plansEqual(*c.plan, expected) {
+						c.scopeState = "changed"
+						scopeErr = errors.New("capture_scope_changed_apply_required")
+					}
+				}
+			}
+		}
+		if c.desired.Enabled && scopeErr != nil && c.scopeState == "" {
+			c.scopeState = "unresolved"
+		}
+	}
 	if c.plan == nil {
-		if err != nil {
-			c.restoreError = err.Error()
+		if scopeErr != nil {
+			c.restoreError = scopeErr.Error()
+		} else if partial != nil {
+			c.restoreError = partial.Error()
+			return c.statusLocked(), partial
 		}
-		return c.statusLocked(), err
+		return c.statusLocked(), scopeErr
 	}
-	if pendingDevices {
-		err = nil
-	}
-	if err == nil {
-		expected, compileErr := proxy.PlanOwnedRules(input)
-		err = compileErr
-		if err == nil && !plansEqual(*c.plan, expected) {
-			err = errors.New("capture_scope_changed_apply_required")
-		}
-	}
-	if err != nil {
-		c.restoreError = err.Error()
-		c.active = false
-		c.cleanupPending = true
-		return c.statusLocked(), err
-	}
-	if err = c.observeLocked(ctx); err != nil {
-		c.active = false
+	// A changed or unresolved desired build does not prove old rules vanished.
+	// Always check the saved plan once, without cleanup or reapplication.
+	observationErr := c.observeStatusLocked(ctx)
+	if scopeErr != nil {
+		c.restoreError = scopeErr.Error()
+	} else if observationErr != nil {
 		c.restoreError = "capture_observation_failed"
-		c.cleanupPending = true
-		return c.statusLocked(), err
+	} else if c.desired.Enabled && !c.cleanupFailed {
+		c.restoreError = ""
+		if partial != nil {
+			c.restoreError = partial.Error()
+		}
+	} else if c.restoreError == "capture_observation_failed" {
+		c.restoreError = ""
 	}
-	c.active = true
-	c.cleanupPending = false
-	c.restoreError = ""
-	if pendingDevices {
-		c.restoreError = partial.Error()
-	}
-	return c.statusLocked(), nil
+	return c.statusLocked(), errors.Join(scopeErr, observationErr)
 }
 
 func plansEqual(a, b proxy.OwnedRulesPlan) bool {
@@ -351,6 +362,7 @@ func (c *Controller) Refresh(ctx context.Context) (Status, error) {
 	if c.plan != nil && plansEqual(*c.plan, expected) && !c.cleanupPending {
 		if err = c.observeLocked(ctx); err == nil {
 			c.active = true
+			c.scopeState = "current"
 			c.restoreError = ""
 			if pending {
 				c.restoreError = partial.Error()
