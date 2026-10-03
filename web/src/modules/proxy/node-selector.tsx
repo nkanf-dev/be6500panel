@@ -14,6 +14,8 @@ import { errorMessage } from "../../lib/api";
 import type { IPv6Policy, ProxyNodes } from "../../lib/contracts";
 import type { RuntimeController } from "../runtime/use-runtime";
 import { useAcceptedNodeConfig } from "./node-selector-config";
+import { NodeProbeBadge, NodeProbeControls } from "./node-probe-controls";
+import { useNodeProbes } from "./use-node-probes";
 import {
   NODE_PAGE_SIZE,
   useNodeFavorites,
@@ -60,11 +62,15 @@ export function NodeSelector({
   onSelected,
   importing = false,
 }: {
-  nodes?: ProxyNodes & { policySummary?: ProxyPolicySummary };
+  nodes?: ProxyNodes & {
+    policySummary?: ProxyPolicySummary;
+    revision?: string;
+  };
   importing?: boolean;
   runtime: RuntimeController;
   onSelected: () => void;
 }) {
+  const probes = useNodeProbes(nodes?.revision);
   const [preferences, setPreferences] = useNodePreferences();
   const { query, protocol, transport, favoritesOnly, region, ipv6, ports } =
     preferences;
@@ -295,7 +301,7 @@ export function NodeSelector({
                   : runtime.status.state === "stopped"
                     ? "已停止"
                     : strings.states.stopped}{" "}
-              · 延迟未测
+              · 延迟未测（支持独立测速）
             </span>
             <div className="node-selector-quick-actions">
               <Button
@@ -492,6 +498,12 @@ export function NodeSelector({
             {NODE_PAGE_SIZE} 个
           </p>
         </div>
+        <NodeProbeControls
+          controller={probes}
+          pageNodeIds={visibleNodes.map((node) => node.id)}
+          allCount={all.length}
+          disabled={importing || !nodes}
+        />
         <nav className="node-selector-pagination" aria-label="节点分页">
           <Button
             type="button"
@@ -582,6 +594,12 @@ export function NodeSelector({
                     </span>
                   </span>
                 </button>
+                <NodeProbeBadge
+                  controller={probes}
+                  nodeId={node.id}
+                  nodeLabel={node.label}
+                  disabled={importing}
+                />
                 <Button
                   type="button"
                   className="node-selector-favorite"
