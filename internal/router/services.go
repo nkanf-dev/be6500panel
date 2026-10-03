@@ -66,6 +66,7 @@ type ServiceObserver struct {
 	source      func(context.Context) ([]byte, error)
 	read        func(string, int64) ([]byte, error)
 	runAction   func(context.Context, string, string) error
+	identities  map[string]processIdentity
 }
 
 func NewServiceObserver(root string) *ServiceObserver {
@@ -160,6 +161,7 @@ func (o *ServiceObserver) refresh(ctx context.Context) (ServiceSnapshot, error) 
 			s.Errors = append(s.Errors, moduleError("services.proc_timing", sourceCode(timingErr)))
 		}
 		registered := map[string]bool{}
+		nextIdentities := map[string]processIdentity{}
 		for _, instance := range rows {
 			if err = child.Err(); err != nil {
 				break
@@ -167,6 +169,7 @@ func (o *ServiceObserver) refresh(ctx context.Context) (ServiceSnapshot, error) 
 			registered[instance.name] = true
 			r := ServiceState{Name: instance.name, Instance: instance.instance, Configured: installedState(instance.name, installed, installErr), Registered: "registered", ProcessState: "unknown", ProcdRunning: instance.running, ReportedPID: instance.pid, Protected: protectedService(instance.name)}
 			o.verifyProcess(child, &r, instance, uptime, ticks)
+			o.checkIdentity(&r, nextIdentities)
 			s.Services = append(s.Services, r)
 		}
 		// Show known native and rescue entries even when they have no procd row.
@@ -194,6 +197,7 @@ func (o *ServiceObserver) refresh(ctx context.Context) (ServiceSnapshot, error) 
 			return s.Services[i].Instance < s.Services[j].Instance
 		})
 		if err == nil {
+			o.identities = nextIdentities
 			sampled := o.now().UTC()
 			s.SampledAt = &sampled
 			s.Stale = false
@@ -431,6 +435,35 @@ func sortedRawKeys(values map[string]json.RawMessage) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// A repeated procd PID alone does not prove service identity after PID reuse.
+// Keep the previous start token until procd publishes no PID or a different PID.
+// This bounded map is replaced only after a complete list observation.
+type processIdentity struct {
+	pid   int
+	start uint64
+}
+
+func (o *ServiceObserver) checkIdentity(row *ServiceState, next map[string]processIdentity) {
+	key := row.Name + "/" + row.Instance
+	previous, ok := o.identities[key]
+	if ok && row.ReportedPID == previous.pid {
+		next[key] = previous
+		if row.ProcessState == "running" && row.StartTicks != previous.start {
+			row.ProcessState = "unknown"
+			row.ErrorCode = "pid_reused"
+			row.PID = 0
+			row.Executable = ""
+			row.StartTicks = 0
+			row.UptimeSeconds = nil
+			row.RSSBytes = nil
+		}
+		return
+	}
+	if row.ProcessState == "running" {
+		next[key] = processIdentity{pid: row.PID, start: row.StartTicks}
+	}
 }
 
 type processStat struct {

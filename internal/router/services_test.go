@@ -314,3 +314,38 @@ func TestServiceClockAndRSSParsers(t *testing.T) {
 		}
 	}
 }
+
+func TestServicePIDReuseBetweenSnapshotsKeepsIdentityUnknown(t *testing.T) {
+	root := serviceRoot(t)
+	o := NewServiceObserver(root)
+	now := time.Date(2026, 10, 3, 1, 2, 3, 0, time.UTC)
+	o.now = func() time.Time { return now }
+	first, _ := o.Snapshot(context.Background())
+	if serviceRow(t, first, "dnsmasq").ProcessState != "running" {
+		t.Fatal("initial process unverified")
+	}
+	fixtureFile(t, root, "/proc/42/stat", statFixture(42, "S", 2000))
+	now = now.Add(serviceInterval)
+	second, _ := o.Snapshot(context.Background())
+	r := serviceRow(t, second, "dnsmasq")
+	if r.ProcessState != "unknown" || r.ErrorCode != "pid_reused" || r.PID != 0 || r.RSSBytes != nil || r.UptimeSeconds != nil {
+		t.Fatalf("PID reused same executable %+v", r)
+	}
+	now = now.Add(serviceInterval)
+	third, _ := o.Snapshot(context.Background())
+	if serviceRow(t, third, "dnsmasq").ProcessState != "unknown" {
+		t.Fatal("stale procd PID regained green")
+	}
+	fixtureFile(t, root, serviceFixture, `{"dnsmasq":{"instances":{"main":{"running":false}}}}`)
+	now = now.Add(serviceInterval)
+	_, _ = o.Snapshot(context.Background())
+	fixtureFile(t, root, serviceFixture, `{"dnsmasq":{"instances":{"main":{"running":true,"pid":42,"command":["/usr/sbin/dnsmasq"]}}}}`)
+	now = now.Add(serviceInterval)
+	final, _ := o.Snapshot(context.Background())
+	if serviceRow(t, final, "dnsmasq").ProcessState != "running" {
+		t.Fatal("fresh procd PID lifecycle remained blocked")
+	}
+	if len(o.identities) > serviceRows {
+		t.Fatal("unbounded identities")
+	}
+}
