@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -17,9 +18,11 @@ import (
 )
 
 type serviceRuntime struct {
-	disk           diskState
-	state          State
-	binary         string
+	disk   diskState
+	state  State
+	binary string
+	// binarySHA256 is volatile provenance from a verified download, never from boot leftovers.
+	binarySHA256   [sha256.Size]byte
 	proc           *managedProcess
 	desired        bool
 	restarts       int
@@ -47,6 +50,7 @@ type Manager struct {
 	closeDone    chan struct{}
 	closeErr     error
 	activeCancel context.CancelFunc
+	probeLease   *probeLeaseState // caller owns release after its probe process is reaped
 	waitingExits int
 	wg           sync.WaitGroup
 	lock         *os.File
@@ -317,11 +321,12 @@ func (m *Manager) setState(id string, state State, code string) {
 // liveSnapshot contains immutable checked records. Ready is set only after a
 // successful start, so a check-only candidate is never an automatic fallback.
 type liveSnapshot struct {
-	disk     diskState
-	binary   string
-	desired  bool
-	ready    *configRecord
-	admitted *Options // holds candidate + prior ready scratch for the entire change
+	disk         diskState
+	binary       string
+	binarySHA256 [sha256.Size]byte
+	desired      bool
+	ready        *configRecord
+	admitted     *Options // holds candidate + prior ready scratch for the entire change
 }
 
 // admitChange reserves recovery scratch before any candidate write. A smaller
@@ -362,7 +367,7 @@ func (m *Manager) admitChange(ctx context.Context, id string, raw []byte, rollba
 }
 
 func snapshotRuntime(s *serviceRuntime) liveSnapshot {
-	previous := liveSnapshot{disk: s.disk, binary: s.binary, desired: s.desired}
+	previous := liveSnapshot{disk: s.disk, binary: s.binary, binarySHA256: s.binarySHA256, desired: s.desired}
 	if s.disk.Current != nil && s.disk.Current.Ready {
 		previous.ready = s.disk.Current
 	} else if s.disk.LastGood != nil && s.disk.LastGood.Ready {
@@ -471,6 +476,7 @@ func (m *Manager) recoverRuntime(ctx context.Context, id string, previous liveSn
 	m.mu.Lock()
 	s.disk = next
 	s.binary = previous.binary
+	s.binarySHA256 = previous.binarySHA256
 	if persistErr == nil {
 		pruneConfigs(opts, id, next)
 	}
@@ -556,6 +562,17 @@ func (m *Manager) AcquireGuarded(ctx context.Context, id string, artifact Artifa
 			_ = os.Remove(staged)
 		}
 	}()
+	// acquireArtifact has verified the fetched (possibly compressed) checksum.
+	// Record extracted bytes now, before any verifier or activation can use them.
+	// Never derive original trust by hashing an arbitrary current executable.
+	binarySHA256, err := verifiedArtifactDigest(ctx, m.opts, staged)
+	if err != nil {
+		m.setState(id, previous, "artifact_acquire_failed")
+		if ctx.Err() != nil {
+			return m.result(id, ctx.Err())
+		}
+		return m.result(id, errors.New("artifact acquisition failed"))
+	}
 	if disk.Current != nil {
 		m.setState(id, Checking, "")
 		if err = m.verifyAccepted(ctx, id, staged, disk.Current); err != nil {
@@ -593,6 +610,7 @@ func (m *Manager) AcquireGuarded(ctx context.Context, id string, artifact Artifa
 	oldBinary := s.binary
 	s.disk = next
 	s.binary = staged
+	s.binarySHA256 = binarySHA256
 	shouldRun := s.desired
 	m.mu.Unlock()
 	activated = true
@@ -1240,7 +1258,9 @@ func (m *Manager) watch(ctx context.Context, id string, p *managedProcess, epoch
 }
 
 // Close cancels downloads/checks/retries, waits for the active operation, stops
-// and reaps both process groups, then releases the private store lock.
+// and reaps both process groups, then releases the private store lock. Probe
+// leases remain caller-owned: close/reap the probe owner before runtime Close,
+// and call each lease's Release after its last process is reaped.
 func (m *Manager) Close() error {
 	m.closeOnce.Do(func() {
 		m.mu.Lock()
@@ -1262,6 +1282,7 @@ func (m *Manager) Close() error {
 				_ = os.Remove(s.binary)
 				s.binary = ""
 			}
+			s.binarySHA256 = [sha256.Size]byte{}
 		}
 		m.mu.Unlock()
 		m.releaseLock()
