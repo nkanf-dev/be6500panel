@@ -35,35 +35,111 @@ const expectReadOnly = (fixture: Fixture) => {
       ),
     ),
   ).toBe(false);
-  for (const url of activityReads(fixture)) {
-    expect(Number(url.searchParams.get("limit"))).toBeLessThanOrEqual(64);
-    expect(Number(url.searchParams.get("maxPoints"))).toBeLessThanOrEqual(288);
-    expect(
-      Array.from(url.searchParams.get("search") ?? "").length,
-    ).toBeLessThanOrEqual(64);
-  }
-  for (const response of fixture.activityResponses) {
-    expect(response.deviceCount).toBe(128);
-    expect(response.returned).toBeLessThanOrEqual(64);
-    expect(response.points).toBeLessThanOrEqual(288);
-  }
+  // Check every ledger entry in one assertion; do not create hundreds of trace-only steps.
+  expect(
+    activityReads(fixture)
+      .filter((url) => {
+        const limit = Number(url.searchParams.get("limit"));
+        const points = Number(url.searchParams.get("maxPoints"));
+        return (
+          !Number.isInteger(limit) ||
+          limit < 1 ||
+          limit > 64 ||
+          !Number.isInteger(points) ||
+          points < 1 ||
+          points > 288 ||
+          Array.from(url.searchParams.get("search") ?? "").length > 64
+        );
+      })
+      .map((url) => url.pathname + url.search),
+  ).toEqual([]);
+  expect(
+    fixture.activityResponses.filter(
+      (response) =>
+        response.deviceCount !== 128 ||
+        response.returned > 64 ||
+        response.points > 288,
+    ),
+  ).toEqual([]);
 };
-const expectBaseline = async (detail: Locator, title: string, devices = 1) => {
+const expectBaseline = async (
+  detail: Locator,
+  title: string,
+  deviceNumbers: readonly number[],
+  fixture: Fixture,
+) => {
   const trend = detail.getByRole("region", { name: title, exact: true });
   await expect(trend).toContainText("缺测与重置保持空隙，不补零");
   const table = trend.locator(".viz-table-details");
-  await table.locator("summary").click();
   const rows = table.locator("tbody tr");
-  await expect(rows).toHaveCount(288 * devices);
-  for (let index = 0; index < devices; index += 1) {
-    const cells = rows.nth(index * 288).locator("th, td");
-    await expect(cells.nth(3)).toHaveText("缺测");
-    await expect(cells.nth(4)).toHaveText("缺测");
-    await expect(cells.nth(5)).toHaveText("0");
-    await expect(cells.nth(6)).toHaveText("—");
-    await expect(cells.nth(7)).toHaveText("—");
-  }
+  const total = 288 * deviceNumbers.length;
+  const pages = Math.ceil(total / 100);
+  await expect(table.locator("summary")).toContainText(`${total} 条`);
+  await expect(rows).toHaveCount(0); // Closed heavy tables must not mount hidden history rows.
   await table.locator("summary").click();
+  const pager = table.getByRole("navigation", {
+    name: `${title} 数据表分页`,
+    exact: true,
+  });
+  // A previous single-device/table journey may retain its page across same-component updates.
+  for (
+    let previous = 0;
+    previous < pages &&
+    (await pager
+      .getByLabel(`${title} 数据表上一页`, { exact: true })
+      .isEnabled());
+    previous += 1
+  )
+    await pager.getByLabel(`${title} 数据表上一页`, { exact: true }).click();
+  const expected = deviceNumbers.flatMap((number) =>
+    fixture.allDevices[number - 1].samples.map((sample) => [
+      scaleDeviceName(number),
+      scaleDeviceMAC(number),
+      sample.rxBytes === null ? "缺测" : String(sample.rxBytes),
+      sample.txBytes === null ? "缺测" : String(sample.txBytes),
+      String(sample.coverageSeconds),
+      sample.rxBytes === null || sample.coverageSeconds === 0
+        ? "—"
+        : String(sample.rxBytes / sample.coverageSeconds),
+      sample.txBytes === null || sample.coverageSeconds === 0
+        ? "—"
+        : String(sample.txBytes / sample.coverageSeconds),
+    ]),
+  );
+  const observed: string[][] = [];
+  for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
+    await expect(pager).toContainText(
+      `第 ${pageIndex + 1} / ${pages} 页 · 共 ${total} 条`,
+    );
+    await expect(rows).toHaveCount(Math.min(100, total - pageIndex * 100));
+    observed.push(
+      ...(await rows.evaluateAll((elements) =>
+        elements.map(
+          (row) =>
+            Array.from(
+              row.querySelectorAll("th, td"),
+              (cell) => cell.textContent?.trim() ?? "",
+            ).filter((_, index) => index !== 2), // Localized timestamp presentation is not counter data.
+        ),
+      )),
+    );
+    if (pageIndex < pages - 1)
+      await pager.getByLabel(`${title} 数据表下一页`, { exact: true }).click();
+  }
+  // Every displayed record is the source record. This includes all8 null first buckets.
+  expect(observed).toEqual(expected);
+  await expect(
+    pager.getByLabel(`${title} 数据表下一页`, { exact: true }),
+  ).toBeDisabled();
+  await pager.getByLabel(`${title} 数据表上一页`, { exact: true }).click();
+  await expect(rows).toHaveCount(100);
+  await pager.getByLabel(`${title} 数据表末页`, { exact: true }).click();
+  await expect(rows).toHaveCount(total - (pages - 1) * 100);
+  await expect(rows.last()).toContainText(
+    scaleDeviceMAC(deviceNumbers.at(-1)!),
+  );
+  await table.locator("summary").click();
+  await expect(rows).toHaveCount(0);
 };
 
 // Synthetic scale acceptance, not live throughput/latency measurements. Three focused cases.
@@ -222,7 +298,7 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
     await expect
       .poll(() => hasActivityRead(fixture, scaleDeviceMAC(1), "1"))
       .toBe(true);
-    await expectBaseline(detail, "设备流量趋势");
+    await expectBaseline(detail, "设备流量趋势", [1], fixture);
     await workspace.getByLabel("设备下一页", { exact: true }).click();
     await expect(rows).toHaveCount(25);
     await expect(rows.first()).toContainText(scaleDeviceName(26));
@@ -258,7 +334,7 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
     await expect(
       detail.getByRole("heading", { name: scaleDeviceName(128), exact: true }),
     ).toBeVisible();
-    await expectBaseline(detail, "设备流量趋势");
+    await expectBaseline(detail, "设备流量趋势", [128], fixture);
     await search.fill("");
     await expect(rows).toHaveCount(25);
     await expect(
@@ -294,7 +370,7 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
       await expect
         .poll(() => hasActivityRead(fixture, scaleDeviceMAC(number), "1"))
         .toBe(true);
-    await expectBaseline(compare, "设备流量对比", 2);
+    await expectBaseline(compare, "设备流量对比", [1, 2], fixture);
     await workspace.getByLabel("设备下一页", { exact: true }).click();
     await expect(rows).toHaveCount(25);
     await expect(rows.first()).toContainText(scaleDeviceName(26));
@@ -340,6 +416,12 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
     await expect(
       compare.locator(".device-chart-stack > .table-scroll tbody tr"),
     ).toHaveCount(8);
+    await expectBaseline(
+      compare,
+      "设备流量对比",
+      [1, 2, 26, 27, 28, 29, 30, 31],
+      fixture,
+    );
     const selectedQueries = activityReads(fixture).filter(
       (url) => url.searchParams.get("limit") === "1",
     );
