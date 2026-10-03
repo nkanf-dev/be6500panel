@@ -1,0 +1,321 @@
+.device-workspace {
+  min-width: 0;
+}
+.device-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(330px, 0.95fr) minmax(0, 1.3fr);
+  gap: 18px;
+  align-items: start;
+}
+.device-inventory,
+.device-detail-stack,
+.device-chart-stack {
+  min-width: 0;
+}
+.device-detail-stack,
+.device-chart-stack {
+  display: grid;
+  gap: 16px;
+}
+.device-inventory {
+  position: sticky;
+  top: 14px;
+}
+.device-list th {
+  font-weight: 500;
+  text-align: left;
+}
+.device-list td,
+.device-list th {
+  vertical-align: top;
+}
+.device-list tbody tr {
+  cursor: pointer;
+}
+.device-list input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.device-title-button {
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  color: var(--foreground);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.device-title-button:hover {
+  color: var(--primary);
+}
+.device-title-button:focus-visible,
+.device-compare-chips button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.device-subtitle {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.device-tags,
+.device-proxy-summary,
+.device-detail-actions,
+.device-compare-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.device-tags {
+  margin-top: 6px;
+}
+.device-compare-toolbar,
+.device-pinned-selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.device-pinned-selection {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.device-compare-toolbar > span {
+  flex: 1;
+}
+.device-paging {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.device-range {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 18px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.device-source-note {
+  padding: 0 18px;
+  margin: 12px 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.device-hardware {
+  padding-top: 4px;
+}
+.device-detail-actions {
+  margin: 4px 18px 14px;
+}
+.device-hardware .key-values {
+  margin: 0;
+}
+.device-note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.device-hardware-details {
+  margin: 14px 18px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.device-hardware-details > summary {
+  color: var(--foreground);
+  cursor: pointer;
+  padding-bottom: 10px;
+  font-weight: 600;
+}
+.device-hardware-details .device-source-note {
+  padding: 0;
+}
+.device-hardware-details .table-scroll {
+  margin: 0;
+}
+.device-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.device-filter select {
+  max-width: 100%;
+  min-height: 34px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  border-radius: 7px;
+  padding: 0 8px;
+  font: inherit;
+}
+.device-proxy-summary {
+  padding: 0 18px 12px;
+}
+.device-compare-chips {
+  padding: 0 18px 18px;
+}
+.device-compare-chips button {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 2px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.device-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgb(0 0 0 / 0.5);
+  backdrop-filter: blur(4px);
+}
+.device-dialog {
+  position: fixed;
+  z-index: 81;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 24px 90px rgb(0 0 0 / 0.25);
+  padding: 22px;
+}
+.device-dialog-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.device-dialog-heading h2 {
+  font-size: 19px;
+  margin: 0 0 8px;
+}
+.device-dialog-heading p {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0;
+}
+.device-edit-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 22px;
+}
+.device-edit-form input,
+.device-edit-form textarea {
+  width: 100%;
+  min-width: 0;
+  background: var(--muted);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  box-sizing: border-box;
+}
+.device-edit-form textarea {
+  resize: vertical;
+  min-height: 96px;
+}
+.device-edit-form .device-hardware-details {
+  margin: 0;
+}
+.device-dialog-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.device-conflict {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+@media (max-width: 1250px) {
+  .device-workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .device-inventory {
+    position: static;
+  }
+  .device-detail-placeholder {
+    display: none;
+  }
+}
+@media (max-width: 600px) {
+  .device-workspace-toolbar,
+  .device-workspace-toolbar .toolbar-left {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+  .device-workspace-toolbar .search-field {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .device-list {
+    min-width: 610px;
+  }
+  .device-filter {
+    justify-content: space-between;
+  }
+  .device-filter select {
+    min-height: 40px;
+  }
+  .device-dialog {
+    padding: 18px;
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    box-sizing: border-box;
+  }
+  .device-edit-form input,
+  .device-edit-form textarea {
+    font-size: 16px;
+  }
+  .device-range {
+    margin: 12px;
+  }
+  .device-range .segmented {
+    width: 100%;
+    display: flex;
+  }
+  .device-range .segmented button {
+    flex: 1;
+    min-height: 40px;
+  }
+  .device-compare-toolbar {
+    padding: 12px;
+  }
+  .device-compare-toolbar > span {
+    flex-basis: 100%;
+  }
+  .device-paging .button {
+    min-height: 40px;
+    min-width: 40px;
+  }
+}
