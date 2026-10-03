@@ -9,8 +9,10 @@ try {
  const page = await browser.newPage({deviceScaleFactor:1});
  for (const [size,name] of sizes) {
   await page.setViewportSize({width:size,height:size});
-  await page.setContent(`<style>html,body{margin:0;background:transparent}svg{display:block;width:100vw;height:100vh}</style>${svg}`);
-  await page.screenshot({path:fileURLToPath(new URL(name,publicDir)),omitBackground:true});
+  const sized = svg.replace(/width="64" height="64"/, `width="${size}" height="${size}"`);
+  await page.setContent(`<style>html,body{margin:0;padding:0;overflow:hidden;background:transparent;width:${size}px;height:${size}px}svg{display:block;overflow:hidden;width:${size}px;height:${size}px}</style>${sized}`);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.screenshot({path:fileURLToPath(new URL(name,publicDir)),omitBackground:true,clip:{x:0,y:0,width:size,height:size}});
  }
  // ICO permits PNG-compressed entries. Embed all three exact resolutions.
  const buffers = await Promise.all([16,32,48].map(size=>readFile(new URL(sizes.get(size),publicDir))));
