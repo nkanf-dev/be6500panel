@@ -8,6 +8,7 @@ vi.mock("../../app/console-context", () => ({
 }));
 afterEach(() => vi.unstubAllGlobals());
 const emptyNodes = { nodes: [], diagnostics: [], selectedNodeId: "" };
+const emptyProbes = {revision:"empty",available:false,unavailableCode:"empty_subscription",target:"https://www.gstatic.com/generate_204",running:false,results:[],limits:{maxNodes:256,concurrency:1,timeoutMs:3000}};
 describe("proxy setup and recovery", () => {
   it("explains the acquisition prerequisite and links to runtime without issuing writes", async () => {
     const fetchMock = vi.fn((url: string) =>
@@ -24,7 +25,7 @@ describe("proxy setup and recovery", () => {
                   },
                 ],
               }
-            : emptyNodes,
+            : url === "/api/proxy/node-probes" ? emptyProbes : emptyNodes,
         ),
       ),
     );
@@ -41,6 +42,7 @@ describe("proxy setup and recovery", () => {
         ([url]) =>
           url === "/api/runtime" ||
           url === "/api/proxy/nodes" ||
+          url === "/api/proxy/node-probes" ||
           url === "/api/runtime/config?service=sing-box",
       ),
     ).toBe(true);
@@ -53,7 +55,7 @@ describe("proxy setup and recovery", () => {
           ? failed
             ? jsonResponse({ enabled: true, services: [{}] })
             : jsonResponse({ enabled: true, services: [runtimeStatus] })
-          : jsonResponse(emptyNodes),
+          : jsonResponse(url === "/api/proxy/node-probes" ? emptyProbes : emptyNodes),
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -72,6 +74,7 @@ describe("proxy setup and recovery", () => {
         ([url]) =>
           url === "/api/runtime" ||
           url === "/api/proxy/nodes" ||
+          url === "/api/proxy/node-probes" ||
           url === "/api/runtime/config?service=sing-box",
       ),
     ).toBe(true);
@@ -89,7 +92,7 @@ describe("proxy setup and recovery", () => {
           jsonResponse(
             url === "/api/runtime"
               ? { enabled: true, services: [runtimeStatus] }
-              : emptyNodes,
+              : url === "/api/proxy/node-probes" ? emptyProbes : emptyNodes,
           ),
         );
       }),
@@ -117,7 +120,7 @@ describe("proxy setup and recovery", () => {
           jsonResponse(
             url === "/api/runtime"
               ? { enabled: false, services: [] }
-              : emptyNodes,
+              : url === "/api/proxy/node-probes" ? emptyProbes : emptyNodes,
           ),
         ),
       ),

@@ -47,7 +47,7 @@ export function useNodeProbes(revision?: string) {
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
-      setLoading(true);
+      setLoading(!latest.current || (revision !== undefined && latest.current.revision !== revision));
       try {
         const value = await runRequest(
           nodeProbeApi.snapshot(),
