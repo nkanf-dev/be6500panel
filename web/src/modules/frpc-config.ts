@@ -39,7 +39,7 @@ function domain(value: string, label: string): string {
   return value;
 }
 /** TOML basic strings cannot contain raw controls or invalid Unicode scalars. */
-function quote(value: string, label: string): string {
+export function quoteFrpcValue(value: string, label: string): string {
   if (typeof value !== "string") fail(`${label}必须为字符串`);
   const escapes: Record<string, string> = {
     '"': '\\"',
@@ -80,11 +80,11 @@ export function compileFrpcConfig(input: FrpcPlanInput, token: string): string {
     input.proxies.length > maximumMappings
   )
     fail(`映射数量必须为 1–${maximumMappings}`);
-  const quotedToken = quote(token, "令牌");
+  const quotedToken = quoteFrpcValue(token, "令牌");
   const lines = [
-    `serverAddr = ${quote(server, "服务器地址")}`,
+    `serverAddr = ${quoteFrpcValue(server, "服务器地址")}`,
     `serverPort = ${serverPort}`,
-    `transport.protocol = ${quote(input.transport, "传输协议")}`,
+    `transport.protocol = ${quoteFrpcValue(input.transport, "传输协议")}`,
     `transport.tls.enable = ${input.tls}`,
   ];
   if (token !== "")
@@ -105,9 +105,9 @@ export function compileFrpcConfig(input: FrpcPlanInput, token: string): string {
     lines.push(
       "",
       "[[proxies]]",
-      `name = ${quote(proxy.name, `${label}名称`)}`,
-      `type = ${quote(proxy.type, `${label}类型`)}`,
-      `localIP = ${quote(address(proxy.localAddress, `${label}本地地址`), `${label}本地地址`)}`,
+      `name = ${quoteFrpcValue(proxy.name, `${label}名称`)}`,
+      `type = ${quoteFrpcValue(proxy.type, `${label}类型`)}`,
+      `localIP = ${quoteFrpcValue(address(proxy.localAddress, `${label}本地地址`), `${label}本地地址`)}`,
       `localPort = ${port(proxy.localPort, `${label}本地端口`)}`,
     );
     if (proxy.type === "tcp" || proxy.type === "udp") {
@@ -120,7 +120,7 @@ export function compileFrpcConfig(input: FrpcPlanInput, token: string): string {
       )
         fail(`${label}域名数量必须为 1–64`);
       const domains = proxy.domains.map((value) =>
-        quote(domain(value, `${label}域名`), `${label}域名`),
+        quoteFrpcValue(domain(value, `${label}域名`), `${label}域名`),
       );
       lines.push(`customDomains = [${domains.join(", ")}]`);
     }

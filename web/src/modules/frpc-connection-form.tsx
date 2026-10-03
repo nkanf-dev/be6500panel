@@ -6,29 +6,32 @@ import {
   PanelHeader,
   Select,
 } from "../components/ui/primitives";
+import type { FrpcTokenIntent } from "./frpc-document";
 import type { FrpcPlanInput } from "../lib/contracts";
 
 export function FrpcConnectionForm({
   input,
   token,
   disabled,
+  hasToken,
   onChange,
   onTokenChange,
 }: {
   input: FrpcPlanInput;
-  token: string;
+  token: FrpcTokenIntent;
+  hasToken: boolean;
   disabled: boolean;
   onChange: <K extends keyof FrpcPlanInput>(
     key: K,
     value: FrpcPlanInput[K],
   ) => void;
-  onTokenChange: (value: string) => void;
+  onTokenChange: (value: FrpcTokenIntent) => void;
 }) {
   return (
     <Panel>
       <PanelHeader
         title="服务器连接"
-        subtitle="填写自己的 frps 服务器；最终 Commit 执行原生校验，不会自动启动或暴露面板"
+        subtitle="填写自己的 frps 服务器；保存时执行原生校验，不会自动启动或暴露面板"
         action={<Cable size={16} />}
       />
       <div className="config-form">
@@ -77,20 +80,58 @@ export function FrpcConnectionForm({
             />
           </Field>
         </div>
-        <Field
-          label="认证令牌"
-          hint="仅填写服务器提供的 token；无令牌则不生成认证配置。Commit 成功后清空输入。"
-        >
-          <input
-            aria-label="认证令牌"
-            type="password"
-            autoComplete="new-password"
-            spellCheck={false}
-            disabled={disabled}
-            value={token}
-            onChange={(event) => onTokenChange(event.target.value)}
-          />
-        </Field>
+        <fieldset className="config-form" disabled={disabled}>
+          <legend>认证密钥</legend>
+          <div role="radiogroup" aria-label="密钥操作">
+            {[
+              { mode: "preserve", label: "保留已保存密钥" },
+              { mode: "replace", label: "替换密钥" },
+              { mode: "clear", label: "清除密钥" },
+            ].map(({ mode, label }) => (
+              <label key={mode} className="checkbox-field">
+                <input
+                  type="radio"
+                  name="frpc-token-intent"
+                  value={mode}
+                  checked={token.mode === mode}
+                  onChange={() =>
+                    onTokenChange({
+                      mode: mode as FrpcTokenIntent["mode"],
+                      value: "",
+                    })
+                  }
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+          <Field
+            label="认证令牌"
+            hint={
+              token.mode === "clear"
+                ? "保存后清除已保存密钥；未修改的认证扩展参数仍会保留。"
+                : "留空默认保留已保存密钥；选择替换并填写新密钥，或明确选择清除。"
+            }
+          >
+            <input
+              aria-label="认证令牌"
+              type="password"
+              autoComplete="new-password"
+              spellCheck={false}
+              disabled={disabled || token.mode === "clear"}
+              placeholder={
+                hasToken ? "已配置密钥（留空保持不变）" : "未配置密钥（可留空）"
+              }
+              value={token.value}
+              onChange={(event) =>
+                onTokenChange({
+                  mode: event.target.value ? "replace" : "preserve",
+                  value: event.target.value,
+                })
+              }
+            />
+          </Field>
+        </fieldset>
         <label className="checkbox-field">
           <input
             type="checkbox"

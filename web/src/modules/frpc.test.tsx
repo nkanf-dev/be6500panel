@@ -69,7 +69,7 @@ describe("FrpcPage runtime configuration", () => {
     await waitFor(() => expect(commitButton()).toBeEnabled());
     await user.click(commitButton());
     await screen.findByText(
-      "frpc 配置 Commit 完成，已校验并保存。可在运行管理中启动。",
+      "frpc 配置已校验并保存。可在运行管理中启动；运行状态不代表远端连通。",
     );
     const call = fetch.mock.calls.find(
       ([url]) => url === "/api/runtime/configure",
@@ -85,7 +85,7 @@ describe("FrpcPage runtime configuration", () => {
     expect(body.config).toContain("localPort = 8080");
     expect(body.config).toContain("remotePort = 18080");
     expect(screen.getByLabelText("认证令牌", { exact: true })).toHaveValue("");
-    expect(screen.getByText(/再次 Commit 需显式填写令牌/)).toBeInTheDocument();
+    expect(screen.getByText(/再次编辑默认保留已保存密钥/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "启动 frpc" })).toBeEnabled();
     expect(fetch.mock.calls.some(([url]) => url === "/api/runtime/start")).toBe(
       false,
@@ -184,7 +184,7 @@ describe("FrpcPage runtime configuration", () => {
       fetch.mock.calls.filter(([url]) => url === "/api/runtime/configure"),
     ).toHaveLength(0);
     await user.click(
-      screen.getByRole("button", { name: "使用最新 generation 审阅" }),
+      screen.getByRole("button", { name: "读取最新配置并合并更改" }),
     );
     expect(commitButton()).toBeEnabled();
   });

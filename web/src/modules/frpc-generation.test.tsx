@@ -34,7 +34,7 @@ describe("frpc sticky edit generation", () => {
     await user.type(tokenInput(), "synthetic-rebase-token");
     observed = { ...observed, generation: 9 };
     await refresh(user, 9);
-    expect(screen.getByRole("alert")).toHaveTextContent("generation_conflict");
+    expect(screen.getByRole("alert")).toHaveTextContent("配置已被更新");
     expect(commitButton()).toBeDisabled();
     fireEvent.submit(screen.getByRole("tabpanel"));
     expect(
@@ -44,14 +44,14 @@ describe("frpc sticky edit generation", () => {
     await user.type(screen.getByRole("textbox", { name: "名称" }), "-edited");
     expect(commitButton()).toBeDisabled();
     await user.click(
-      screen.getByRole("button", { name: "使用最新 generation 审阅" }),
+      screen.getByRole("button", { name: "读取最新配置并合并更改" }),
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(tokenInput()).toHaveValue("synthetic-rebase-token");
     await waitFor(() => expect(commitButton()).toBeEnabled());
     await user.click(commitButton());
     await screen.findByText(
-      "frpc 配置 Commit 完成，已校验并保存。可在运行管理中启动。",
+      "frpc 配置已校验并保存。可在运行管理中启动；运行状态不代表远端连通。",
     );
     const call = fetch.mock.calls.find(
       ([url]) => url === "/api/runtime/configure",
@@ -74,7 +74,7 @@ describe("frpc sticky edit generation", () => {
     await waitFor(() => expect(commitButton()).toBeEnabled());
     await user.click(commitButton());
     await screen.findByText(
-      "frpc 配置 Commit 完成，已校验并保存。可在运行管理中启动。",
+      "frpc 配置已校验并保存。可在运行管理中启动；运行状态不代表远端连通。",
     );
     const call = fetch.mock.calls.find(
       ([url]) => url === "/api/runtime/configure",
@@ -93,7 +93,7 @@ describe("frpc sticky edit generation", () => {
     await waitFor(() => expect(commitButton()).toBeEnabled());
     observed = { ...observed, generation: 4 };
     await refresh(user, 4);
-    expect(screen.getByRole("alert")).toHaveTextContent("generation_conflict");
+    expect(screen.getByRole("alert")).toHaveTextContent("配置已被更新");
     expect(commitButton()).toBeDisabled();
   });
   it("resets edit generation after successful Commit and freezes again on a new edit", async () => {
@@ -106,7 +106,7 @@ describe("frpc sticky edit generation", () => {
     observed = { ...observed, generation: 8, configured: true };
     await user.click(commitButton());
     await screen.findByText(
-      "frpc 配置 Commit 完成，已校验并保存。可在运行管理中启动。",
+      "frpc 配置已校验并保存。可在运行管理中启动；运行状态不代表远端连通。",
     );
     await screen.findByText("generation 8 · 版本未登记");
     observed = { ...observed, generation: 11 };
@@ -115,7 +115,7 @@ describe("frpc sticky edit generation", () => {
     await user.type(tokenInput(), "synthetic-next-token");
     observed = { ...observed, generation: 12 };
     await refresh(user, 12);
-    expect(screen.getByRole("alert")).toHaveTextContent("generation_conflict");
+    expect(screen.getByRole("alert")).toHaveTextContent("配置已被更新");
     expect(commitButton()).toBeDisabled();
   });
 });

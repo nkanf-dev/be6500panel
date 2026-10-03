@@ -22,11 +22,14 @@ export function FrpcTunnelEditor({
   proxies,
   onChange,
   disabled = false,
+  isSavedMapping = () => false,
 }: {
   proxies: FrpcProxy[];
   onChange: (proxies: FrpcProxy[]) => void;
   disabled?: boolean;
+  isSavedMapping?: (proxy: FrpcProxy) => boolean;
 }) {
+  const [removeIndex, setRemoveIndex] = useState<number>();
   const [nextId, setNextId] = useState(2);
   function update(index: number, change: Partial<FrpcProxy>) {
     onChange(
@@ -42,6 +45,7 @@ export function FrpcTunnelEditor({
         i !== index
           ? item
           : {
+              ...proxy,
               name: proxy.name,
               type,
               localAddress: proxy.localAddress,
@@ -92,7 +96,10 @@ export function FrpcTunnelEditor({
                 type="button"
                 disabled={disabled}
                 aria-label={`删除映射 ${index + 1}`}
-                onClick={() => onChange(proxies.filter((_, i) => i !== index))}
+                onClick={() => {
+                  if (isSavedMapping(proxy)) setRemoveIndex(index);
+                  else onChange(proxies.filter((_, i) => i !== index));
+                }}
               >
                 <Trash2 size={14} />
               </Button>
@@ -139,7 +146,7 @@ export function FrpcTunnelEditor({
               <Field label="本地端口">
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={65535}
                   required
                   disabled={disabled}
@@ -154,7 +161,7 @@ export function FrpcTunnelEditor({
               <Field label="远程端口">
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={65535}
                   required
                   disabled={disabled}
@@ -188,6 +195,29 @@ export function FrpcTunnelEditor({
             )}
           </section>
         ))}
+        {removeIndex !== undefined && proxies[removeIndex] && (
+          <div role="group" aria-label="删除映射确认" className="config-form">
+            <p>
+              删除映射“{proxies[removeIndex].name}
+              ”？保存后会同时移除该映射的原生与扩展参数。
+            </p>
+            <div>
+              <Button type="button" onClick={() => setRemoveIndex(undefined)}>
+                保留映射
+              </Button>{" "}
+              <Button
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  onChange(proxies.filter((_, index) => index !== removeIndex));
+                  setRemoveIndex(undefined);
+                }}
+              >
+                确认删除映射
+              </Button>
+            </div>
+          </div>
+        )}
         {!proxies.length && <div className="empty-inline">暂无服务映射</div>}
       </div>
     </Panel>

@@ -1,6 +1,8 @@
 import { screen } from "@testing-library/react";
 import type userEvent from "@testing-library/user-event";
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
+import { clearFrpcFormSession } from "./frpc-session";
+beforeEach(clearFrpcFormSession);
 import type { RuntimeStatus } from "../lib/contracts";
 
 export const frpcStatus: RuntimeStatus = {
@@ -25,13 +27,20 @@ export function mockRuntime(
     missingStatus?: boolean;
     failure?: boolean;
     artifactAvailable?: boolean;
+    config?: string;
+    configGeneration?: () => number;
+    configured?: boolean;
     observedStatus?: () => RuntimeStatus | undefined;
   } = {},
 ) {
   let currentStatus = {
     ...frpcStatus,
+    configured: options.configured ?? false,
     artifactAvailable: options.artifactAvailable ?? true,
   };
+  let currentConfig =
+    options.config ??
+    'serverAddr = "private.example.test"\nauth.token = "synthetic-stored-token"\n';
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url === "/api/runtime") {
       const observed = options.observedStatus
@@ -48,9 +57,11 @@ export function mockRuntime(
       return Promise.resolve(
         respond({
           service: "frpc",
-          generation: 7,
-          config:
-            'serverAddr = "private.example.test"\nauth.token = "synthetic-stored-token"\n',
+          generation:
+            options.configGeneration?.() ??
+            options.observedStatus?.()?.generation ??
+            currentStatus.generation,
+          config: currentConfig,
         }),
       );
     if (url === "/api/runtime/configure" && init?.method === "POST") {
@@ -63,6 +74,7 @@ export function mockRuntime(
             409,
           ),
         );
+      currentConfig = JSON.parse(init.body as string).config;
       currentStatus = {
         ...currentStatus,
         state: "stopped",
@@ -77,7 +89,7 @@ export function mockRuntime(
   return fetch;
 }
 export const commitButton = () =>
-  screen.getByRole("button", { name: "生成并 Commit frpc 配置" });
+  screen.getByRole("button", { name: "校验并保存 frpc 配置" });
 export async function setServer(user: ReturnType<typeof userEvent.setup>) {
   await user.type(
     screen.getByRole("textbox", { name: "服务器地址" }),

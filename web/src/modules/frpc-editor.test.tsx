@@ -51,7 +51,7 @@ describe("frpc mapping and native editors", () => {
     await waitFor(() => expect(commitButton()).toBeEnabled());
     await user.click(commitButton());
     await screen.findByText(
-      "frpc 配置 Commit 完成，已校验并保存。可在运行管理中启动。",
+      "frpc 配置已校验并保存。可在运行管理中启动；运行状态不代表远端连通。",
     );
     const call = fetch.mock.calls.find(
       ([url]) => url === "/api/runtime/configure",
