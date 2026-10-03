@@ -9,6 +9,7 @@ import {
   runtimeStatus,
 } from "../production-fixtures.test-data";
 vi.mock("../../app/console-context", () => ({
+  useOptionalConsole: () => undefined,
   useConsole: () => ({ health: { mode: "host" } }),
 }));
 afterEach(() => vi.unstubAllGlobals());

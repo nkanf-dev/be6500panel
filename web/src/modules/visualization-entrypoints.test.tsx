@@ -7,9 +7,11 @@ import { OverviewPage } from "./overview";
 import { ConnectionAnalysis } from "./proxy/connection-analysis";
 import { jsonResponse, routerSnapshot } from "./production-fixtures.test-data";
 import { historyFixture } from "../components/traffic-history/history-fixture.test-data";
+import { activityFixture } from "../components/device-activity/activity-fixture.test-data";
 
 const state = vi.hoisted(() => ({ mode: "host" }));
 vi.mock("../app/console-context", () => ({
+  useOptionalConsole: () => undefined,
   useConsole: () => ({
     health: { mode: state.mode, readOnly: state.mode === "demo" },
     capabilities: [],
@@ -99,7 +101,7 @@ describe("production visualization entry points", () => {
     const user = userEvent.setup();
     renderPanel(<ConnectionAnalysis />);
     for (const [tab, title] of [
-      ["请求阶段", "请求瀑布"],
+      ["请求阶段", "网络诊断瀑布图 · 演示"],
       ["延迟分布", "延迟分布"],
       ["规则命中", "规则命中"],
     ]) {
@@ -113,11 +115,39 @@ describe("production visualization entry points", () => {
       ).toBeInTheDocument();
     }
   });
-  it("renders the custom homepage with observed devices and durable WAN history, not browser samples or a heatmap", async () => {
-    const fetch = vi.fn().mockResolvedValue(jsonResponse(historyFixture()));
+  it("renders the custom homepage with observed devices and durable WAN history, real activity heatmap and diagnostic controls, not browser samples", async () => {
+    const fetch = vi.fn((url: string, _init?: RequestInit) =>
+      Promise.resolve(
+        jsonResponse(
+          url.startsWith("/api/devices/activity")
+            ? activityFixture()
+            : url === "/api/proxy/request-traces"
+              ? {
+                  traces: [],
+                  targets: [
+                    {
+                      id: "google204",
+                      label: "Google 204",
+                      url: "https://www.gstatic.com/generate_204",
+                    },
+                  ],
+                  limits: {
+                    timeoutMs: 10000,
+                    bodyBytes: 65536,
+                    concurrency: 1,
+                    capacity: 64,
+                  },
+                  running: false,
+                }
+              : historyFixture(),
+        ),
+      ),
+    );
     vi.stubGlobal("fetch", fetch);
     renderPanel(<OverviewPage navigate={vi.fn()} />);
-    await screen.findByText("来源：服务器 WAN 聚合历史（当前接口：WAN · test-wan）");
+    await screen.findByText(
+      "来源：服务器 WAN 聚合历史（当前接口：WAN · test-wan）",
+    );
     expect(
       screen.getByRole("button", { name: "编辑布局" }),
     ).toBeInTheDocument();
@@ -143,6 +173,15 @@ describe("production visualization entry points", () => {
       within(traffic).getByRole("table", { hidden: true }),
     ).toBeInTheDocument();
     expect(screen.queryByText("演示数据")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "设备活跃热力图" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "网络诊断瀑布图" }),
+    ).toBeInTheDocument();
+    expect(
+      fetch.mock.calls.every(([, init]) => !init || init.method === "GET"),
+    ).toBe(true);
     expect(fetch).toHaveBeenCalledWith(
       "/api/traffic/history?range=30m&maxPoints=1500",
       expect.any(Object),

@@ -1,4 +1,5 @@
 import { strings } from "../../locales/strings";
+import { useDeviceLabels } from "../devices";
 import { useEffect, useState } from "react";
 import {
   Badge,
@@ -43,6 +44,7 @@ export function CapturePanel({
   runtime: RuntimeController;
   onPending?: (pending: boolean) => void;
 }) {
+  const labels = useDeviceLabels();
   const observation = useResource(api.proxyCapture);
   const router = useResource(api.router);
   const [selected, setSelected] = useState<string[]>([]);
@@ -259,7 +261,7 @@ export function CapturePanel({
           <ul>
             {capture.clients.map((client) => (
               <li key={client.mac}>
-                {client.hostname || "未命名设备"} ·{" "}
+                {labels.displayName(client.mac, client.hostname)} ·{" "}
                 <span className="mono">{client.mac}</span> ·{" "}
                 <span className="mono">
                   {client.ip || strings.proxy.capture.waitingAddress}
@@ -364,8 +366,8 @@ export function CapturePanel({
           </div>
         </div>
         <p className="text-muted text-xs">
-          只列出可接管的 LAN 设备，按 MAC 识别。在线状态来自 ARP
-          观察；离线或未解析的设备等待当前地址，不扩大到整个 LAN。
+          只列出可接管的 LAN 设备，按 MAC 识别。ARP 记录不等同于实时在线；
+          未解析的设备等待当前地址，不扩大到整个 LAN。
         </p>
         {router.loading && <Loading label="正在读取当前设备" />}
         {router.error !== undefined && (
@@ -404,7 +406,7 @@ export function CapturePanel({
                   <th>设备名称</th>
                   <th>IP 地址</th>
                   <th>MAC 地址</th>
-                  <th>在线状态</th>
+                  <th>ARP 状态</th>
                 </tr>
               </thead>
               <tbody>
@@ -413,7 +415,7 @@ export function CapturePanel({
                     <td>
                       <input
                         type="checkbox"
-                        aria-label={`选择设备 ${device.hostname || "未命名设备"} ${device.mac}`}
+                        aria-label={`选择设备 ${labels.displayName(device.mac, device.hostname)} ${device.mac}`}
                         checked={selected.includes(device.mac)}
                         disabled={
                           busy ||
@@ -432,7 +434,7 @@ export function CapturePanel({
                       />
                     </td>
                     <td>
-                      {device.hostname || "未命名设备"}
+                      {labels.displayName(device.mac, device.hostname)}
                       {device.ip && device.ip === snapshot?.currentClientIP && (
                         <>
                           {" "}

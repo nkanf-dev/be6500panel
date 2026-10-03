@@ -6,6 +6,7 @@ import { ProxyPage } from "./proxy";
 import { FrpcPage } from "./frpc";
 import { LogsPanel } from "./logs";
 vi.mock("../app/console-context", () => ({
+  useOptionalConsole: () => undefined,
   useConsole: () => ({ health: { mode: "host" }, capabilities: [] }),
 }));
 vi.mock("../components/visualizations", () => ({

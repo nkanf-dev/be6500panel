@@ -15,6 +15,7 @@ import type {
   RouterSnapshot,
 } from "../lib/contracts";
 import { connectStatusStream, type ConnectionState } from "../lib/events";
+import { canonicalMAC } from "../modules/devices";
 
 interface ConsoleContextValue {
   health?: Health;
@@ -25,6 +26,8 @@ interface ConsoleContextValue {
   routerError?: unknown;
   routerLoading: boolean;
   refreshRouter: () => void;
+  selectedDeviceMAC?: string;
+  selectDevice: (mac: string | undefined) => void;
   trafficSamples: readonly { time: string; rx: number; tx: number }[];
   trafficSource?: string;
   connection: ConnectionState;
@@ -47,6 +50,10 @@ export function ConsoleProvider({
   const [router, setRouter] = useState<RouterSnapshot>();
   const [routerError, setRouterError] = useState<unknown>();
   const [routerLoading, setRouterLoading] = useState(true);
+  const [selectedDeviceMAC, setSelectedDeviceMAC] = useState<string>();
+  const selectDevice = useCallback((mac: string | undefined) => {
+    setSelectedDeviceMAC(mac ? canonicalMAC(mac) : undefined);
+  }, []);
   const sampleRouter = useRef<() => void>(() => {});
   const [trafficSamples, setTrafficSamples] = useState<
     { time: string; rx: number; tx: number }[]
@@ -243,6 +250,8 @@ export function ConsoleProvider({
         routerError,
         routerLoading,
         refreshRouter,
+        selectedDeviceMAC,
+        selectDevice,
         trafficSamples: routerError ? [] : trafficSamples,
         trafficSource,
         connection,
@@ -254,6 +263,9 @@ export function ConsoleProvider({
       {children}
     </ConsoleContext.Provider>
   );
+}
+export function useOptionalConsole() {
+  return useContext(ConsoleContext);
 }
 export function useConsole() {
   const value = useContext(ConsoleContext);

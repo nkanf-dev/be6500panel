@@ -1,8 +1,10 @@
 import { Badge } from "../components/ui/primitives";
+import { useDeviceLabels } from "./devices";
 import type { RouterSnapshot } from "../lib/contracts";
 import { observationErrors, RouterTable, RouterTime } from "./router-frame";
 
 export function RouterDevices({ snapshot }: { snapshot: RouterSnapshot }) {
+  const labels = useDeviceLabels();
   const arpIncomplete = observationErrors(snapshot, ["devices.arp"]).length > 0;
   return (
     <RouterTable
@@ -13,7 +15,7 @@ export function RouterDevices({ snapshot }: { snapshot: RouterSnapshot }) {
     >
       {snapshot.devices.map((device) => (
         <tr key={`${device.ip}-${device.mac}`}>
-          <td>{device.hostname || "—"}</td>
+          <td>{labels.displayName(device.mac, device.hostname)}</td>
           <td className="mono">{device.ip || "—"}</td>
           <td className="mono">{device.mac || "—"}</td>
           <td>

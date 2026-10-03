@@ -3,7 +3,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "../../theme";
 import { CustomDashboard } from "./CustomDashboard";
-import { DASHBOARD_STORAGE_KEY } from "./layout";
+import { DASHBOARD_STORAGE_KEY, widgetDefinitions } from "./layout";
+import { activityFixture } from "../device-activity/activity-fixture.test-data";
 import { historyFixture } from "../traffic-history/history-fixture.test-data";
 import {
   jsonResponse,
@@ -17,6 +18,7 @@ const state = vi.hoisted(() => ({
   mode: "host",
 }));
 vi.mock("../../app/console-context", () => ({
+  useOptionalConsole: () => undefined,
   useConsole: () => ({
     health: { mode: state.mode, readOnly: true },
     system: {
@@ -89,7 +91,29 @@ function metricsFixture(): ProxyMetrics {
   };
 }
 function installFetch(telemetry = metricsFixture()) {
-  const fetch = vi.fn((url: string) => {
+  const fetch = vi.fn((url: string, _init?: RequestInit) => {
+    if (url.startsWith("/api/devices/activity"))
+      return Promise.resolve(jsonResponse(activityFixture()));
+    if (url === "/api/proxy/request-traces")
+      return Promise.resolve(
+        jsonResponse({
+          traces: [],
+          targets: [
+            {
+              id: "google204",
+              label: "Google 204",
+              url: "https://www.gstatic.com/generate_204",
+            },
+          ],
+          limits: {
+            timeoutMs: 10000,
+            bodyBytes: 65536,
+            concurrency: 1,
+            capacity: 64,
+          },
+          running: false,
+        }),
+      );
     if (url.startsWith("/api/traffic/history"))
       return Promise.resolve(jsonResponse(historyFixture()));
     if (url === "/api/proxy/metrics")
@@ -131,7 +155,7 @@ describe("custom homepage with real widget integration", () => {
       within(widgets)
         .getAllByRole("listitem")
         .filter((item) => item.hasAttribute("data-widget-id")),
-    ).toHaveLength(6);
+    ).toHaveLength(widgetDefinitions.length);
     expect(screen.getByText("observed-home-router")).toBeInTheDocument();
     expect(screen.queryByText(/Commit/)).not.toBeInTheDocument();
     expect(screen.getByText("75.0")).toBeInTheDocument();
@@ -149,6 +173,16 @@ describe("custom homepage with real widget integration", () => {
     expect(within(proxy).getByText("8.0 KiB")).toBeInTheDocument();
     expect(within(proxy).getByText("64.0 KiB")).toBeInTheDocument();
     expect(within(proxy).getByText("512 / 4096 B/s")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "设备活跃热力图" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "网络诊断瀑布图" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发起诊断测试" })).toBeEnabled();
+    expect(
+      fetch.mock.calls.every(([, init]) => !init || init.method === "GET"),
+    ).toBe(true);
     expect(screen.queryByText("演示数据")).not.toBeInTheDocument();
     expect(screen.queryByText("browser-only-sample")).not.toBeInTheDocument();
     expect(

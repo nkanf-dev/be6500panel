@@ -86,7 +86,8 @@ describe("custom dashboard layout flows", () => {
     const user = userEvent.setup();
     const stored = defaultLayout();
     stored.name = "Saved";
-    stored.widgets[2].visible = false;
+    stored.widgets.find((widget) => widget.id === "environment")!.visible =
+      false;
     window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(stored));
     render(<CustomDashboard navigate={vi.fn()} />);
     await beginEditing(user);
@@ -149,7 +150,7 @@ describe("custom dashboard layout flows", () => {
     window.localStorage.setItem(DASHBOARD_STORAGE_KEY, "{broken");
     render(<CustomDashboard navigate={vi.fn()} />);
     expect(screen.getByText(/保存的布局已损坏/)).toBeInTheDocument();
-    expect(visibleIds()).toHaveLength(6);
+    expect(visibleIds()).toHaveLength(widgetDefinitions.length);
     await beginEditing(user);
     await user.click(screen.getByRole("button", { name: "保存布局" }));
     expect(screen.queryByText(/保存的布局已损坏/)).not.toBeInTheDocument();

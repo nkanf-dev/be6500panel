@@ -110,6 +110,23 @@ export const strings = {
       pendingApplyCount: (count: number) => `本次待应用：${count} 台设备。`,
     },
   },
+  visualization: {
+    heatmap: {
+      title: "设备活跃热力图",
+      subtitle: "展示局域网各设备在不同时段的流量分布与活跃状态",
+      sourceTrafficd: "数据源：系统流量统计 (trafficd)",
+      emptyTitle: "暂无时段活跃数据",
+      emptyDetail:
+        "后台统计服务正在积累时段数据，或当前设备在所选时段内无活动。",
+    },
+    waterfall: {
+      title: "网络诊断瀑布图",
+      subtitle:
+        "精确测量真实诊断请求在各阶段的时延分布（DNS / 握手 / TLS / 响应）",
+      runAction: "发起诊断测试",
+      emptyTitle: "暂未执行网络诊断",
+    },
+  },
   configuration: {
     title: "原生配置",
     subtitle: "编辑配置 → 检查更改 → 应用更改",
@@ -156,7 +173,7 @@ export const strings = {
       previous: "上次采样",
       waitingConnection: "等待连接",
       host: "宿主状态",
-      observationOnly: "只读观察模式",
+      observationOnly: "本地预览模式",
       configuration: "配置与运行管理",
       demoCapabilities: "演示能力清单",
       streamConnected: "事件流已连接",

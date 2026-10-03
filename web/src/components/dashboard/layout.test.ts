@@ -12,7 +12,7 @@ beforeEach(() => window.localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
 describe("browser-local dashboard layout", () => {
-  it("starts with all six widgets and independent default copies", () => {
+  it("starts with all registered widgets and independent default copies", () => {
     const first = defaultLayout();
     first.widgets[0].visible = false;
     expect(readLayout().layout.widgets.map((widget) => widget.id)).toEqual(
@@ -80,7 +80,7 @@ describe("browser-local dashboard layout", () => {
       visible: false,
       size: "wide",
     });
-    expect(layout.widgets).toHaveLength(6);
+    expect(layout.widgets).toHaveLength(widgetDefinitions.length);
     expect(layout.widgets.slice(1).every((widget) => widget.visible)).toBe(
       true,
     );
@@ -120,8 +120,10 @@ describe("browser-local dashboard layout", () => {
     const changed = moveWidget(original, "environment", -1);
     expect(changed.widgets.map((widget) => widget.id)).toEqual([
       "systemSummary",
-      "environment",
       "trafficHistory",
+      "deviceActivity",
+      "environment",
+      "networkDiagnostics",
       "devices",
       "proxy",
       "moduleStatus",

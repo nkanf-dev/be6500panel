@@ -90,6 +90,8 @@ beforeEach(() => {
       );
     if (url === "/api/modules")
       return Promise.resolve(respond({ modules: [] }));
+    if (url === "/api/devices/annotations")
+      return Promise.resolve(jsonResponse({ revision: 0, devices: {} }));
     if (url === "/api/configuration/status")
       return Promise.resolve(respond({ enabled: true, generation: 1 }));
     if (url === "/api/router")

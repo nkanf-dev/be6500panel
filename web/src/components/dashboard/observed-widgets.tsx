@@ -20,6 +20,7 @@ import {
 import { errorMessage } from "../../lib/api";
 import { bytes, timestamp, uptime } from "../../lib/format";
 import { modules, type PageId } from "../../modules/registry";
+import { useDeviceLabels } from "../../modules/devices";
 
 interface NavigationProps {
   navigate: (id: PageId) => void;
@@ -174,18 +175,19 @@ export function EnvironmentWidget({ navigate }: NavigationProps) {
           </dd>
         </div>
         <div>
-          <dt>写入策略</dt>
+          <dt>工作空间</dt>
           <dd>
-            {health
-              ? health.readOnly
-                ? "观察模式"
-                : strings.dashboard.states.configuration
-              : "—"}
+            {health?.mode === "demo"
+              ? "本地预览模式"
+              : health
+                ? strings.dashboard.states.configuration
+                : "—"}
           </dd>
         </div>
       </dl>
       <div className="panel-bottom">
-        <Button variant="ghost" size="small" onClick={() => navigate("system")}>{strings.dashboard.actions.systemDetails} <ArrowUpRight size={14} />
+        <Button variant="ghost" size="small" onClick={() => navigate("system")}>
+          {strings.dashboard.actions.systemDetails} <ArrowUpRight size={14} />
         </Button>
       </div>
     </Panel>
@@ -210,7 +212,9 @@ export function ModuleStatusWidget({ navigate }: NavigationProps) {
       )}
       {capabilities.length === 0 && (
         <p className="dashboard-data-note" role="status">
-          {refreshing ? "正在读取能力清单…" : strings.dashboard.states.noCapabilities}
+          {refreshing
+            ? "正在读取能力清单…"
+            : strings.dashboard.states.noCapabilities}
         </p>
       )}
       <div className="table-scroll">
@@ -279,7 +283,9 @@ export function ModuleStatusWidget({ navigate }: NavigationProps) {
                         size="small"
                         aria-label={`打开${module.title}`}
                         onClick={() => navigate(module.id)}
-                      >{strings.dashboard.actions.open} <ArrowUpRight size={14} />
+                      >
+                        {strings.dashboard.actions.open}{" "}
+                        <ArrowUpRight size={14} />
                       </Button>
                     </td>
                   </tr>
@@ -293,8 +299,15 @@ export function ModuleStatusWidget({ navigate }: NavigationProps) {
 }
 
 export function DevicesWidget({ navigate }: NavigationProps) {
-  const { router, routerError, routerLoading, refreshRouter, health } =
-    useConsole();
+  const {
+    router,
+    routerError,
+    routerLoading,
+    refreshRouter,
+    health,
+    selectDevice,
+  } = useConsole();
+  const labels = useDeviceLabels();
   const errors =
     router?.errors.filter(
       (error) =>
@@ -310,7 +323,9 @@ export function DevicesWidget({ navigate }: NavigationProps) {
         subtitle="当前租约与 ARP 状态 · 不代表实时在线"
         action={
           <Badge tone={health?.mode === "demo" ? "warning" : "neutral"}>
-            {health?.mode === "demo" ? strings.dashboard.states.demo : "路由器观察"}
+            {health?.mode === "demo"
+              ? strings.dashboard.states.demo
+              : "路由器观察"}
           </Badge>
         }
       />
@@ -355,7 +370,15 @@ export function DevicesWidget({ navigate }: NavigationProps) {
                 <li key={`${device.ip}-${device.mac}`}>
                   <span>
                     <strong>
-                      {device.hostname || device.ip || "未命名设备"}
+                      <button
+                        className="device-title-button"
+                        onClick={() => {
+                          selectDevice?.(device.mac);
+                          navigate("devices");
+                        }}
+                      >
+                        {labels.displayName(device.mac, device.hostname)}
+                      </button>
                     </strong>
                     <small className="mono">{device.ip || "—"}</small>
                   </span>
@@ -382,7 +405,8 @@ export function DevicesWidget({ navigate }: NavigationProps) {
           variant="ghost"
           size="small"
           onClick={() => navigate("devices")}
-        >{strings.dashboard.actions.deviceDetails} <ArrowUpRight size={14} />
+        >
+          {strings.dashboard.actions.deviceDetails} <ArrowUpRight size={14} />
         </Button>
       </div>
     </Panel>

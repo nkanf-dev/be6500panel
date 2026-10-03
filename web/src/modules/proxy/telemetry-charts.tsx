@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useConnectionDeviceNames } from "../../app/use-connection-device-names";
 import type { EChartsOption } from "echarts";
 import { ChartFrame } from "../../components/visualizations/ChartFrame";
 import { EChart } from "../../components/visualizations/EChart";
@@ -48,6 +49,7 @@ const percentile = (values: readonly number[], fraction: number) => {
 /** Start offsets and age come only from the active connection snapshot. */
 export function ConnectionTimeline(props: TelemetryChartProps) {
   const { metrics } = props;
+  const deviceNames = useConnectionDeviceNames(metrics);
   const connections = useMemo(
     () =>
       observed(metrics, "connections")
@@ -83,7 +85,7 @@ export function ConnectionTimeline(props: TelemetryChartProps) {
           inverse: true,
           data: connections.map(
             (item) =>
-              `${item.sourceIP || item.id} → ${item.host || item.destinationIP || "未提供目标"}${item.destinationPort ? `:${item.destinationPort}` : ""}`,
+              `${deviceNames.get(item.id) || item.sourceIP || item.id} → ${item.host || item.destinationIP || "未提供目标"}${item.destinationPort ? `:${item.destinationPort}` : ""}`,
           ),
           ...axisStyle(p),
           axisLabel: { color: p.text, width: 180, overflow: "truncate" },
@@ -98,7 +100,7 @@ export function ConnectionTimeline(props: TelemetryChartProps) {
             const item = Array.isArray(parameters) ? parameters[0] : parameters;
             const connection = connections[item.dataIndex];
             return connection
-              ? `${connection.id} · ${connection.network}\n客户端 ${connection.sourceIP || "未提供"} · 端口 ${connection.sourcePort || "未提供"}\n目标 ${connection.host || connection.destinationIP || "未提供"} · 端口 ${connection.destinationPort || "未提供"}\n开始 ${connection.startedAt || "未提供"}\n存续 ${connection.ageMs} ms · 出站 ${connection.outbound}\n上传 ${connection.uploadBytes} B · 下载 ${connection.downloadBytes} B`
+              ? `${connection.id} · ${connection.network}${deviceNames.has(connection.id) ? ` · ${deviceNames.get(connection.id)}` : ""}\n客户端 ${connection.sourceIP || "未提供"} · 端口 ${connection.sourcePort || "未提供"}\n目标 ${connection.host || connection.destinationIP || "未提供"} · 端口 ${connection.destinationPort || "未提供"}\n开始 ${connection.startedAt || "未提供"}\n存续 ${connection.ageMs} ms · 出站 ${connection.outbound}\n上传 ${connection.uploadBytes} B · 下载 ${connection.downloadBytes} B`
               : "";
           },
         },
@@ -124,7 +126,7 @@ export function ConnectionTimeline(props: TelemetryChartProps) {
           },
         ],
       }),
-    [connections, start],
+    [connections, start, deviceNames],
   );
   return (
     <ChartFrame
@@ -135,10 +137,11 @@ export function ConnectionTimeline(props: TelemetryChartProps) {
       source={sourceLabel(props)}
       emptyLabel="无连接采样"
       unavailable={emptyReason(props, "connections", "当前没有活动连接")}
-      summary={`${metrics?.activeConnections ?? 0} 个活动连接 · 列出 ${connections.length} 个${metrics?.truncated ? " · 连接列表已截断" : ""}`}
+      summary={`${metrics && metrics.state !== "unavailable" ? metrics.activeConnections : "未知"} 个活动连接 · 列出 ${connections.length} 个${metrics?.truncated ? " · 连接列表已截断" : ""}`}
       hint="横轴从最早可用开始时间计起 · 不推算 DNS、TCP 握手或 TLS 阶段"
       columns={[
         "连接 ID",
+        "设备名称",
         "客户端 IP",
         "客户端端口",
         "目标主机",
@@ -155,6 +158,7 @@ export function ConnectionTimeline(props: TelemetryChartProps) {
       ]}
       rows={connections.map((item) => [
         item.id,
+        deviceNames.get(item.id) || "未关联设备",
         item.sourceIP || "未提供",
         item.sourcePort || "未提供",
         item.host || "未提供",

@@ -13,6 +13,7 @@ import { ConnectionAnalysis } from "./proxy/connection-analysis";
 import { ProxyDiagnostics } from "./proxy/diagnostics";
 import { ProxyPlanPreview } from "./proxy-plan-preview";
 import { ProxySetupGuidance } from "./proxy/setup-guidance";
+import { NetworkDiagnosticPanel } from "./proxy/network-diagnostic-panel";
 
 export function ProxyPage() {
   const runtime = useRuntime("sing-box");
@@ -32,6 +33,7 @@ export function ProxyPage() {
             { id: "capture", label: "客户端接管" },
             { id: "analysis", label: "连接分析" },
             { id: "diagnostics", label: "诊断" },
+            { id: "requests", label: "网络诊断" },
             { id: "preview", label: "计划预览" },
           ].map((item) => (
             <button
@@ -103,6 +105,8 @@ export function ProxyPage() {
         <CapturePanel runtime={runtime} onPending={setCapturing} />
       ) : tab === "analysis" ? (
         <ConnectionAnalysis />
+      ) : tab === "requests" ? (
+        <NetworkDiagnosticPanel />
       ) : tab === "diagnostics" ? (
         <ProxyDiagnostics
           diagnostics={nodes?.diagnostics}

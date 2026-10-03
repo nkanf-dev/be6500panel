@@ -12,6 +12,8 @@ import { clearConfigurationSession } from "../components/configuration";
 import { clearRuntimeEditorSession } from "../modules/runtime/editor-session";
 import { GlobalRecoveryProvider } from "../components/configuration/GlobalRecoveryProvider";
 import { GlobalRecoveryBanner } from "../components/configuration/GlobalRecoveryBanner";
+import { DeviceLabelsProvider } from "../modules/devices";
+import { clearFrpcFormSession } from "../modules/frpc-session";
 
 export function App() {
   const [session, setSession] = useState<Session>();
@@ -35,6 +37,7 @@ export function App() {
   const onUnauthorized = useCallback(() => {
     clearConfigurationSession();
     clearRuntimeEditorSession();
+    clearFrpcFormSession();
     setSession((previous) => ({
       authenticated: false,
       authRequired: previous?.authRequired ?? true,
@@ -51,6 +54,7 @@ export function App() {
       window.dispatchEvent(new Event("be6500panel:logout"));
       clearConfigurationSession();
       clearRuntimeEditorSession();
+      clearFrpcFormSession();
       setSession(nextSession);
     } catch (error) {
       setError(error);
@@ -75,15 +79,17 @@ export function App() {
       ) : (
         <ConsoleProvider onUnauthorized={onUnauthorized}>
           <GlobalRecoveryProvider>
-            <Shell
-              page={page}
-              navigate={navigate}
-              authRequired={session.authRequired}
-              onLogout={logout}
-              recoveryBanner={<GlobalRecoveryBanner />}
-            >
-              <ModulePage page={page} navigate={navigate} />
-            </Shell>
+            <DeviceLabelsProvider>
+              <Shell
+                page={page}
+                navigate={navigate}
+                authRequired={session.authRequired}
+                onLogout={logout}
+                recoveryBanner={<GlobalRecoveryBanner />}
+              >
+                <ModulePage page={page} navigate={navigate} />
+              </Shell>
+            </DeviceLabelsProvider>
           </GlobalRecoveryProvider>
         </ConsoleProvider>
       )}

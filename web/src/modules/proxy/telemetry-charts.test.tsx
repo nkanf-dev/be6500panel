@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   charts: vi.fn(),
 }));
 vi.mock("../../app/console-context", () => ({
+  useOptionalConsole: () => undefined,
   useConsole: () => ({ health: { mode: "host" } }),
 }));
 vi.mock("./use-proxy-telemetry", () => ({

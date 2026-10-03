@@ -15,9 +15,13 @@ import { jsonResponse } from "../modules/production-fixtures.test-data";
 const cleanup = vi.hoisted(() => ({
   configuration: vi.fn(),
   runtime: vi.fn(),
+  frpc: vi.fn(),
 }));
 vi.mock("../components/configuration", () => ({
   clearConfigurationSession: cleanup.configuration,
+}));
+vi.mock("../modules/frpc-session", () => ({
+  clearFrpcFormSession: cleanup.frpc,
 }));
 vi.mock("../modules/runtime/editor-session", () => ({
   clearRuntimeEditorSession: cleanup.runtime,
@@ -74,6 +78,8 @@ beforeEach(() => {
         jsonResponse({ authenticated, authRequired: true }),
       );
     }
+    if (url === "/api/devices/annotations")
+      return Promise.resolve(jsonResponse({ revision: 0, devices: {} }));
     if (url === "/api/configuration/status")
       return Promise.resolve(
         jsonResponse({ enabled: true, generation: 4, operation }),
@@ -118,6 +124,7 @@ describe("authenticated global recovery wiring", () => {
     ).not.toBeInTheDocument();
     expect(cleanup.configuration).toHaveBeenCalledOnce();
     expect(cleanup.runtime).toHaveBeenCalledOnce();
+    expect(cleanup.frpc).toHaveBeenCalledOnce();
   });
   it("clears recovery on 401 and does not mount it before authentication", async () => {
     const { unmount } = renderApp();
@@ -129,6 +136,7 @@ describe("authenticated global recovery wiring", () => {
     ).not.toBeInTheDocument();
     expect(cleanup.configuration).toHaveBeenCalledOnce();
     expect(cleanup.runtime).toHaveBeenCalledOnce();
+    expect(cleanup.frpc).toHaveBeenCalledOnce();
     unmount();
     authenticated = false;
     fetchMock.mockClear();

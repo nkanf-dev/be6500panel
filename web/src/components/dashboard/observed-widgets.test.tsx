@@ -88,7 +88,7 @@ describe("observed homepage widgets", () => {
     expect(screen.getAllByText("演示数据")).toHaveLength(2);
     expect(screen.getByText("observed-router")).toBeInTheDocument();
     expect(screen.getByText("linux / arm")).toBeInTheDocument();
-    expect(screen.getByText("观察模式")).toBeInTheDocument();
+    expect(screen.getByText("本地预览模式")).toBeInTheDocument();
   });
   it("uses reviewed write-enabled language without internal Commit terminology", () => {
     state.health = { mode: "host", readOnly: false, status: "ok" };

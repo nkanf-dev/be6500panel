@@ -23,6 +23,9 @@ const Proxy = lazy(() =>
 const Frpc = lazy(() =>
   import("../modules/frpc").then((module) => ({ default: module.FrpcPage })),
 );
+const Devices = lazy(() =>
+  import("./device-page").then((module) => ({ default: module.DevicePage })),
+);
 const Unavailable = lazy(() =>
   import("../modules/unavailable").then((module) => ({
     default: module.UnavailablePage,
@@ -45,6 +48,8 @@ export function ModulePage({
       <Network />
     ) : page === "proxy" ? (
       <Proxy />
+    ) : page === "devices" ? (
+      <Devices />
     ) : page === "frpc" ? (
       <Frpc />
     ) : (

@@ -1,3 +1,5 @@
+import { strings } from "../../locales/strings";
+
 export const widgetDefinitions = [
   {
     id: "systemSummary",
@@ -10,6 +12,18 @@ export const widgetDefinitions = [
     title: "WAN 历史",
     description: "服务端保存的真实流量历史与数据导出",
     size: "wide",
+  },
+  {
+    id: "deviceActivity",
+    title: strings.visualization.heatmap.title,
+    description: "按设备与时段展示 trafficd 实测字节流量",
+    size: "full",
+  },
+  {
+    id: "networkDiagnostics",
+    title: strings.visualization.waterfall.title,
+    description: "主动测试真实 DNS、连接、TLS、首字与内容传输耗时",
+    size: "full",
   },
   {
     id: "environment",
