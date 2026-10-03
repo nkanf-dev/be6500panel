@@ -1,4 +1,4 @@
-//go:build !linux && !darwin && !freebsd && !openbsd && !netbsd && !dragonfly
+//go:build !linux && !darwin
 
 package nodeprobe
 
@@ -11,3 +11,5 @@ func prepareProcessGroup(*exec.Cmd) error {
 	return errors.New("isolated process groups are unavailable")
 }
 func terminateProcessGroup(*exec.Cmd, bool) {}
+
+func retainProbeLeader(int) bool { return false }

@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -27,6 +28,14 @@ func validNode() proxy.Node {
 func TestCoreProcessFixture(t *testing.T) {
 	if os.Getenv("NODE_PROBE_PROCESS_FIXTURE") != "1" {
 		return
+	}
+	if os.Getenv("NODE_PROBE_PROCESS_IDLE") == "1" {
+		listener, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			os.Exit(5)
+		}
+		_ = http.Serve(listener, http.NotFoundHandler())
+		os.Exit(0)
 	}
 	data, err := os.ReadFile(os.Getenv("NODE_PROBE_CONFIG"))
 	if err != nil {
@@ -63,7 +72,9 @@ func fmtInt(value int) string {
 }
 func TestCoreProcessPrivateFilesAndExactCleanup(t *testing.T) {
 	original := coreProcessCommand
-	defer func() { coreProcessCommand = original }()
+	originalOwner := coreSocketOwnerFactory
+	defer func() { coreProcessCommand = original; coreSocketOwnerFactory = originalOwner }()
+	coreSocketOwnerFactory = func(int, string, string, <-chan struct{}) (socketOwner, error) { return &fixtureSocketOwner{}, nil }
 	coreProcessCommand = func(path, config string) *exec.Cmd {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestCoreProcessFixture$")
 		cmd.Env = append(os.Environ(), "NODE_PROBE_PROCESS_FIXTURE=1", "NODE_PROBE_CONFIG="+config)
@@ -207,3 +218,60 @@ func TestHTTPSStatusBodyTimeoutAndRedirectAreBounded(t *testing.T) {
 
 // Compile-time check that fixtures are native HTTP peers, not TCP success fakes.
 var _ io.Reader = (*bufio.Reader)(nil)
+
+type fixtureSocketOwner struct {
+	listenerError   error
+	connectionError error
+}
+
+func (o *fixtureSocketOwner) VerifyListener() error           { return o.listenerError }
+func (o *fixtureSocketOwner) VerifyConnection(net.Conn) error { return o.connectionError }
+
+func TestLiveCoreWithCompetingListenerFailsReadinessWithoutCredentials(t *testing.T) {
+	originalCommand := coreProcessCommand
+	originalOwner := coreSocketOwnerFactory
+	defer func() { coreProcessCommand = originalCommand; coreSocketOwnerFactory = originalOwner }()
+	var competing *http.Server
+	var listener net.Listener
+	var requests atomic.Int32
+	defer func() {
+		if competing != nil {
+			competing.Close()
+		}
+		if listener != nil {
+			listener.Close()
+		}
+	}()
+	coreProcessCommand = func(path, configPath string) *exec.Cmd {
+		data, _ := os.ReadFile(configPath)
+		var config struct {
+			Inbounds []struct {
+				Port int `json:"listen_port"`
+			} `json:"inbounds"`
+		}
+		json.Unmarshal(data, &config)
+		listener, _ = net.Listen("tcp4", net.JoinHostPort("127.0.0.1", fmtInt(config.Inbounds[0].Port)))
+		competing = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(204) })}
+		go competing.Serve(listener)
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCoreProcessFixture$")
+		cmd.Env = append(os.Environ(), "NODE_PROBE_PROCESS_FIXTURE=1", "NODE_PROBE_PROCESS_IDLE=1")
+		return cmd
+	}
+	coreSocketOwnerFactory = func(int, string, string, <-chan struct{}) (socketOwner, error) {
+		return &fixtureSocketOwner{listenerError: ErrUnavailable}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	temp := t.TempDir()
+	if session, err := newCoreSession(ctx, CoreLease{Path: "/frozen/core"}, []proxy.Node{validNode()}, temp); err == nil {
+		session.Close()
+		t.Fatal("wrong live process authenticated competing listener")
+	}
+	if requests.Load() != 0 {
+		t.Fatal("competing proxy received HTTP/credentials")
+	}
+	entries, _ := os.ReadDir(temp)
+	if len(entries) != 0 {
+		t.Fatal("unowned startup leaked owned process files")
+	}
+}

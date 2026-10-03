@@ -1,4 +1,4 @@
-//go:build linux || darwin || freebsd || openbsd || netbsd || dragonfly
+//go:build linux || darwin
 
 package nodeprobe
 
@@ -7,10 +7,6 @@ import (
 	"syscall"
 )
 
-func prepareProcessGroup(cmd *exec.Cmd) error {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	return nil
-}
 func terminateProcessGroup(cmd *exec.Cmd, force bool) {
 	if cmd.Process == nil {
 		return
