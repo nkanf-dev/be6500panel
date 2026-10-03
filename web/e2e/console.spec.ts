@@ -66,7 +66,7 @@ test("FRPC keeps unconfigured runtime disabled in demo", async ({ page }) => {
   await page.goto("/#/frpc");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "生成并 Commit frpc 配置" }),
+    page.getByRole("button", { name: "校验并保存 frpc 配置" }),
   ).toBeDisabled();
   await expect(page.getByPlaceholder("frps.example.com")).toBeVisible();
   await page.getByRole("tab", { name: "原生配置" }).click();
