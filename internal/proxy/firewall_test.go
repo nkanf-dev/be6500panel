@@ -330,7 +330,11 @@ func TestOwnedRulesDNSAndBypassOrdering(t *testing.T) {
 					} else {
 						dnsIndex = ownedFindCommand(plan.Apply, "-A", chain, "-p", protocol, "--dport", "53", "-j", "REDIRECT", "--to-ports", "2082")
 					}
-					if local < 0 || mgmt <= local || endpoint < local || linkIndex < 0 || dnsIndex <= mgmt || dnsIndex <= endpoint || dnsIndex <= linkIndex || private <= dnsIndex {
+					endpointOrder := endpoint > dnsIndex && endpoint < private
+					if chain == capture {
+						endpointOrder = endpoint > local && endpoint < dnsIndex
+					}
+					if local < 0 || mgmt <= local || linkIndex < 0 || dnsIndex <= mgmt || dnsIndex <= linkIndex || private <= dnsIndex || !endpointOrder {
 						t.Fatalf("DNS/bypass order invalid in %s/%s: local=%d mgmt=%d endpoint=%d link=%d dns=%d private=%d", chain, protocol, local, mgmt, endpoint, linkIndex, dnsIndex, private)
 					}
 					if chain == capture {
@@ -422,7 +426,7 @@ func TestOwnedRulesFirstMatchPacketIntent(t *testing.T) {
 		{"B6P_V4_DNS", "10.0.0.2", "tcp", 53, false, "REDIRECT"},
 		{"B6P_V4_DNS", "192.168.31.1", "udp", 53, false, "RETURN"},
 		{"B6P_V4_DNS", "192.168.31.9", "udp", 53, true, "RETURN"},
-		{"B6P_V4_DNS", "203.0.113.20", "tcp", 53, false, "RETURN"},
+		{"B6P_V4_DNS", "203.0.113.20", "tcp", 53, false, "REDIRECT"},
 		{"B6P_V4_DNS", "224.0.0.1", "udp", 53, false, "RETURN"},
 		{"B6P_V4_DNS", "8.8.8.8", "udp", 443, false, "RETURN"},
 		{"B6P_V6_CAPTURE", "2001:db8::20", "tcp", 443, false, "RETURN"},

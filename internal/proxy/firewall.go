@@ -32,10 +32,12 @@ const (
 // address. IP and unicast six-byte MAC literals are canonicalized. A nil map
 // preserves legacy IP-only intent for standalone
 // compiler callers. Mapped hooks require both exact source IP and source MAC.
-// ManagementIPs and EndpointIPs bypass capture except for explicitly selected
-// RouterDNSAddresses on TCP/UDP port 53. RouterDNSAddresses must be a subset
-// of ManagementIPs sourced from actual router LAN addresses by the owner.
-// Other router-addressed DNS remains on the original dnsmasq path.
+// ManagementIPs bypass capture except for explicitly selected RouterDNSAddresses
+// on TCP/UDP port 53. RouterDNSAddresses must be a subset of ManagementIPs sourced
+// from actual router LAN addresses by the owner. Other router-addressed DNS
+// remains on the original dnsmasq path. EndpointIPs bypass non-DNS capture;
+// selected-client TCP/UDP port 53 still uses managed DNS unless its destination
+// is router-local, explicitly managed or in a safety network.
 // IPv6Follow and IPv6Block require at least one IPv6 client; IPv6Direct installs
 // no IPv6 rules. Each family has shared dedicated chains and one local route,
 // with exact per-client policy rules and interface-scoped hooks.
@@ -181,7 +183,7 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 			return OwnedRulesPlan{}, fmt.Errorf("RouterDNSAddresses must be unicast router LAN addresses also present in ManagementIPs")
 		}
 	}
-	bypass := append(endpoints, management...)
+	bypass := append(slices.Clone(endpoints), management...)
 	slices.Sort(bypass)
 	bypass = slices.Compact(bypass)
 
@@ -195,7 +197,7 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 			"Single-client TCP/UDP capture only; no OUTPUT or full-LAN hooks. Client address changes require a new coordinated plan.",
 			"Validate kernel TPROXY, policy routing, NAT REDIRECT, firewall hook order and return routing on the router before activation.",
 			"DNS REDIRECT requires a DNS listener on the incoming LAN address or a suitable wildcard, not loopback only. Restrict listener access in the coordinated firewall; keep mixed authentication/listener scope separate.",
-			"Router-local, management and endpoint traffic bypasses even DNS capture unless an exact ManagementIPs subset is opted into RouterDNSAddresses for selected-client TCP/UDP port53 only, preserving factory SSH management without a global port-22 exemption. Other router-addressed DNS stays on dnsmasq; TCP and UDP DNS to other unicast destinations is redirected before private-network bypass. Encrypted DNS needs separate policy.",
+			"Router-local and management traffic bypasses DNS capture unless an exact ManagementIPs subset is opted into RouterDNSAddresses for selected-client TCP/UDP port53 only, preserving factory SSH management without a global port-22 exemption. Other router-addressed DNS stays on dnsmasq; TCP and UDP DNS to other unicast destinations, including endpoint IPs, is redirected before endpoint and private-network bypass. Non-DNS endpoint traffic remains exempt. Encrypted DNS needs separate policy.",
 			"No ECM/PPE/SFE setting is changed. Verify rule counters and real TCP, UDP, DNS, QUIC and failure/return paths with hardware offload on this firmware; argv alone does not prove capture works.",
 			"Fail-direct cleanup removes owned rules, not existing DNS REDIRECT conntrack bindings. Coordinate scoped flow drain/expiry on stop or failure; no global conntrack flush is planned.",
 		},
@@ -217,10 +219,10 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	}
 	if input.FakeIP {
 		plan.Warnings = append(plan.Warnings,
-			"Fake-IP identities 198.18.0.0/15 and fc00::/18 take precedence over ordinary private-network bypass only because FakeIP is enabled; synchronize this setting with the native compiler. Explicit management/endpoint exemptions still win.",
+			"Fake-IP identities 198.18.0.0/15 and fc00::/18 take precedence over ordinary private-network bypass only because FakeIP is enabled; synchronize this setting with the native compiler. Explicit management exemptions still win; endpoint exemptions still win for non-DNS traffic.",
 			"Fail-direct rule withdrawal cannot make cached fake-IP identities directly routable. Coordinate resolver/classifier lifetime and client DNS cache recovery before enabling FakeIP; cleanup alone is not instant direct recovery.")
 	}
-	builder := ownedRulesBuilder{plan: &plan, input: input, bypass: bypass, routerDNS: routerDNS}
+	builder := ownedRulesBuilder{plan: &plan, input: input, bypass: bypass, management: management, endpoints: endpoints, routerDNS: routerDNS}
 	builder.captureFamily(4, v4)
 	switch input.IPv6 {
 	case IPv6Follow:
@@ -387,12 +389,14 @@ type ownedFamilyRoute struct {
 }
 
 type ownedRulesBuilder struct {
-	plan      *OwnedRulesPlan
-	input     RulesPlanInput
-	bypass    []string
-	routerDNS []string
-	hooks     [][]string
-	routes    []ownedFamilyRoute
+	plan       *OwnedRulesPlan
+	input      RulesPlanInput
+	bypass     []string
+	management []string
+	endpoints  []string
+	routerDNS  []string
+	hooks      [][]string
+	routes     []ownedFamilyRoute
 }
 
 func (b *ownedRulesBuilder) captureFamily(family int, clients []netip.Addr) {
@@ -419,10 +423,23 @@ func (b *ownedRulesBuilder) captureFamily(family int, clients []netip.Addr) {
 			b.appendRule(family, "nat", dns, "-d", ownedHostPrefix(addr), "-p", protocol, "--dport", "53", "-j", "REDIRECT", "--to-ports", strconv.Itoa(int(b.input.Ports.DNS)))
 		}
 	}
-	b.prelude(family, "nat", dns)
+	// Router-local, explicit management and safety destinations keep their
+	// original DNS path. Other selected-client port53 traffic must reach the
+	// managed resolver even when its destination is also a bootstrap or node
+	// endpoint. Mangle RETURNs do not stop the later NAT PREROUTING stage.
+	b.localBypass(family, "nat", dns)
+	b.addressBypass(family, "nat", dns, b.management)
+	b.safetyBypass(family, "nat", dns)
 	for _, protocol := range []string{"tcp", "udp"} {
 		b.appendRule(family, "mangle", capture, "-p", protocol, "--dport", "53", "-j", "RETURN")
 		b.appendRule(family, "nat", dns, "-p", protocol, "--dport", "53", "-j", "REDIRECT", "--to-ports", strconv.Itoa(int(b.input.Ports.DNS)))
+	}
+	// Preserve endpoint bypass for non-DNS transports without duplicating an
+	// endpoint already exempted by explicit management intent.
+	for _, destination := range b.endpoints {
+		if !slices.Contains(b.management, destination) {
+			b.addressBypass(family, "nat", dns, []string{destination})
+		}
 	}
 	fake := "198.18.0.0/15"
 	if family == 6 {
@@ -483,16 +500,28 @@ func (b *ownedRulesBuilder) hook(family int, table, name, hook string, client ne
 }
 
 func (b *ownedRulesBuilder) prelude(family int, table, chain string) {
+	b.localBypass(family, table, chain)
+	b.addressBypass(family, table, chain, b.bypass)
+	b.safetyBypass(family, table, chain)
+}
+
+func (b *ownedRulesBuilder) localBypass(family int, table, chain string) {
 	// All router interface addresses are management, even if the caller did
 	// not enumerate them. Only explicit RouterDNSAddresses port53 exceptions
 	// installed earlier in the NAT chain may override this LOCAL bypass.
 	b.appendRule(family, table, chain, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "RETURN")
-	for _, destination := range b.bypass {
+}
+
+func (b *ownedRulesBuilder) addressBypass(family int, table, chain string, destinations []string) {
+	for _, destination := range destinations {
 		addr, _ := netip.ParseAddr(destination) // already validated and canonical
 		if addr.Is4() == (family == 4) {
 			b.appendRule(family, table, chain, "-d", ownedHostPrefix(addr), "-j", "RETURN")
 		}
 	}
+}
+
+func (b *ownedRulesBuilder) safetyBypass(family int, table, chain string) {
 	for _, destination := range ownedSafetyNetworks(family) {
 		b.appendRule(family, table, chain, "-d", destination, "-j", "RETURN")
 	}
