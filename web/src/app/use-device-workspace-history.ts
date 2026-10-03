@@ -22,6 +22,7 @@ export function workspaceHistoryRequest(
 }
 interface HistoryState {
   key: string;
+  baseKey: string;
   base?: DeviceActivityHistory;
   details: readonly (DeviceActivityHistory | undefined)[];
   loading: boolean;
@@ -45,9 +46,11 @@ export function useDeviceWorkspaceHistory(
     [selected],
   );
   const boundedSearch = Array.from(search.trim()).slice(0, 64).join("");
-  const key = JSON.stringify([range, macs, boundedSearch]);
+  const baseKey = JSON.stringify([range, boundedSearch]);
+  const key = JSON.stringify([baseKey, macs]);
   const [state, setState] = useState<HistoryState>({
     key,
+    baseKey,
     details: [],
     loading: true,
   });
@@ -61,9 +64,22 @@ export function useDeviceWorkspaceHistory(
       if (!active || inFlight || document.hidden) return;
       inFlight = true;
       setState((previous) => ({
-        ...(previous.key === key ? previous : { key, details: [] }),
+        ...(previous.baseKey === baseKey
+          ? previous
+          : { key, baseKey, details: [] }),
+        key,
+        details:
+          previous.key === key
+            ? previous.details
+            : previous.baseKey === baseKey
+              ? previous.details.filter((detail) =>
+                  detail?.devices.some((device) =>
+                    macs.includes(canonicalMAC(device.id) ?? ""),
+                  ),
+                )
+              : [],
         loading:
-          previous.key !== key ||
+          previous.baseKey !== baseKey ||
           (!previous.base &&
             !previous.details.some(Boolean) &&
             previous.error === undefined),
@@ -91,17 +107,22 @@ export function useDeviceWorkspaceHistory(
         if (active)
           setState((previous) => ({
             key,
+            baseKey,
             base:
               base.status === "fulfilled"
                 ? base.value
-                : previous.key === key
+                : previous.baseKey === baseKey
                   ? previous.base
                   : undefined,
             details: details.map((detail, index) =>
               detail.status === "fulfilled"
                 ? detail.value
-                : previous.key === key
-                  ? previous.details[index]
+                : previous.baseKey === baseKey
+                  ? previous.details.find((old) =>
+                      old?.devices.some(
+                        (device) => canonicalMAC(device.id) === macs[index],
+                      ),
+                    )
                   : undefined,
             ),
             loading: false,
@@ -112,7 +133,18 @@ export function useDeviceWorkspaceHistory(
       } catch (error) {
         if (active)
           setState((previous) => ({
-            ...(previous.key === key ? previous : { key, details: [] }),
+            ...(previous.baseKey === baseKey
+              ? previous
+              : { key, baseKey, details: [] }),
+            key,
+            details:
+              previous.baseKey === baseKey
+                ? previous.details.filter((detail) =>
+                    detail?.devices.some((device) =>
+                      macs.includes(canonicalMAC(device.id) ?? ""),
+                    ),
+                  )
+                : [],
             error,
             loading: false,
           }));
@@ -134,7 +166,19 @@ export function useDeviceWorkspaceHistory(
     };
   }, [key, range, revision]);
   const current: HistoryState =
-    state.key === key ? state : { key, details: [], loading: true };
+    state.key === key
+      ? state
+      : state.baseKey === baseKey
+        ? {
+            ...state,
+            key,
+            details: state.details.filter((detail) =>
+              detail?.devices.some((device) =>
+                macs.includes(canonicalMAC(device.id) ?? ""),
+              ),
+            ),
+          }
+        : { key, baseKey, details: [], loading: true };
   const data = useMemo(() => {
     const merged = mergeDeviceHistories(current.base, current.details, range);
     // A failed source cannot make retained selected-device records look current.

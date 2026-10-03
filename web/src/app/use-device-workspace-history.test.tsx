@@ -247,4 +247,25 @@ describe("bounded real device workspace history", () => {
     expect(Array.from(latest.get("search")!)).toHaveLength(64);
     expect(latest.get("limit")).toBe("64");
   });
+  it("retains the unchanged base list when comparison selections change and detail reads are pending", async () => {
+    const fetch = install();
+    const first = "02:00:00:00:00:0A",
+      second = "02:00:00:00:00:0B";
+    const { result, rerender } = renderHook(
+      ({ selected }) => useDeviceWorkspaceHistory("24h", selected),
+      { initialProps: { selected: [first] } },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const original = result.current.data?.devices.find(
+      (d) => d.id === "02:00:00:00:00:01",
+    );
+    fetch.mockImplementation(() => new Promise<Response>(() => {}));
+    rerender({ selected: [first, second] });
+    expect(
+      result.current.data?.devices.find((d) => d.id === "02:00:00:00:00:01"),
+    ).toBe(original);
+    expect(result.current.loading).toBe(false);
+    await waitFor(() => expect(fetch.mock.calls.length).toBe(5));
+    expect(result.current.data?.devices.map((d) => d.id)).toContain(first);
+  });
 });
