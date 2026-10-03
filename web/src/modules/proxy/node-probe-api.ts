@@ -22,6 +22,8 @@ export const nodeProbeApi = {
         request("/proxy/node-probes", NodeProbeSnapshotSchema, {
           method: "POST",
           body: { all, nodeIds, revision },
+          // The service bounds lease admission to10 seconds, not the full job.
+          timeoutMs: 12000,
         }),
       ),
     ),
