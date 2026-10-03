@@ -18,9 +18,12 @@ import (
 	"be6500panel/internal/capture"
 	"be6500panel/internal/control"
 	"be6500panel/internal/core"
+	"be6500panel/internal/deviceannotations"
+	"be6500panel/internal/devicetelemetry"
 	"be6500panel/internal/httpapi"
 	"be6500panel/internal/modules"
 	"be6500panel/internal/proxy"
+	"be6500panel/internal/requesttrace"
 	"be6500panel/internal/router"
 	managedruntime "be6500panel/internal/runtime"
 	"be6500panel/internal/storage"
@@ -211,7 +214,26 @@ func run() error {
 		metrics.Start(ctx)
 		defer metrics.Close()
 	}
-	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager, Traffic: history, TrafficError: historyError, Telemetry: metrics, StorageAdmission: flashBudget.Admit})
+	deviceActivity, err := devicetelemetry.New(router.NewDeviceSource(routerAdapter))
+	if err != nil {
+		return err
+	}
+	deviceActivity.Start(ctx)
+	defer deviceActivity.Close()
+	var diagnosticProxy requesttrace.ProxyProvider
+	if runtimeManager != nil {
+		diagnosticProxy = acceptedDiagnosticProxy(runtimeManager, routerAdapter)
+	}
+	requestTraces := requesttrace.New(requesttrace.Config{ProxyProvider: diagnosticProxy})
+	serviceObserver := router.NewServiceObserver(*adapterRoot)
+	var deviceNames *deviceannotations.Store
+	if *dataDir != "" {
+		deviceNames, err = deviceannotations.New(deviceannotations.Options{DataDir: *dataDir, Context: ctx, StorageAdmission: flashBudget.Admit})
+		if err != nil {
+			logger.Warn("Device annotation storage unavailable; existing state retained", "code", "annotations_storage_unavailable", "module", "devices")
+		}
+	}
+	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager, Traffic: history, TrafficError: historyError, Telemetry: metrics, DeviceTelemetry: deviceActivity, RequestTraces: requestTraces, Services: serviceObserver, DeviceAnnotations: deviceNames, StorageAdmission: flashBudget.Admit})
 	if err != nil {
 		return err
 	}
