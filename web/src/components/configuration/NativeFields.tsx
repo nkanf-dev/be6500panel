@@ -1,7 +1,9 @@
 import { useId, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Info, Plus, Trash2 } from "lucide-react";
 import { Button } from "../ui/primitives";
 import type { ConfigurationModule } from "./contracts";
+import { firmwareContext } from "./field-help";
+import type { FieldHelp } from "./field-help/types";
 import {
   fieldSchema,
   sectionFields,
@@ -114,6 +116,97 @@ function FieldInput({
   );
 }
 
+const helpFlagLabels = {
+  generated: "固件可能重建此值；仍可编辑",
+  "hardware-dependent": "取决于硬件 / 驱动",
+  credential: "凭据；说明不展示保存的值",
+  legacy: "旧版字段",
+  "version-dependent": "需核对版本与消费者",
+} as const;
+
+function FieldHelpDetails({ help, label }: { help: FieldHelp; label: string }) {
+  return (
+    <details className="configuration-field-help">
+      <summary>
+        <Info size={13} aria-hidden="true" />
+        {label}使用说明
+      </summary>
+      <div className="configuration-field-help-body">
+        <p>{help.description}</p>
+        <dl>
+          {help.defaultValue !== undefined && (
+            <>
+              <dt>源码回退值</dt>
+              <dd>{help.defaultValue}（条件见说明；不是当前值）</dd>
+            </>
+          )}
+          {help.unit && (
+            <>
+              <dt>单位</dt>
+              <dd>{help.unit}</dd>
+            </>
+          )}
+          {help.range && (
+            <>
+              <dt>格式 / 范围</dt>
+              <dd>{help.range}</dd>
+            </>
+          )}
+          {help.dependencies?.length ? (
+            <>
+              <dt>相关条件</dt>
+              <dd>
+                <ul>
+                  {help.dependencies.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </dd>
+            </>
+          ) : null}
+          <dt>应用后的影响</dt>
+          <dd>{help.impact}</dd>
+          {help.flags?.length ? (
+            <>
+              <dt>字段性质</dt>
+              <dd>
+                {help.flags.map((flag) => helpFlagLabels[flag]).join("；")}
+              </dd>
+            </>
+          ) : null}
+        </dl>
+        {help.discovery && (
+          <p className="configuration-field-help-discovery">
+            静态追踪结果：{help.discovery}
+          </p>
+        )}
+        <details className="configuration-field-evidence">
+          <summary>固件来源与版本</summary>
+          <p>{firmwareContext}</p>
+          <ul>
+            {help.evidence.map((item, index) => (
+              <li key={`${item.source}-${item.line}-${index}`}>
+                <code>
+                  {item.source}:{item.line}
+                  {item.endLine ? `–${item.endLine}` : ""}
+                </code>
+                <span>{item.fact}</span>
+                <small>{item.firmware}</small>
+                {item.artifact && (
+                  <small>
+                    提取自 <code>{item.artifact.source}</code> · SHA-256{" "}
+                    {item.artifact.sha256}
+                  </small>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      </div>
+    </details>
+  );
+}
+
 interface FieldGroup {
   key: string;
   name: string;
@@ -194,6 +287,9 @@ export function NativeFields({
                 {group.name} · {group.kind}
               </code>
               <p id={`${id}-hint`}>{schema.hint}</p>
+              {schema.help && (
+                <FieldHelpDetails help={schema.help} label={schema.label} />
+              )}
             </div>
             <div className="configuration-field-controls">
               {group.fields.map((field, index) => (

@@ -1,0 +1,422 @@
+{
+  "bin/busybox": {
+    "sha256": "d9fa606a3c706a56bfd4f2e7d1c538a2f0ae132b016cd5392004b93123d46234",
+    "bytes": 499737,
+    "lines": 5732
+  },
+  "bin/ipcalc.sh": {
+    "sha256": "0e170cfb8015c2c589c58f835224aa3f6bb33e8a12eb07888e304ba27f54f548",
+    "bytes": 1550,
+    "lines": 72
+  },
+  "docs/field-help-dhcp-research.md": {
+    "sha256": "3bb612dc8e72a833d9e32b0caf96aee873efd2a0d8d499c7773bb5633044f119",
+    "bytes": 8251,
+    "lines": 124
+  },
+  "docs/field-help-firewall-research.md": {
+    "sha256": "a2de80132f2b3faefdeca40af3ce91b362781d683427ec7851be343fed08ecdb",
+    "bytes": 31223,
+    "lines": 250
+  },
+  "docs/field-help-network-research.md": {
+    "sha256": "7400eef0ead97f001145e612a8e8b0ab8f4760f542ade83c3dd665cd64c13314",
+    "bytes": 25064,
+    "lines": 197
+  },
+  "docs/field-help-queryport-review.md": {
+    "sha256": "744f3933d86876b628fd1342c39dda9cedfd9b52b01f09ebb826f0e017e79868",
+    "bytes": 9691,
+    "lines": 179
+  },
+  "docs/field-help-system-dropbear-research.md": {
+    "sha256": "c62d54714e2801e5a6633707f94a09ad3b989b44fa4b04aa6ed38cd932039fd9",
+    "bytes": 12910,
+    "lines": 95
+  },
+  "etc/crontabs/root": {
+    "sha256": "7bf6d5707518ae19add504bbb268ac7d819a50a25ddbc73402330b1e91af3940",
+    "bytes": 698,
+    "lines": 14
+  },
+  "etc/dnsmasq.conf": {
+    "sha256": "1e6ab19c1ae5e70d609ac7b6246541d52042e4dee1892f825266507ef52d7dfd",
+    "bytes": 1368,
+    "lines": 38
+  },
+  "etc/hotplug.d/iface/20-firewall": {
+    "sha256": "efd17ce6ee4e5df5f8992eda4647c9b03e220b2c374749b1d33598f54cf85029",
+    "bytes": 435,
+    "lines": 13
+  },
+  "etc/init.d/autovpn": {
+    "sha256": "02e32f3fb725c4a933cf33ac6c71a44713cd788154d6edd6e10c9d6153cb54fc",
+    "bytes": 1274,
+    "lines": 56
+  },
+  "etc/init.d/cron": {
+    "sha256": "efd3ba0b38246cecc2d38b9604b86ee6bc2bc96eb83bd1b48c54de5d166e9094",
+    "bytes": 846,
+    "lines": 42
+  },
+  "etc/init.d/dnsmasq": {
+    "sha256": "167b43de9ca98b0cd500741f801557e16c876965b3769f21fd4550dc530de747",
+    "bytes": 41258,
+    "lines": 1534
+  },
+  "etc/init.d/dropbear": {
+    "sha256": "ed48cba04fc1a94a4289a848a468d7dea7baf35e29004abcca885e51351c6fa5",
+    "bytes": 5189,
+    "lines": 224
+  },
+  "etc/init.d/firewall": {
+    "sha256": "5a786ce53657659fc0e27e58da496231fd87786091b1f1a2b390c3991c994089",
+    "bytes": 1525,
+    "lines": 86
+  },
+  "etc/init.d/miwifi-logd": {
+    "sha256": "f9f7e0a4c92fe6907bde70ef6a208171b239d8483bd09df5466f9b253b969e33",
+    "bytes": 535,
+    "lines": 32
+  },
+  "etc/init.d/network": {
+    "sha256": "a8b9503901706a6f1f29043461a3c3f8aaba5924038249fdb900769821006e5d",
+    "bytes": 3044,
+    "lines": 166
+  },
+  "etc/init.d/odhcpd": {
+    "sha256": "7c8ba2f8240f71f734fb7cacd56f18419742bada6027f7456a2e1a6c724124e6",
+    "bytes": 934,
+    "lines": 47
+  },
+  "etc/init.d/syslog-ng": {
+    "sha256": "88b544876ecf0a9336c484030d19faab90e55d978745fe96c421ec57406dae91",
+    "bytes": 579,
+    "lines": 31
+  },
+  "etc/init.d/system": {
+    "sha256": "fafde943d14427fff08756c7726b68a139f6dd36e9210568eaee98c52ff45dd8",
+    "bytes": 1336,
+    "lines": 65
+  },
+  "etc/init.d/timezone": {
+    "sha256": "f29caf410b130b3dbda2be3722ec8e19566224096b0851162ab2c76da576e023",
+    "bytes": 2295,
+    "lines": 87
+  },
+  "etc/init.d/xqled": {
+    "sha256": "7d4c9c1592aae0489d5993ee6fa7eaec6030079ad8bfe17f6ab6a02d1b4a6c22",
+    "bytes": 396,
+    "lines": 20
+  },
+  "etc/syslog-ng.conf": {
+    "sha256": "75afb4cd74d413e4225e976866c89f12c67f05cd4203fe3c93a5f1e7cbe757e8",
+    "bytes": 818,
+    "lines": 52
+  },
+  "lib/firewall.sysapi.loader": {
+    "sha256": "88882545b9a0e4984a797f905770e4fef7c84197ea98e6f113832e0d59029473",
+    "bytes": 149,
+    "lines": 11
+  },
+  "lib/functions/network.sh": {
+    "sha256": "227865e5b95fd4d45988185bf21d82040dd38f68e8a3174ee015fc8c2017a8af",
+    "bytes": 7879,
+    "lines": 307
+  },
+  "lib/functions/uci-defaults.sh": {
+    "sha256": "7000680724d1ecc8251aeeca6478dda0316a672fc4ecfe2b654bf6f86cd0c5af",
+    "bytes": 11838,
+    "lines": 617
+  },
+  "lib/lib.scripthelper.sh": {
+    "sha256": "0eb2d61d7cd38b265c828914d9021984c42a6c34451ff005e865b1ab1d0c85bb",
+    "bytes": 48831,
+    "lines": 2230
+  },
+  "lib/miwifi/arch/lib_arch_network.sh": {
+    "sha256": "0fba3e31ceb150595b19f36dbcc16452405e70d0eea4cdc1601a5c015f557d1f",
+    "bytes": 600,
+    "lines": 28
+  },
+  "lib/miwifi/arch/lib_arch_port_map.sh": {
+    "sha256": "ed58d36fba78dabee61d26943287be85ec1e17d3eb2de08b3b4bc7146508b365",
+    "bytes": 2100,
+    "lines": 59
+  },
+  "lib/miwifi/lib_network.sh": {
+    "sha256": "c626e8ac3c1c249a752b59934b535f2efcdec5f4d0ad0122df5b5a64f4d0b255",
+    "bytes": 2143,
+    "lines": 114
+  },
+  "lib/miwifi/lib_port_map.sh": {
+    "sha256": "709818a0977025a7cc528a7b251c1dd3537481d8fd8b3463f30259e6f98e672f",
+    "bytes": 6234,
+    "lines": 202
+  },
+  "lib/netifd/dhcp.script": {
+    "sha256": "34494cdb580cbfeb23da2f45737d38f901924509202b4fdc6fae1c8e5e3f89d4",
+    "bytes": 8476,
+    "lines": 297
+  },
+  "lib/netifd/dhcpv6.script": {
+    "sha256": "8b0346a683595c78ece6b5744d3a7936f3645f9f2eae7a97cfefc4324d4130eb",
+    "bytes": 10115,
+    "lines": 344
+  },
+  "lib/netifd/netifd-proto.sh": {
+    "sha256": "ae6a9dd275e4bf2f0cb143a876affb15db812a91be3349048cd2f60bdc3f8ec2",
+    "bytes": 10190,
+    "lines": 502
+  },
+  "lib/netifd/netifd-wireless.sh": {
+    "sha256": "3d5b0a0d0a61876820cc97aa919700fcd129ca4fd599d7623af27d339cde139e",
+    "bytes": 7658,
+    "lines": 428
+  },
+  "lib/netifd/ppp6-up": {
+    "sha256": "3d165195cfef42a8da85d30b2e20478809ec534891419b9256b583dce39305cb",
+    "bytes": 2580,
+    "lines": 92
+  },
+  "lib/netifd/proto/dhcp.sh": {
+    "sha256": "41c9d79252db43e80785019fceb8ae0e87a079afac416fb967932b521c3ee4d2",
+    "bytes": 4146,
+    "lines": 122
+  },
+  "lib/netifd/proto/dhcpv6.sh": {
+    "sha256": "6278ca15558f3ae07c91ba5b2263bd59871f87805c7895097f8b7e3961472051",
+    "bytes": 7827,
+    "lines": 224
+  },
+  "lib/netifd/proto/l2tp.sh": {
+    "sha256": "4475ea4581916c4ff4f685c01b7781872d4dd116cd55f9a477065eb576f2fcef",
+    "bytes": 3861,
+    "lines": 158
+  },
+  "lib/netifd/proto/ppp.sh": {
+    "sha256": "cccf08babee1aefd14b9f1de8dd45af72cc5bf5c79d69581cb28e55708747f54",
+    "bytes": 9670,
+    "lines": 411
+  },
+  "lib/network/config.sh": {
+    "sha256": "5a88e000f610beb3414fa18099b649780509d97a0dad6d24598504647f104e06",
+    "bytes": 1483,
+    "lines": 77
+  },
+  "lib/network/switch.sh": {
+    "sha256": "4ead158b024021e7c415c1eaa5070698b962a3534ba89fb37eff0f4a53ca57a3",
+    "bytes": 532,
+    "lines": 24
+  },
+  "lib/wifi/hostapd.sh": {
+    "sha256": "31191662bea1fffddd03dfdb2bd4f524c05acd9bc926da63c8408c1bcbcabb81",
+    "bytes": 86083,
+    "lines": 2560
+  },
+  "lib/wifi/qcawificfg80211.sh": {
+    "sha256": "db23e554878152401fd87ea12be36a12eda9abc6704f1f77f00551cc470421ec",
+    "bytes": 366697,
+    "lines": 12095
+  },
+  "lib/wifi/wpa_supplicant.sh": {
+    "sha256": "61357b40ca5774306b51a28f89590d07c5b8d6c9b619072b257c0471c2109a61",
+    "bytes": 19137,
+    "lines": 743
+  },
+  "lib/wifi_interface_helper.sh": {
+    "sha256": "f6460d5d7364a9ce03df4ea96b5f9fe3104c81780ce76cdb3d8e02f941c607e5",
+    "bytes": 2033,
+    "lines": 112
+  },
+  "lib/xqled/xqled_common.sh": {
+    "sha256": "cd7ec506e4ee78d4d2cee9ed7bacbb0cb69fd5d72f50189a995f3cc1976ddc01",
+    "bytes": 1597,
+    "lines": 108
+  },
+  "lib/xqled/xqled_gpio.sh": {
+    "sha256": "191bfa3f20e665f55b12a5e74c442c49888bc2e6f12e7cc1f1bb498266cbf04a",
+    "bytes": 1937,
+    "lines": 103
+  },
+  "lib/xqled/xqled_sysfs.sh": {
+    "sha256": "c062945e559c3926c4f9dfcba2f85177201326b134def0f6bb6891d776ccf812",
+    "bytes": 1527,
+    "lines": 80
+  },
+  "live-inspection/field-help-live-1.0.64/etc/init.d/dnsmasq": {
+    "sha256": "1140d50bb1bde4a6574fe74dc14e2e38d5abb8f005dd4a347c1a70cfd797ec0e",
+    "bytes": 41393,
+    "lines": 1535
+  },
+  "live-inspection/field-help-live-1.0.64/etc/init.d/dropbear": {
+    "sha256": "ed48cba04fc1a94a4289a848a468d7dea7baf35e29004abcca885e51351c6fa5",
+    "bytes": 5189,
+    "lines": 224
+  },
+  "live-inspection/field-help-live-1.0.64/etc/init.d/system": {
+    "sha256": "fafde943d14427fff08756c7726b68a139f6dd36e9210568eaee98c52ff45dd8",
+    "bytes": 1336,
+    "lines": 65
+  },
+  "live-inspection/field-help-live-1.0.64/lib/netifd/proto/dhcp.sh": {
+    "sha256": "41c9d79252db43e80785019fceb8ae0e87a079afac416fb967932b521c3ee4d2",
+    "bytes": 4146,
+    "lines": 122
+  },
+  "live-inspection/field-help-live-1.0.64/lib/netifd/proto/ppp.sh": {
+    "sha256": "cccf08babee1aefd14b9f1de8dd45af72cc5bf5c79d69581cb28e55708747f54",
+    "bytes": 9670,
+    "lines": 411
+  },
+  "sbin/devstatus": {
+    "sha256": "ed3b96a8c64f3da254932a57ece3e96b6921638bae11b8a94abc90087821920b",
+    "bytes": 200,
+    "lines": 13
+  },
+  "sbin/fw3": {
+    "sha256": "7e25ca821847e00bf042b20aacd81be61c6b0eed239f37ad5801e43d3bc8101a",
+    "bytes": 111100,
+    "lines": 1198
+  },
+  "sbin/netifd": {
+    "sha256": "7ba2352bde8e6e7f878a68eb83084c3d4416fa5ecd8b2f8af700845d9610151d",
+    "bytes": 177943,
+    "lines": 2106
+  },
+  "sbin/port_map": {
+    "sha256": "a803db64c851ed36619b8e88730b70790890532cf1842bffb9095f4116c776d3",
+    "bytes": 5726,
+    "lines": 216
+  },
+  "sbin/wifi": {
+    "sha256": "7132b53720fcec79337817befced569a62d52ae691575c8861a1771e34024d8f",
+    "bytes": 14999,
+    "lines": 637
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/luci/model/cbi/admin_network/proto_dhcp.lua": {
+    "sha256": "d101fc4216c82bd4339cb8914ee0af90c82215c61bbffbc9aeb20e3f508c7f44",
+    "bytes": 4595,
+    "lines": 189
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/luci/model/cbi/admin_network/proto_static.lua": {
+    "sha256": "e38b4de0c4aa49e2de93c92d31ffeaa13a46f6d1ae64d54cbb7bc0348b55af84",
+    "bytes": 4296,
+    "lines": 190
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/luci/model/cbi/firewall/forward-details.lua": {
+    "sha256": "48c77712e437b5248bd57395db695a47106419e3a2506ab38334857027508cc2",
+    "bytes": 9428,
+    "lines": 457
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/luci/model/cbi/firewall/rule-details.lua": {
+    "sha256": "83e4edf78c104489b79234a48af85da409be2b5450c924968572839448d81dba",
+    "bytes": 28212,
+    "lines": 976
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/luci/model/cbi/firewall/zone-details.lua": {
+    "sha256": "34b5597614ceb6b3578bc3746f3da43aadd96f2de47baa862c0886d840d9fd87",
+    "bytes": 16844,
+    "lines": 674
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/luci/model/firewall.lua": {
+    "sha256": "699f86064d8d1ffc272ef52b7108c3b54e1476531eca382e05ad7b192f203079",
+    "bytes": 32103,
+    "lines": 1697
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/luci/model/network.lua": {
+    "sha256": "f1f5d7b117df237500263fa221654ab73510b6e9a6651b9cc72c61432d1ee506",
+    "bytes": 95789,
+    "lines": 4918
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/xiaoqiang/util/XQLanWanUtil.lua": {
+    "sha256": "869ef0b7ac51b488f108751bd92e787be168539888bb3fd577abc6ea2302b7c0",
+    "bytes": 187548,
+    "lines": 8982
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/xiaoqiang/util/XQSysUtil.lua": {
+    "sha256": "c3e4c149fc87904a9d9e9350d4208991c3b61e165b8442a1934406c5fa717c15",
+    "bytes": 154906,
+    "lines": 7905
+  },
+  "static/lua-analysis/decompiled/usr/lib/lua/xiaoqiang/util/XQWifiUtil.lua": {
+    "sha256": "b432da3def0784d26f581bd04b46d0593261afa4ec701f29cbf7f36e2413a724",
+    "bytes": 282334,
+    "lines": 13317
+  },
+  "usr/lib/libsyslog-ng-3.5.6.so": {
+    "sha256": "2c514cedebfc5032e75ab49a02c2866b46a37a91808d07583d6c9774f33b9765",
+    "bytes": 445003,
+    "lines": 2384
+  },
+  "usr/lib/opkg/info/odhcpd-ipv6only.control": {
+    "sha256": "bb324118b7c186481935566dbce64570d56db9c11c174e76866626bf523e5e7f",
+    "bytes": 717,
+    "lines": 17
+  },
+  "usr/sbin/dnsmasq": {
+    "sha256": "f251e489ca2cc138cea166bbb24446ebf0d49aa1916ab136094982bbe283a47c",
+    "bytes": 233355,
+    "lines": 2732
+  },
+  "usr/sbin/dropbear": {
+    "sha256": "f5e6838edc8b218f7f95a4f20e4d9e9050c8f9025f613d252d823ab17743c7d2",
+    "bytes": 164203,
+    "lines": 1372
+  },
+  "usr/sbin/guestwifi.sh": {
+    "sha256": "df24dee887ef6659c7ed3d63005a40f5b63a0614e6944374c3655844506ee73d",
+    "bytes": 5275,
+    "lines": 207
+  },
+  "usr/sbin/ipv6.sh": {
+    "sha256": "94a7c39610d3f3216fbff0934ba21fd66bda548739c0d4300168e02c9472f33c",
+    "bytes": 13853,
+    "lines": 485
+  },
+  "usr/sbin/led_ctl": {
+    "sha256": "5c289c210207d1ba4c4ce9181505781c167d938085a37ae811744a47a571f6ad",
+    "bytes": 8733,
+    "lines": 329
+  },
+  "usr/sbin/led_srv": {
+    "sha256": "4b2018ab36d643cd80218a3bf8d04bc7cad7e9a8002fbfabbf3b959a317ed733",
+    "bytes": 20773,
+    "lines": 153
+  },
+  "usr/sbin/nettb2": {
+    "sha256": "c3257af3186902788baca4847c5e863821c5a22d871477a682680f8d3c3cd06b",
+    "bytes": 10339,
+    "lines": 531
+  },
+  "usr/sbin/ntpsetclock": {
+    "sha256": "ea3c51d8c4b0ae55eb5cc05c2f71cb17d83829c554884c7a95a6004d53851141",
+    "bytes": 4726,
+    "lines": 162
+  },
+  "usr/sbin/odhcpd": {
+    "sha256": "afdbd367187bfa35d3f6868c313744e100bd392d81d7fd3b76d021252830f798",
+    "bytes": 70173,
+    "lines": 716
+  },
+  "usr/sbin/odhcpd-update": {
+    "sha256": "3aa9219b044e80b362145240c08b859c9e56974cbe3f82818730ca3f7966cde0",
+    "bytes": 134,
+    "lines": 7
+  },
+  "usr/sbin/sysapi": {
+    "sha256": "b2c4680b5befef171842ebe002990cf4daf395f89fc65b5ebb319217f294f01a",
+    "bytes": 31403,
+    "lines": 1091
+  },
+  "usr/sbin/sysapi.firewall": {
+    "sha256": "5b94c54416b90eaec94242c281ef5c3dac1cd161f8e4871217eba066528333cf",
+    "bytes": 33565,
+    "lines": 981
+  },
+  "usr/sbin/wan6_link_check.sh": {
+    "sha256": "302471f2f2299b2207971a4496ac638bcd598eecf78d3ef0bf957b56ee260510",
+    "bytes": 602,
+    "lines": 24
+  }
+}

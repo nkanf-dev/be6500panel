@@ -1,4 +1,6 @@
 import type { ConfigurationModule } from "./contracts";
+import { fieldHelp } from "./field-help";
+import type { FieldHelp } from "./field-help/types";
 
 export interface FieldSchema {
   label: string;
@@ -9,6 +11,8 @@ export interface FieldSchema {
   max?: number;
   step?: number;
   placeholder?: string;
+  /** Detailed source-backed explanation; never changes the input value or validation. */
+  help?: FieldHelp;
 }
 
 interface SectionSchema {
@@ -1257,7 +1261,15 @@ export function fieldSchema(
   fieldName: string,
 ): FieldSchema {
   const fields = definition(module, sectionType)?.fields;
-  if (fields && Object.hasOwn(fields, fieldName)) return fields[fieldName];
+  if (fields && Object.hasOwn(fields, fieldName)) {
+    const help = fieldHelp(module, sectionType, fieldName);
+    return {
+      ...fields[fieldName],
+      ...(help
+        ? { help, ...(help.summary ? { hint: help.summary } : {}) }
+        : {}),
+    };
+  }
   return text(
     fieldName,
     "未登记的原生字段；可直接编辑文本，不推断布尔值或数字类型，未编辑时保留原值。",
@@ -1284,4 +1296,21 @@ export function sectionFields(
 ): readonly string[] {
   const fields = definition(module, sectionType)?.fields;
   return fields ? Object.keys(fields) : [];
+}
+
+/** Complete inventory for catalog review and deterministic coverage tests. */
+export function fieldInventory(): readonly {
+  module: ConfigurationModule;
+  section: string;
+  field: string;
+}[] {
+  return (Object.keys(definitions) as ConfigurationModule[]).flatMap((module) =>
+    Object.entries(definitions[module]).flatMap(([section, definition]) =>
+      Object.keys(definition.fields).map((field) => ({
+        module,
+        section,
+        field,
+      })),
+    ),
+  );
 }
