@@ -262,7 +262,7 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 		}
 		defer release()
 	}
-	state, err = s.runtime.Configure(r.Context(), managedruntime.SingBox, out.Config, state.Generation)
+	state, err = s.runtime.ConfigureGuarded(r.Context(), managedruntime.SingBox, out.Config, state.Generation, s.runtimeMutationGuard)
 	if err != nil {
 		s.runtimeResult(w, managedruntime.SingBox, "config_committed", state, err)
 		return

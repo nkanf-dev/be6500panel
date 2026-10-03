@@ -52,7 +52,7 @@ func (s *Server) runtimeAcquire(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input, "service", "artifact") {
 		return
 	}
-	state, err := s.runtime.Acquire(r.Context(), input.Service, input.Artifact)
+	state, err := s.runtime.AcquireGuarded(r.Context(), input.Service, input.Artifact, s.runtimeMutationGuard)
 	s.runtimeResult(w, input.Service, "artifact_acquired", state, err)
 }
 func (s *Server) runtimeConfigure(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +70,7 @@ func (s *Server) runtimeConfigure(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSONLimit(w, r, &input, 2<<20, "service", "config", "generation") {
 		return
 	}
-	state, err := s.runtime.Configure(r.Context(), input.Service, []byte(input.Config), input.Generation)
+	state, err := s.runtime.ConfigureGuarded(r.Context(), input.Service, []byte(input.Config), input.Generation, s.runtimeMutationGuard)
 	s.runtimeResult(w, input.Service, "config_committed", state, err)
 }
 func (s *Server) runtimeConfig(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +104,7 @@ func (s *Server) runtimeAction(w http.ResponseWriter, r *http.Request, start boo
 	var err error
 	code := "runtime_stopped"
 	if start {
-		state, err = s.runtime.Start(r.Context(), input.Service)
+		state, err = s.runtime.StartGuarded(r.Context(), input.Service, s.runtimeMutationGuard)
 		code = "runtime_started"
 	} else {
 		state, err = s.runtime.Stop(r.Context(), input.Service)
@@ -131,10 +131,14 @@ func (s *Server) runtimeRestore(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input, "service", "generation") {
 		return
 	}
-	state, err := s.runtime.Restore(r.Context(), input.Service, input.Generation)
+	state, err := s.runtime.RestoreGuarded(r.Context(), input.Service, input.Generation, s.runtimeMutationGuard)
 	s.runtimeResult(w, input.Service, "runtime_config_restored", state, err)
 }
 func (s *Server) runtimeResult(w http.ResponseWriter, service, code string, state managedruntime.Status, err error) {
+	// A refused admission must not persist desired state or report success.
+	if runtimeGuardRefusal(w, err) {
+		return
+	}
 	if state.Service != "" && (code == "config_committed" || code == "runtime_config_restored" || code == "artifact_acquired" || state.Restored || state.NeedsRecovery) {
 		if persistErr := s.persistDesired(service, state.Desired); persistErr != nil && err == nil {
 			fail(w, 500, "storage_failed", "运行目标保存失败；请刷新运行状态")
