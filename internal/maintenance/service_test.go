@@ -427,3 +427,56 @@ func TestPartialCleanupAlreadyAbsentIsNotReportedRetained(t *testing.T) {
 		t.Fatal("already-absent draft counted retained")
 	}
 }
+
+func TestClearRejectsPreviewAlreadyReadingPrivateSnapshot(t *testing.T) {
+	s, _, _ := fixture(t)
+	raw := changedBackup(t, s)
+	originalMetadata := s.options.Metadata
+	entered, resume := make(chan struct{}), make(chan struct{})
+	s.options.Metadata = func(ctx context.Context) (Metadata, error) {
+		close(entered)
+		select {
+		case <-resume:
+			return originalMetadata(ctx)
+		case <-ctx.Done():
+			return Metadata{}, ctx.Err()
+		}
+	}
+	type result struct {
+		preview Preview
+		err     error
+	}
+	finished := make(chan result, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() { preview, err := s.Preview(ctx, raw); finished <- result{preview: preview, err: err} }()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("preview did not enter snapshot")
+	}
+	s.Clear()
+	close(resume)
+	var got result
+	select {
+	case got = <-finished:
+	case <-ctx.Done():
+		t.Fatal("preview did not finish after Clear")
+	}
+	expectCode(t, got.err, "preview_cleared")
+	if got.preview.ID != "" || len(s.previews) != 0 {
+		t.Fatalf("old-session private preview published %#v %#v", got.preview, s.previews)
+	}
+	s.options.Metadata = originalMetadata
+	oldPreview, err := s.Preview(context.Background(), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Clear()
+	_, err = s.Stage(context.Background(), StageRequest{PreviewID: oldPreview.ID, Generation: oldPreview.Generation, Modules: []string{"system"}})
+	expectCode(t, err, "preview_not_found")
+	current, err := s.Preview(context.Background(), raw)
+	if err != nil || current.ID == "" || len(s.previews) != 1 {
+		t.Fatalf("new preview after Clear unavailable %#v %v", current, err)
+	}
+}

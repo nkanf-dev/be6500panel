@@ -116,7 +116,7 @@ func maintenanceError(w http.ResponseWriter, err error) {
 	switch code {
 	case "preview_not_found":
 		status = http.StatusNotFound
-	case "generation_conflict", "confirmation_pending", "model_mismatch", "draft_limit", "preview_limit", "operation_cancelled":
+	case "generation_conflict", "confirmation_pending", "model_mismatch", "draft_limit", "preview_limit", "preview_cleared", "operation_cancelled":
 		status = http.StatusConflict
 	case "backup_too_large", "document_too_large":
 		status = http.StatusRequestEntityTooLarge

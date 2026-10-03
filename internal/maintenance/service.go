@@ -22,6 +22,9 @@ type Service struct {
 	mu       sync.Mutex
 	options  Options
 	previews map[string]storedPreview
+	// clearEpoch prevents work started before an auth reset from publishing
+	// private content after Clear, even when the request context remains live.
+	clearEpoch uint64
 }
 
 func New(options Options) *Service {
@@ -141,8 +144,16 @@ func privateID() (string, error) {
 
 // Clear removes all in-memory private imports. Root may use it on shutdown or
 // authentication reset; expiry and admission remain bounded without a worker.
-func (s *Service) Clear() { s.mu.Lock(); defer s.mu.Unlock(); s.previews = map[string]storedPreview{} }
+func (s *Service) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clearEpoch++
+	s.previews = map[string]storedPreview{}
+}
 func (s *Service) Preview(ctx context.Context, raw []byte) (Preview, error) {
+	s.mu.Lock()
+	epoch := s.clearEpoch
+	s.mu.Unlock()
 	envelope, err := Decode(raw)
 	if err != nil {
 		return Preview{}, err
@@ -172,6 +183,9 @@ func (s *Service) Preview(ctx context.Context, raw []byte) (Preview, error) {
 	s.pruneLocked()
 	if err := ctx.Err(); err != nil {
 		return Preview{}, err
+	}
+	if epoch != s.clearEpoch {
+		return Preview{}, failure("preview_cleared", "Private import previews were cleared; upload the backup again in the current session.")
 	}
 	total := contentBytes
 	for _, preview := range s.previews {
