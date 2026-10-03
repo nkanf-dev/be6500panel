@@ -92,7 +92,7 @@ func (c *Collector) Query(ctx context.Context, name string, maxPoints, limit int
 			continue
 		}
 		h.MatchedCount++
-		stale := now.Sub(d.seen) > StaleAfter || h.State == "stale" || h.State == "unavailable"
+		stale := now.Sub(d.seen) > StaleAfter || h.State == "stale" || h.State == "unavailable" || (o.AgeingSeconds != nil && *o.AgeingSeconds > uint64(StaleAfter/time.Second))
 		row := Device{ID: id, Name: o.Name, Addresses: addresses, Interface: o.Interface, Associated: o.Associated, LastSeen: d.seen, Stale: stale, OnlineSeconds: copyValue(o.OnlineSeconds), AgeingSeconds: copyValue(o.AgeingSeconds), Counters: []CurrentCounter{}, Links: copyLinks(o.Links), AddressConflicts: []string{}, Samples: make([]Point, int(points))}
 		if !stale {
 			row.RXBytesPerSecond = copyValue(d.rxRate)

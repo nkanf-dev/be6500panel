@@ -192,7 +192,7 @@ func (c *Collector) record(s Snapshot) {
 		d.txRate = nil
 		prev := d.previous
 		d.previous = nil
-		if !o.Associated || len(o.Counters) == 0 {
+		if !o.Associated || len(o.Counters) == 0 || (o.AgeingSeconds != nil && *o.AgeingSeconds > uint64(StaleAfter/time.Second)) {
 			continue
 		}
 		next := &baseline{at: s.SampledAt.UTC(), online: o.OnlineSeconds, counters: o.Counters}

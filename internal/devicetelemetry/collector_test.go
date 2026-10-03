@@ -293,3 +293,31 @@ func TestReturnedHistoryDoesNotMutatePrivateMetadata(t *testing.T) {
 		t.Fatal("query changed private metadata", again)
 	}
 }
+
+func TestVendorAgedCachedDeviceDoesNotCreateMeasuredZero(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	c := makeCollector(t, &now)
+	age := uint64(120)
+	row := observed("02:00:00:00:00:01", 100, 200)
+	row.AgeingSeconds = &age
+	recordAt(c, now, row)
+	now = now.Add(SampleInterval)
+	recordAt(c, now, row)
+	d := query(t, c, "24h", 25, 1, "").Devices[0]
+	if !d.Stale || d.CoverageSeconds != 0 || d.RXBytesPerSecond != nil {
+		t.Fatal("vendor-aged frozen counters represented as measured zero", d)
+	}
+	age = 0
+	now = now.Add(SampleInterval)
+	recordAt(c, now, row)
+	d = query(t, c, "24h", 25, 1, "").Devices[0]
+	if d.Stale || d.CoverageSeconds != 0 {
+		t.Fatal("freshness recovery must first establish baseline", d)
+	}
+	now = now.Add(SampleInterval)
+	recordAt(c, now, row)
+	d = query(t, c, "24h", 25, 1, "").Devices[0]
+	if d.CoverageSeconds != 15 || d.RXBytesPerSecond == nil || *d.RXBytesPerSecond != 0 {
+		t.Fatal("genuine fresh zero not kept", d)
+	}
+}
