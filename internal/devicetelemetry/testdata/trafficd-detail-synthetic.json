@@ -1,0 +1,86 @@
+{
+  "02:00:00:00:00:01": {
+    "hw": "02:00:00:00:00:01",
+    "hostname": "Synthetic device 1",
+    "ifname": "wl0",
+    "assoc": 1,
+    "ageing_timer": 9,
+    "online_timer": 3499,
+    "ip_list": [
+      {
+        "ageing_timer": 3,
+        "rx_bytes": 36396931,
+        "tx_bytes": 6363515,
+        "rx_rate": 3236,
+        "tx_rate": 3085,
+        "max_rx_rate": 1745350,
+        "max_tx_rate": 219343,
+        "hw": "02:00:00:00:00:01",
+        "ip": "192.0.2.11"
+      }
+    ]
+  },
+  "02:00:00:00:00:02": {
+    "hw": "02:00:00:00:00:02",
+    "hostname": "Synthetic device 2",
+    "ifname": "",
+    "assoc": 1,
+    "ageing_timer": 9,
+    "online_timer": 21863,
+    "ip_list": [
+      {
+        "ageing_timer": 3,
+        "rx_bytes": 295574682,
+        "tx_bytes": 64002570,
+        "rx_rate": 1436,
+        "tx_rate": 1333,
+        "max_rx_rate": 17484415,
+        "max_tx_rate": 250763,
+        "hw": "02:00:00:00:00:02",
+        "ip": "192.0.2.12"
+      }
+    ]
+  },
+  "02:00:00:00:00:03": {
+    "hw": "02:00:00:00:00:03",
+    "hostname": "Synthetic device 3",
+    "ifname": "wl0",
+    "assoc": 1,
+    "ageing_timer": 9,
+    "online_timer": 9321,
+    "ip_list": [
+      {
+        "ageing_timer": 3,
+        "rx_bytes": 368740689,
+        "tx_bytes": 829701708,
+        "rx_rate": 26027,
+        "tx_rate": 13408,
+        "max_rx_rate": 3334783,
+        "max_tx_rate": 1516002,
+        "hw": "02:00:00:00:00:03",
+        "ip": "192.0.2.13"
+      }
+    ]
+  },
+  "02:00:00:00:00:04": {
+    "hw": "02:00:00:00:00:04",
+    "hostname": "Synthetic device 4",
+    "ifname": "wl1",
+    "assoc": 1,
+    "ageing_timer": 9,
+    "online_timer": 21873,
+    "ip_list": [
+      {
+        "ageing_timer": 13,
+        "rx_bytes": 2027913,
+        "tx_bytes": 6531342,
+        "rx_rate": 0,
+        "tx_rate": 0,
+        "max_rx_rate": 3121,
+        "max_tx_rate": 16859,
+        "hw": "02:00:00:00:00:04",
+        "ip": "192.0.2.14"
+      }
+    ]
+  }
+}

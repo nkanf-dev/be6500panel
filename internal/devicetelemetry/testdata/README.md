@@ -1,0 +1,1 @@
+These synthetic fixtures keep the observed trafficd hw JSON shape and numeric counter values. All MAC addresses, IP addresses and hostnames are synthetic. The wireless response duplicates a device counter set across two MLO link keys; it is not two devices or two counter series. RX/TX rate vendor units and network direction are not asserted.
