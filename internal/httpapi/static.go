@@ -30,6 +30,9 @@ func staticHandler(directory string) http.Handler {
 		clean := path.Clean("/" + r.URL.Path)
 		target := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(clean, "/")))
 		if info, err := os.Stat(target); err == nil && !info.IsDir() {
+			if strings.HasSuffix(clean, ".webmanifest") {
+				w.Header().Set("Content-Type", "application/manifest+json")
+			}
 			files.ServeHTTP(w, r)
 			return
 		}

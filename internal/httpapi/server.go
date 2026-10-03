@@ -17,6 +17,7 @@ import (
 	"be6500panel/internal/devicetelemetry"
 	"be6500panel/internal/maintenance"
 	"be6500panel/internal/modules"
+	"be6500panel/internal/nodeprobe"
 	"be6500panel/internal/requesttrace"
 	"be6500panel/internal/router"
 	managedruntime "be6500panel/internal/runtime"
@@ -47,6 +48,7 @@ type Config struct {
 	Services          *router.ServiceObserver
 	DeviceAnnotations *deviceannotations.Store
 	Maintenance       *maintenance.Service
+	NodeProbes        *nodeprobe.Manager
 	StorageAdmission  storage.Admission
 }
 type Server struct {
@@ -78,6 +80,7 @@ type Server struct {
 	deviceAnnotations     http.Handler
 	deviceAnnotationStore *deviceannotations.Store
 	maintenance           *maintenance.Service
+	nodeProbes            *nodeprobe.Manager
 	storageAdmission      storage.Admission
 	desiredMu             sync.Mutex
 }
@@ -100,11 +103,22 @@ func New(cfg Config) (*Server, error) {
 		cfg.Logger = slog.New(core.NewRingHandler(slog.Default().Handler(), cfg.Logs))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, traffic: cfg.Traffic, trafficError: cfg.TrafficError, telemetry: cfg.Telemetry, deviceTelemetry: cfg.DeviceTelemetry, requestTraces: cfg.RequestTraces, services: cfg.Services, deviceAnnotations: DeviceAnnotationsHandler(cfg.DeviceAnnotations), deviceAnnotationStore: cfg.DeviceAnnotations, maintenance: cfg.Maintenance, storageAdmission: cfg.StorageAdmission, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel}, nil
+	s := &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, traffic: cfg.Traffic, trafficError: cfg.TrafficError, telemetry: cfg.Telemetry, deviceTelemetry: cfg.DeviceTelemetry, requestTraces: cfg.RequestTraces, services: cfg.Services, deviceAnnotations: DeviceAnnotationsHandler(cfg.DeviceAnnotations), deviceAnnotationStore: cfg.DeviceAnnotations, maintenance: cfg.Maintenance, storageAdmission: cfg.StorageAdmission, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel, nodeProbes: cfg.NodeProbes}
+	if s.nodeProbes == nil {
+		s.nodeProbes, err = s.newNodeProbeManager()
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+	}
+	return s, nil
 }
 func (s *Server) Close() {
 	s.closeOnce.Do(func() {
 		s.cancel()
+		if s.nodeProbes != nil {
+			s.nodeProbes.Close()
+		}
 		if s.maintenance != nil {
 			s.maintenance.Clear()
 		}
@@ -129,7 +143,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Unknown API path.")
 		return
 	}
-	allowedMethod := method == r.Method || (r.URL.Path == "/api/configuration/drafts" && r.Method == "DELETE") || (r.URL.Path == "/api/proxy/capture" && (r.Method == "POST" || r.Method == "DELETE")) || (r.URL.Path == "/api/proxy/request-traces" && r.Method == "POST") || (r.URL.Path == DeviceAnnotationsPath && r.Method == "POST") || (r.URL.Path == "/api/maintenance/import/preview" && r.Method == "DELETE")
+	allowedMethod := method == r.Method || (r.URL.Path == "/api/configuration/drafts" && r.Method == "DELETE") || (r.URL.Path == "/api/proxy/capture" && (r.Method == "POST" || r.Method == "DELETE")) || (r.URL.Path == "/api/proxy/request-traces" && r.Method == "POST") || (r.URL.Path == DeviceAnnotationsPath && r.Method == "POST") || (r.URL.Path == "/api/maintenance/import/preview" && r.Method == "DELETE") || (r.URL.Path == NodeProbesPath && (r.Method == "POST" || r.Method == "DELETE"))
 	if !allowedMethod {
 		w.Header().Set("Allow", method)
 		fail(w, 405, "method_not_allowed", "Method is not allowed for this endpoint.")
@@ -151,6 +165,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.deviceAnnotations.ServeHTTP(w, r)
 	case "/api/devices/activity":
 		DeviceActivityWithAnnotations(w, r, s.deviceTelemetry, s.deviceAnnotationStore)
+	case NodeProbesPath:
+		s.nodeProbeRequest(w, r)
 	case "/api/proxy/request-traces":
 		HandleRequestTraces(w, r, s.requestTraces)
 	case "/api/system/services":
@@ -264,6 +280,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var routes = map[string]string{
+	NodeProbesPath:            "GET",
 	"/api/maintenance/backup": "POST", "/api/maintenance/import/preview": "POST", "/api/maintenance/import/stage": "POST",
 	DeviceAnnotationsPath:   "GET",
 	"/api/devices/activity": "GET", "/api/proxy/request-traces": "GET", "/api/system/services": "GET", "/api/system/services/action": "POST",

@@ -254,6 +254,7 @@ export const ProxyNodesSchema = Schema.Struct({
   ),
   diagnostics: Schema.Array(ProxyDiagnosticSchema),
   policySummary: Schema.optional(ProxyPolicySummarySchema),
+  revision: Schema.optional(Schema.String),
   selectedNodeId: Schema.String,
 });
 export const ProxySelectSchema = Schema.Struct({

@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,10 +29,11 @@ type proxyState struct {
 	selected     string
 	dataDir      string
 	loadFailed   bool
+	revision     string
 }
 
 func newProxyState(dataDir string) *proxyState {
-	p := &proxyState{dataDir: dataDir, subscription: proxy.Subscription{Nodes: []proxy.Node{}, Rules: []proxy.Rule{}, Diagnostics: []proxy.Diagnostic{}}}
+	p := &proxyState{dataDir: dataDir, revision: freshNodeRevision(), subscription: proxy.Subscription{Nodes: []proxy.Node{}, Rules: []proxy.Rule{}, Diagnostics: []proxy.Diagnostic{}}}
 	if dataDir != "" {
 		raw, err := os.ReadFile(filepath.Join(dataDir, "subscription.yaml"))
 		if err == nil {
@@ -67,8 +70,9 @@ func (s *Server) proxyNodes(w http.ResponseWriter, r *http.Request) {
 		Nodes         []proxy.PublicNode `json:"nodes"`
 		Diagnostics   []proxy.Diagnostic `json:"diagnostics"`
 		Selected      string             `json:"selectedNodeId"`
+		Revision      string             `json:"revision"`
 		PolicySummary proxyPolicySummary `json:"policySummary"`
-	}{p.subscription.PublicNodes(), diagnostics, selected, summarizeProxyPolicy(p.subscription)})
+	}{p.subscription.PublicNodes(), diagnostics, selected, p.revision, summarizeProxyPolicy(p.subscription)})
 }
 func (s *Server) proxyImport(w http.ResponseWriter, r *http.Request) {
 	if !s.runtimeEnabled(w) {
@@ -121,7 +125,12 @@ func (s *Server) proxyImport(w http.ResponseWriter, r *http.Request) {
 	p.subscription = sub
 	p.loadFailed = false
 	p.selected = ""
+	p.revision = freshNodeRevision()
+	revision := p.revision
 	p.mu.Unlock()
+	if s.nodeProbes != nil {
+		s.nodeProbes.Invalidate(revision)
+	}
 	s.logger.Info("Subscription imported", "module", "proxy", "code", "subscription_imported", "nodes", len(sub.Nodes))
 	s.proxyNodes(w, r)
 }
@@ -341,4 +350,14 @@ func (s *Server) ruleSetReferences() ([]proxy.RuleSetReference, error) {
 		}
 	}
 	return refs, nil
+}
+
+// A new import always invalidates measured node results, including credential-
+// only changes. Random tokens contain no subscription text or credential hash.
+func freshNodeRevision() string {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(token[:])
 }
