@@ -322,8 +322,39 @@ func (m *Manager) Drafts(ctx context.Context) ([]Draft, error) {
 	}
 	return out, nil
 }
+
+// acquireDraftDeletion lets bounded import cleanup abandon a queued deletion
+// without leaving a goroutine waiting for an unrelated live transaction. Other
+// operations keep their existing synchronous transaction serialization.
+func (m *Manager) acquireDraftDeletion(ctx context.Context) error {
+	if m.ctx.Err() != nil {
+		return failure("closed", "Configuration manager is closed.")
+	}
+	if ctx.Err() != nil {
+		return failure("cancelled", "Configuration operation was cancelled.")
+	}
+	if m.mu.TryLock() {
+		return nil
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return failure("closed", "Configuration manager is closed.")
+		case <-ctx.Done():
+			return failure("cancelled", "Configuration operation was cancelled.")
+		case <-ticker.C:
+			if m.mu.TryLock() {
+				return nil
+			}
+		}
+	}
+}
 func (m *Manager) DeleteDraft(ctx context.Context, id string) error {
-	m.mu.Lock()
+	if err := m.acquireDraftDeletion(ctx); err != nil {
+		return err
+	}
 	defer m.mu.Unlock()
 	if err := m.check(ctx); err != nil {
 		return err
