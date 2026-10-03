@@ -10,11 +10,12 @@ const renderChart = (Component: typeof TrafficTrend, demo = true) => render(<The
 describe('visualization public contract', () => {
   it.each(components)('never replaces unavailable telemetry with samples (%s)', Component => {
     renderChart(Component, false);
-    expect(screen.getByText(Component === TrafficTrend ? '未采样' : Component === ActivityHeatmap ? '数据源：系统流量统计 (trafficd)' : '未接入', { selector: '.viz-source' })).toBeTruthy();
+    const source = Component === TrafficTrend ? '未采样' : Component === ActivityHeatmap ? '数据源：系统流量统计 (trafficd)' : Component === RequestWaterfall ? '主动诊断记录' : '未接入';
+    expect(screen.getByText(source, { selector: '.viz-source' })).toBeTruthy();
     expect(screen.queryByText('演示数据')).toBeNull();
     expect(screen.queryByRole('img')).toBeNull();
     expect(screen.queryByRole('table')).toBeNull();
-    expect(screen.getByRole('status').textContent).toContain(Component === TrafficTrend ? '未采样' : '未接入');
+    expect(screen.getByRole('status').textContent).toContain(Component === TrafficTrend ? '未采样' : Component === RequestWaterfall ? '暂未执行网络诊断' : '未接入');
   });
   it('defaults to an honest empty state', () => {
     render(<ThemeProvider><TrafficTrend /></ThemeProvider>);
