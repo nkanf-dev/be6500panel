@@ -103,11 +103,19 @@ describe("trafficd device activity HTTP contract", () => {
           { ...device, samples: Array.from({ length: 289 }, () => point) },
         ],
       },
-      { ...valid, devices: Array.from({ length: 33 }, () => device) },
+      { ...valid, devices: Array.from({ length: 65 }, () => device) },
     ])
       expect(() =>
         Schema.decodeUnknownSync(DeviceActivityHistorySchema)(invalid),
       ).toThrow();
+  });
+  it("accepts bounded workspace responses with 64 devices while the panel still queries 32", () => {
+    const valid = activityFixture();
+    const devices = Array.from({ length: 64 }, (_, index) => ({
+      ...valid.devices[0],
+      id: `02:00:00:00:01:${index.toString(16).padStart(2, "0")}`,
+    }));
+    expect(Schema.decodeUnknownSync(DeviceActivityHistorySchema)({ ...valid, devices }).devices).toHaveLength(64);
   });
   it("accepts all 169 hourly buckets for seven days including the current partial edge", () => {
     const valid = activityFixture("7d");

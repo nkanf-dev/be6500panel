@@ -3,7 +3,9 @@ import { Schema } from "effect";
 export const DEVICE_ACTIVITY_RANGES = ["24h", "7d", "30m"] as const;
 export type DeviceActivityRange = (typeof DEVICE_ACTIVITY_RANGES)[number];
 export const DEVICE_ACTIVITY_MAX_POINTS = 288;
+/** Default panel query/table bound. The API also admits bounded workspace queries. */
 export const DEVICE_ACTIVITY_MAX_DEVICES = 32;
+export const DEVICE_ACTIVITY_MAX_QUERY_DEVICES = 64;
 export const DEVICE_ACTIVITY_CHART_ROWS = 16;
 export const DEVICE_ACTIVITY_SEARCH_LIMIT = 64;
 export const deviceActivityRangeLabels: Record<DeviceActivityRange, string> = {
@@ -100,7 +102,7 @@ export const DeviceActivityHistorySchema = Schema.Struct({
   matchedCount: count,
   truncated: Schema.Boolean,
   devices: Schema.Array(DeviceActivityDeviceSchema).pipe(
-    Schema.maxItems(DEVICE_ACTIVITY_MAX_DEVICES),
+    Schema.maxItems(DEVICE_ACTIVITY_MAX_QUERY_DEVICES),
   ),
   groups: Schema.Array(DeviceActivityGroupSchema),
 });
