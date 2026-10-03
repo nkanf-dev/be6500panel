@@ -187,21 +187,25 @@ export function DeviceHistoryCharts({
       },
     [values, times],
   );
-  const rows = values.flatMap(({ device, name, samples }) =>
-    samples.map((sample) => [
-      name,
-      device.mac,
-      new Date(sample.time).toLocaleString("zh-CN"),
-      sample.rxBytes === null ? "缺测" : sample.rxBytes,
-      sample.txBytes === null ? "缺测" : sample.txBytes,
-      sample.coverageSeconds,
-      sample.coverageSeconds > 0 && sample.rxBytes !== null
-        ? Number((sample.rxBytes / sample.coverageSeconds).toFixed(2))
-        : "—",
-      sample.coverageSeconds > 0 && sample.txBytes !== null
-        ? Number((sample.txBytes / sample.coverageSeconds).toFixed(2))
-        : "—",
-    ]),
+  const rows = useMemo(
+    () =>
+      values.flatMap(({ device, name, samples }) =>
+        samples.map((sample) => [
+          name,
+          device.mac,
+          new Date(sample.time).toLocaleString("zh-CN"),
+          sample.rxBytes === null ? "缺测" : sample.rxBytes,
+          sample.txBytes === null ? "缺测" : sample.txBytes,
+          sample.coverageSeconds,
+          sample.coverageSeconds > 0 && sample.rxBytes !== null
+            ? Number((sample.rxBytes / sample.coverageSeconds).toFixed(2))
+            : "—",
+          sample.coverageSeconds > 0 && sample.txBytes !== null
+            ? Number((sample.txBytes / sample.coverageSeconds).toFixed(2))
+            : "—",
+        ]),
+      ),
+    [values],
   );
   return (
     <div className="device-chart-stack">
@@ -227,6 +231,8 @@ export function DeviceHistoryCharts({
             "TX B/s",
           ]}
           rows={rows}
+          tablePageSize={100}
+          lazyTable
           hint="RX / TX 为固件计数器方向；按有效覆盖秒数计算速率。"
         >
           <EChart
@@ -256,6 +262,8 @@ export function DeviceHistoryCharts({
             "TX B/s",
           ]}
           rows={rows}
+          tablePageSize={100}
+          lazyTable
         >
           <EChart
             option={heatOption}
