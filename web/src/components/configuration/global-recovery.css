@@ -1,0 +1,62 @@
+.global-recovery-banner {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #b88425;
+  border-radius: 0.6rem;
+  background: var(--surface, #191a20);
+  box-shadow: 0 3px 12px #0002;
+}
+.global-recovery-summary {
+  display: flex;
+  flex: 1 1 20rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.global-recovery-summary .badge {
+  white-space: normal;
+}
+.global-recovery-summary progress {
+  width: 6rem;
+  accent-color: #c79433;
+}
+.global-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.global-recovery-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--danger, #f19999);
+  overflow-wrap: anywhere;
+}
+.global-recovery-details {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+}
+.global-recovery-details summary {
+  cursor: pointer;
+}
+.global-recovery-details p {
+  margin: 0.4rem 0 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 480px) {
+  .global-recovery-banner {
+    padding: 0.7rem;
+  }
+  .global-recovery-actions {
+    width: 100%;
+  }
+  .global-recovery-actions .button {
+    flex: 1 1 auto;
+  }
+}

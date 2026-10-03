@@ -53,11 +53,6 @@ export const ConfigurationSchema = Schema.Struct({
 export const DraftsSchema = Schema.Struct({
   drafts: Schema.Array(DraftSchema),
 });
-export const ConfigurationStatusSchema = Schema.Struct({
-  enabled: Schema.Boolean,
-  generation: Schema.Number,
-  pendingCommit: Schema.optional(PendingCommitSchema),
-});
 export const CommitSchema = Schema.Struct({
   id: Schema.String,
   state: Schema.Literal("committed", "pending_confirmation", "rolled_back"),
@@ -67,6 +62,30 @@ export const CommitSchema = Schema.Struct({
   captureDisabled: Schema.optional(Schema.Boolean),
   warning: Schema.optional(Schema.String),
 });
+// The journal phase is recovery truth. Operation.state can still describe the
+// original apply while phase is rolling_back after a failed restoration.
+export const ConfigurationOperationStatusSchema = Schema.Struct({
+  ...CommitSchema.fields,
+  phase: Schema.Literal(
+    "applying",
+    "pending",
+    "committed",
+    "rolling_back",
+    "rolled_back",
+  ),
+  errorCode: Schema.optional(Schema.String),
+  canConfirm: Schema.Boolean,
+  canRollback: Schema.Boolean,
+});
+export const ConfigurationStatusSchema = Schema.Struct({
+  enabled: Schema.Boolean,
+  generation: Schema.Number,
+  pendingCommit: Schema.optional(PendingCommitSchema),
+  errorCode: Schema.optional(Schema.String),
+  operation: Schema.optional(ConfigurationOperationStatusSchema),
+});
+export type ConfigurationOperationStatus =
+  typeof ConfigurationOperationStatusSchema.Type;
 export type ConfigurationSnapshot = typeof ConfigurationSchema.Type;
 export type ConfigurationDraft = typeof DraftSchema.Type;
 export type ConfigurationStatus = typeof ConfigurationStatusSchema.Type;
