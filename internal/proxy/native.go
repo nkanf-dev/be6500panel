@@ -173,7 +173,7 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	if in.IPv6 == IPv6Block {
 		routeRules = append(routeRules, map[string]any{"ip_version": 6, "action": "reject"})
 	}
-	routeRules = append(routeRules, map[string]any{"inbound": []string{"mixed-in", "tproxy-in"}, "action": "sniff", "sniffer": []string{"http", "tls", "dns"}, "timeout": "300ms"})
+	routeRules = append(routeRules, map[string]any{"inbound": []string{"mixed-in", "tproxy-in"}, "action": "sniff", "sniffer": []string{"http", "tls", "dns", "quic"}, "timeout": "300ms"})
 	dnsRules := []map[string]any{}
 	if len(bootstrap) > 0 {
 		dnsRules = append(dnsRules, map[string]any{"domain": bootstrap, "server": "dns-direct", "rewrite_ttl": 300})
