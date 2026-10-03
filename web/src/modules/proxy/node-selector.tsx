@@ -10,7 +10,7 @@ import {
   Panel,
   PanelHeader,
 } from "../../components/ui/primitives";
-import { api, errorMessage } from "../../lib/api";
+import { errorMessage } from "../../lib/api";
 import type { IPv6Policy, ProxyNodes } from "../../lib/contracts";
 import type { RuntimeController } from "../runtime/use-runtime";
 import { useAcceptedNodeConfig } from "./node-selector-config";
@@ -22,6 +22,9 @@ import {
   type NodePreferences,
 } from "./node-selector-preferences";
 import { matchesRegion, NODE_REGIONS } from "./node-selector-regions";
+import { selectProxyPolicy } from "./policy-api";
+import type { ProxyPolicySummary } from "./policy-contracts";
+import { PolicyReview } from "./policy-review";
 import "./node-selector.css";
 
 type Node = ProxyNodes["nodes"][number];
@@ -57,7 +60,7 @@ export function NodeSelector({
   onSelected,
   importing = false,
 }: {
-  nodes?: ProxyNodes;
+  nodes?: ProxyNodes & { policySummary?: ProxyPolicySummary };
   importing?: boolean;
   runtime: RuntimeController;
   onSelected: () => void;
@@ -75,6 +78,14 @@ export function NodeSelector({
   const [pending, setPending] = useState(false);
   const submitting = useRef(false);
   const [saved, setSaved] = useState<string>();
+  // Deliberate review is component memory only, never a persisted preference.
+  const [acknowledgedRevision, setAcknowledgedRevision] = useState<string>();
+  const policySummary = nodes?.policySummary;
+  const policyRevision = policySummary?.revision;
+  const policyAcknowledged =
+    !!policyRevision && acknowledgedRevision === policyRevision;
+  const policyReady =
+    !policySummary || policySummary.omitted === 0 || policyAcknowledged;
   const [focusId, setFocusId] = useState("");
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const listRef = useRef<HTMLDivElement>(null);
@@ -96,7 +107,8 @@ export function NodeSelector({
     !!selectedNode &&
     !!runtime.status?.artifactAvailable &&
     configReady &&
-    validPorts;
+    validPorts &&
+    policyReady;
   const filtered = useMemo(() => {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     return (nodes?.nodes ?? []).filter((node) => {
@@ -131,6 +143,10 @@ export function NodeSelector({
   const transports = [...new Set(all.map((node) => node.transport))].sort();
   const draft = !!selectedId && selectedId !== nodes?.selectedNodeId;
 
+  useEffect(() => {
+    // Clearing also prevents an old revision from reviving after a missing summary.
+    setAcknowledgedRevision(undefined);
+  }, [policyRevision]);
   useEffect(() => {
     if (accepted.inputs && accepted.generation !== undefined) {
       setPreferences((previous) =>
@@ -202,19 +218,25 @@ export function NodeSelector({
     try {
       await runtime.run(
         () =>
-          api
-            .proxySelect({ nodeId: selectedId, ipv6, failure: "direct", ports })
-            .pipe(
-              Effect.map((response) => {
-                setSaved(
-                  response.status.state === "running"
-                    ? strings.proxy.nodes.switchSuccess
-                    : "节点配置已保存",
-                );
-                onSelected();
-                return response.status;
-              }),
-            ),
+          selectProxyPolicy({
+            nodeId: selectedId,
+            ipv6,
+            failure: "direct",
+            ports,
+            ...(policyAcknowledged
+              ? { acknowledgedRevision: policyRevision }
+              : {}),
+          }).pipe(
+            Effect.map((response) => {
+              setSaved(
+                response.status.state === "running"
+                  ? strings.proxy.nodes.switchSuccess
+                  : "节点配置已保存",
+              );
+              onSelected();
+              return response.status;
+            }),
+          ),
         "节点配置已保存",
       );
     } finally {
@@ -247,6 +269,15 @@ export function NodeSelector({
               fallback={selectedId ? "已选节点已移除" : "尚未选择节点"}
             />
           </div>
+          <PolicyReview
+            summary={policySummary}
+            acknowledgment={{
+              checked: policyAcknowledged,
+              disabled: busy,
+              onChange: (checked) =>
+                setAcknowledgedRevision(checked ? policyRevision : undefined),
+            }}
+          />
           <div className="node-selector-apply">
             <Badge tone={draft ? "warning" : "neutral"}>
               {!selectedId

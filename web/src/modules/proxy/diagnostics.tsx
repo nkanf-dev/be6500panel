@@ -1,14 +1,21 @@
 import { Panel, PanelHeader } from "../../components/ui/primitives";
 import type { ProxyNodes } from "../../lib/contracts";
 import { LogsPanel } from "../logs";
+import type { ProxyPolicySummary } from "./policy-contracts";
+import { PolicyReview } from "./policy-review";
 
 export function ProxyDiagnostics({
   diagnostics = [],
+  policySummary,
 }: {
   diagnostics?: ProxyNodes["diagnostics"];
+  policySummary?: ProxyPolicySummary;
 }) {
   return (
     <div className="page-stack">
+      <Panel className="config-form">
+        <PolicyReview summary={policySummary} />
+      </Panel>
       <Panel>
         <PanelHeader
           title="订阅诊断"
