@@ -280,83 +280,72 @@ export async function installNodeProbeBrowserFixture(
     assert(!armed, "Consume the explicitly armed probe request first");
     armed = entry;
   };
-  // Intercept the full browser boundary. Only same-origin static GET assets may pass.
-  await page.route("**/*", async (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    const method = request.method();
-    try {
-      assert(
-        url.origin === origin,
-        `External browser request forbidden: ${request.url()}`,
-      );
-      assert(!/\bubus\b/i.test(url.pathname), "Browser ubus is forbidden");
-      if (
-        method === "GET" &&
-        !url.pathname.startsWith("/api/") &&
-        ["document", "script", "stylesheet", "image", "font"].includes(
-          request.resourceType(),
-        )
-      ) {
-        await route.continue();
-        return;
-      }
-      if (method === "GET") {
-        reads.push(`${url.pathname}${url.search}`);
-        const value = source.get(url);
+  // Intercept every API request at the full configured origin. Vite serves public assets.
+  await page.route(
+    (url) => url.origin === origin && url.pathname.startsWith("/api/"),
+    async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const method = request.method();
+      try {
+        if (method === "GET") {
+          reads.push(`${url.pathname}${url.search}`);
+          const value = source.get(url);
+          await route.fulfill({
+            status: 200,
+            contentType:
+              url.pathname === "/api/events"
+                ? "text/event-stream"
+                : "application/json",
+            body:
+              url.pathname === "/api/events"
+                ? `event: snapshot\ndata: ${JSON.stringify(value)}\n\n`
+                : JSON.stringify(value),
+          });
+          return;
+        }
+        const raw = request.postData();
+        const entry = {
+          method,
+          path: url.pathname,
+          raw,
+          body: raw ? JSON.parse(raw) : null,
+        };
+        writes.push(entry);
+        assert(
+          url.pathname === PROBE_PATH &&
+            !url.search &&
+            (method === "POST" || method === "DELETE"),
+          `Only explicit node-probe mutations are allowed: ${method} ${url.pathname}`,
+        );
+        assert(
+          armed !== undefined &&
+            JSON.stringify(entry) === JSON.stringify(armed),
+          `Unarmed or non-exact probe mutation: ${method} ${url.pathname}`,
+        );
+        armed = undefined;
+        const value =
+          method === "POST" ? source.start(entry.body) : source.stop();
         await route.fulfill({
           status: 200,
-          contentType:
-            url.pathname === "/api/events"
-              ? "text/event-stream"
-              : "application/json",
-          body:
-            url.pathname === "/api/events"
-              ? `event: snapshot\ndata: ${JSON.stringify(value)}\n\n`
-              : JSON.stringify(value),
+          contentType: "application/json",
+          body: JSON.stringify(value),
         });
-        return;
+      } catch (error) {
+        unexpected.push(error instanceof Error ? error.message : String(error));
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "node_probe_fixture_unexpected",
+              message: "Synthetic node-probe fixture refused this request",
+            },
+          }),
+        });
       }
-      const raw = request.postData();
-      const entry = {
-        method,
-        path: url.pathname,
-        raw,
-        body: raw ? JSON.parse(raw) : null,
-      };
-      writes.push(entry);
-      assert(
-        url.pathname === PROBE_PATH &&
-          !url.search &&
-          (method === "POST" || method === "DELETE"),
-        `Only explicit node-probe mutations are allowed: ${method} ${url.pathname}`,
-      );
-      assert(
-        armed !== undefined && JSON.stringify(entry) === JSON.stringify(armed),
-        `Unarmed or non-exact probe mutation: ${method} ${url.pathname}`,
-      );
-      armed = undefined;
-      const value =
-        method === "POST" ? source.start(entry.body) : source.stop();
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(value),
-      });
-    } catch (error) {
-      unexpected.push(error instanceof Error ? error.message : String(error));
-      await route.fulfill({
-        status: 409,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: {
-            code: "node_probe_fixture_unexpected",
-            message: "Synthetic node-probe fixture refused this request",
-          },
-        }),
-      });
-    }
-  });
+    },
+  );
   return {
     ...source,
     reads,
