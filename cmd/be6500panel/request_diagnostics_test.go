@@ -71,6 +71,12 @@ func TestAcceptedDiagnosticProxy(t *testing.T) {
 			r.states[0].State = managedruntime.Stopped
 		}},
 		{"recovery", func(r *diagnosticRuntimeFixture, s *diagnosticRouterFixture) { r.states[0].NeedsRecovery = true }},
+		{"accepted state not durable while old PID still runs", func(r *diagnosticRuntimeFixture, s *diagnosticRouterFixture) {
+			r.states[0].ErrorCode = "state_not_durable"
+		}},
+		{"error appears during private read", func(r *diagnosticRuntimeFixture, s *diagnosticRouterFixture) {
+			r.states = append(r.states, managedruntime.Status{State: managedruntime.Running, PID: 123, Generation: 7, ErrorCode: "state_not_durable"})
+		}},
 		{"unverified LAN", func(r *diagnosticRuntimeFixture, s *diagnosticRouterFixture) { s.addresses = nil }},
 		{"invalid interface source", func(r *diagnosticRuntimeFixture, s *diagnosticRouterFixture) { s.err = errors.New("invalid") }},
 		{"stale accepted generation", func(r *diagnosticRuntimeFixture, s *diagnosticRouterFixture) { r.generation = 6 }},

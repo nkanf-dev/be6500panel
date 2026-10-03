@@ -15,6 +15,7 @@ import (
 	"be6500panel/internal/core"
 	"be6500panel/internal/deviceannotations"
 	"be6500panel/internal/devicetelemetry"
+	"be6500panel/internal/maintenance"
 	"be6500panel/internal/modules"
 	"be6500panel/internal/requesttrace"
 	"be6500panel/internal/router"
@@ -45,6 +46,7 @@ type Config struct {
 	RequestTraces     *requesttrace.Collector
 	Services          *router.ServiceObserver
 	DeviceAnnotations *deviceannotations.Store
+	Maintenance       *maintenance.Service
 	StorageAdmission  storage.Admission
 }
 type Server struct {
@@ -74,6 +76,7 @@ type Server struct {
 	requestTraces     *requesttrace.Collector
 	services          *router.ServiceObserver
 	deviceAnnotations http.Handler
+	maintenance       *maintenance.Service
 	storageAdmission  storage.Admission
 	desiredMu         sync.Mutex
 }
@@ -96,9 +99,17 @@ func New(cfg Config) (*Server, error) {
 		cfg.Logger = slog.New(core.NewRingHandler(slog.Default().Handler(), cfg.Logs))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, traffic: cfg.Traffic, trafficError: cfg.TrafficError, telemetry: cfg.Telemetry, deviceTelemetry: cfg.DeviceTelemetry, requestTraces: cfg.RequestTraces, services: cfg.Services, deviceAnnotations: DeviceAnnotationsHandler(cfg.DeviceAnnotations), storageAdmission: cfg.StorageAdmission, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel}, nil
+	return &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, traffic: cfg.Traffic, trafficError: cfg.TrafficError, telemetry: cfg.Telemetry, deviceTelemetry: cfg.DeviceTelemetry, requestTraces: cfg.RequestTraces, services: cfg.Services, deviceAnnotations: DeviceAnnotationsHandler(cfg.DeviceAnnotations), maintenance: cfg.Maintenance, storageAdmission: cfg.StorageAdmission, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel}, nil
 }
-func (s *Server) Close() { s.closeOnce.Do(func() { s.cancel(); s.sampler.Close() }) }
+func (s *Server) Close() {
+	s.closeOnce.Do(func() {
+		s.cancel()
+		if s.maintenance != nil {
+			s.maintenance.Clear()
+		}
+		s.sampler.Close()
+	})
+}
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
@@ -117,7 +128,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Unknown API path.")
 		return
 	}
-	allowedMethod := method == r.Method || (r.URL.Path == "/api/configuration/drafts" && r.Method == "DELETE") || (r.URL.Path == "/api/proxy/capture" && (r.Method == "POST" || r.Method == "DELETE")) || (r.URL.Path == "/api/proxy/request-traces" && r.Method == "POST") || (r.URL.Path == DeviceAnnotationsPath && r.Method == "POST")
+	allowedMethod := method == r.Method || (r.URL.Path == "/api/configuration/drafts" && r.Method == "DELETE") || (r.URL.Path == "/api/proxy/capture" && (r.Method == "POST" || r.Method == "DELETE")) || (r.URL.Path == "/api/proxy/request-traces" && r.Method == "POST") || (r.URL.Path == DeviceAnnotationsPath && r.Method == "POST") || (r.URL.Path == "/api/maintenance/import/preview" && r.Method == "DELETE")
 	if !allowedMethod {
 		w.Header().Set("Allow", method)
 		fail(w, 405, "method_not_allowed", "Method is not allowed for this endpoint.")
@@ -129,6 +140,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/api/maintenance/backup":
+		HandleMaintenanceBackup(w, r, s.maintenance)
+	case "/api/maintenance/import/preview":
+		HandleMaintenancePreview(w, r, s.maintenance)
+	case "/api/maintenance/import/stage":
+		HandleMaintenanceStage(w, r, s.maintenance)
 	case DeviceAnnotationsPath:
 		s.deviceAnnotations.ServeHTTP(w, r)
 	case "/api/devices/activity":
@@ -233,6 +250,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/api/session/login":
 		s.login(w, r)
 	case "/api/session/logout":
+		if s.maintenance != nil {
+			s.maintenance.Clear()
+		}
 		s.auth.logout(w, r)
 		s.session(w, r)
 	case "/api/events":
@@ -241,6 +261,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var routes = map[string]string{
+	"/api/maintenance/backup": "POST", "/api/maintenance/import/preview": "POST", "/api/maintenance/import/stage": "POST",
 	DeviceAnnotationsPath:   "GET",
 	"/api/devices/activity": "GET", "/api/proxy/request-traces": "GET", "/api/system/services": "GET", "/api/system/services/action": "POST",
 	"/api/proxy/metrics": "GET", "/api/proxy/probe": "POST", "/api/traffic/history": "GET",

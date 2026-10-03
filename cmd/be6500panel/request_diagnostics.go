@@ -27,7 +27,7 @@ func acceptedDiagnosticProxy(runtime diagnosticRuntime, source diagnosticRouter)
 			return unavailable, requesttrace.ErrUnavailable
 		}
 		before, err := runtime.Status(managedruntime.SingBox)
-		if err != nil || before.State != managedruntime.Running || before.NeedsRecovery {
+		if err != nil || before.State != managedruntime.Running || before.NeedsRecovery || before.ErrorCode != "" {
 			return unavailable, requesttrace.ErrUnavailable
 		}
 		raw, generation, err := runtime.Config(managedruntime.SingBox)
@@ -49,7 +49,7 @@ func acceptedDiagnosticProxy(runtime diagnosticRuntime, source diagnosticRouter)
 			}
 		}
 		after, err := runtime.Status(managedruntime.SingBox)
-		if err != nil || after.State != managedruntime.Running || after.NeedsRecovery || after.Generation != generation || after.PID != before.PID {
+		if err != nil || after.State != managedruntime.Running || after.NeedsRecovery || after.ErrorCode != "" || after.Generation != generation || after.PID != before.PID {
 			return unavailable, requesttrace.ErrUnavailable
 		}
 		if ctx.Err() != nil {

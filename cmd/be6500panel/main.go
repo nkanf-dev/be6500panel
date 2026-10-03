@@ -21,6 +21,7 @@ import (
 	"be6500panel/internal/deviceannotations"
 	"be6500panel/internal/devicetelemetry"
 	"be6500panel/internal/httpapi"
+	"be6500panel/internal/maintenance"
 	"be6500panel/internal/modules"
 	"be6500panel/internal/proxy"
 	"be6500panel/internal/requesttrace"
@@ -197,11 +198,15 @@ func run() error {
 				return telemetry.CoreConfig{}, err
 			}
 			state, err := runtimeManager.Status(managedruntime.SingBox)
-			if err != nil || state.State != managedruntime.Running {
+			if err != nil || state.State != managedruntime.Running || state.NeedsRecovery || state.ErrorCode != "" {
 				return telemetry.CoreConfig{}, telemetry.ErrUnavailable
 			}
 			raw, generation, err := runtimeManager.Config(managedruntime.SingBox)
-			if err != nil {
+			if err != nil || generation != state.Generation {
+				return telemetry.CoreConfig{}, telemetry.ErrUnavailable
+			}
+			after, err := runtimeManager.Status(managedruntime.SingBox)
+			if err != nil || after.State != managedruntime.Running || after.NeedsRecovery || after.ErrorCode != "" || after.Generation != generation || after.PID != state.PID {
 				return telemetry.CoreConfig{}, telemetry.ErrUnavailable
 			}
 			config, err := telemetry.FromNativeConfig(raw)
@@ -233,7 +238,33 @@ func run() error {
 			logger.Warn("Device annotation storage unavailable; existing state retained", "code", "annotations_storage_unavailable", "module", "devices")
 		}
 	}
-	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager, Traffic: history, TrafficError: historyError, Telemetry: metrics, DeviceTelemetry: deviceActivity, RequestTraces: requestTraces, Services: serviceObserver, DeviceAnnotations: deviceNames, StorageAdmission: flashBudget.Admit})
+	var backupService *maintenance.Service
+	if controlManager != nil {
+		backupService = maintenance.New(maintenance.Options{
+			Native: controlManager,
+			Metadata: func(ctx context.Context) (maintenance.Metadata, error) {
+				snapshot, err := routerAdapter.Snapshot(ctx)
+				if err != nil {
+					return maintenance.Metadata{}, err
+				}
+				if snapshot.Platform.Model == "" || snapshot.Platform.Firmware == "" {
+					return maintenance.Metadata{}, errors.New("platform metadata unavailable")
+				}
+				return maintenance.Metadata{Model: snapshot.Platform.Model, Build: snapshot.Platform.Firmware}, nil
+			},
+			Runtime: func(ctx context.Context, service string) (maintenance.RuntimeDocument, error) {
+				if err := ctx.Err(); err != nil {
+					return maintenance.RuntimeDocument{}, err
+				}
+				if runtimeManager == nil {
+					return maintenance.RuntimeDocument{}, errors.New("runtime unavailable")
+				}
+				raw, generation, err := runtimeManager.Config(service)
+				return maintenance.RuntimeDocument{Content: string(raw), Generation: generation}, err
+			},
+		})
+	}
+	api, err := httpapi.New(httpapi.Config{System: observer, Network: modules.Network{}, Sampler: sampler, Password: password, WebDir: *webDir, Logger: logger, Logs: logs, Router: routerAdapter, Runtime: runtimeManager, Control: controlManager, DataDir: *dataDir, Capture: captureManager, Traffic: history, TrafficError: historyError, Telemetry: metrics, DeviceTelemetry: deviceActivity, RequestTraces: requestTraces, Services: serviceObserver, DeviceAnnotations: deviceNames, Maintenance: backupService, StorageAdmission: flashBudget.Admit})
 	if err != nil {
 		return err
 	}
