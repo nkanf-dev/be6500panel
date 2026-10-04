@@ -34,6 +34,8 @@ type Client struct {
 
 // Builder resolves current device observations and accepted native configuration.
 // It must return every selected MAC in clients, including unresolved identities.
+// Datapath and TUN fields come only from that accepted config, never Desired or
+// a recovery journal. GET reconciliation only compares the resulting intent.
 type Builder func(context.Context, Desired) (proxy.RulesPlanInput, []Client, error)
 
 func normalizeDesired(d Desired) (Desired, error) {

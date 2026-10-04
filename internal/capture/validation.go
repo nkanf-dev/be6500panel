@@ -26,6 +26,7 @@ func recoveredPlan(stored journal) (proxy.OwnedRulesPlan, error) {
 		ClientIPv4s: slices.Clone(ownership.ClientIPv4s), ClientIPv6s: slices.Clone(ownership.ClientIPv6s),
 		ClientMACs:   maps.Clone(ownership.ClientMACs),
 		LANInterface: ownership.LANInterface, IPv6: proxy.IPv6Direct,
+		Datapath: ownership.Datapath, TUNInterface: ownership.TUNInterface, TUNAddress: ownership.TUNAddress,
 	}
 	if stored.Input != nil {
 		input = *stored.Input
@@ -77,6 +78,15 @@ func validate(a []string) error {
 	if err := validateArgs(a); err != nil {
 		return err
 	}
+	if len(a) == 7 && slices.Equal(a[:6], []string{"ip", "-j", "-4", "address", "show", "dev"}) && captureTUNInterface.MatchString(a[6]) {
+		return nil
+	}
+	if len(a) == 3 && a[0] == "sysctl" && a[1] == "-n" {
+		name := strings.TrimSuffix(strings.TrimPrefix(a[2], "net.ipv4.conf."), ".rp_filter")
+		if captureTUNInterface.MatchString(name) && a[2] == "net.ipv4.conf."+name+".rp_filter" {
+			return nil
+		}
+	}
 	if a[0] == "ip" && len(a) >= 2 && (a[1] == "-4" || a[1] == "-6") {
 		if slices.Equal(a[2:], []string{"route", "show", "table", strconv.Itoa(proxy.CaptureTable)}) || slices.Equal(a[2:], []string{"route", "show", "table", "all"}) || slices.Equal(a[2:], []string{"rule", "show"}) {
 			return nil
@@ -97,7 +107,7 @@ func validate(a []string) error {
 	return errors.New("command is not fixed read-only capture inspection")
 }
 func validateArgs(a []string) error {
-	if len(a) < 2 || (a[0] != "ip" && a[0] != "iptables" && a[0] != "ip6tables") {
+	if len(a) < 2 || (a[0] != "ip" && a[0] != "iptables" && a[0] != "ip6tables" && a[0] != "sysctl") {
 		return errors.New("unapproved capture executable")
 	}
 	for _, arg := range a {
@@ -139,6 +149,14 @@ func (c *Controller) approvedCommand(a []string) error {
 	return errors.New("command does not match internally compiled capture intent")
 }
 func ownedChain(family int, table, name string) bool {
+	if family == 4 {
+		if table == "mangle" && name == "B6P_V4_TUN_MARK" {
+			return true
+		}
+		if table == "filter" && slices.Contains([]string{"B6P_V4_TUN_FORWARD", "B6P_V4_TUN_RETURN", "B6P_V4_TUN_INPUT", "B6P_V4_TUN_OUTPUT"}, name) {
+			return true
+		}
+	}
 	if table == "mangle" {
 		return name == "B6P_V"+strconv.Itoa(family)+"_CAPTURE"
 	}
@@ -148,6 +166,12 @@ func ownedChain(family int, table, name string) bool {
 	return family == 6 && table == "filter" && name == "B6P_V6_BLOCK"
 }
 func isReadCommand(a []string) bool {
+	if len(a) == 7 && slices.Equal(a[:6], []string{"ip", "-j", "-4", "address", "show", "dev"}) {
+		return true
+	}
+	if len(a) == 3 && a[0] == "sysctl" && a[1] == "-n" {
+		return true
+	}
 	if len(a) > 3 && a[0] == "ip" {
 		return a[3] == "show"
 	}

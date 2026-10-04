@@ -51,6 +51,7 @@ type DiagnosticChain struct {
 	Family   int               `json:"family"`
 	Table    string            `json:"table"`
 	Chain    string            `json:"chain"`
+	Role     string            `json:"role,omitempty"` // TUN stage only; never proof of delivery.
 	State    string            `json:"state"`
 	Error    string            `json:"error,omitempty"`
 	Counters []DiagnosticCount `json:"counters"`
@@ -68,7 +69,7 @@ type DiagnosticCount struct {
 
 type DiagnosticFamily struct {
 	Family      int                `json:"family"`
-	LocalRoute  DiagnosticEvidence `json:"localRoute"`
+	LocalRoute  DiagnosticEvidence `json:"localRoute"` // Legacy name; TUN proves an ordinary default dev route.
 	PolicyRules DiagnosticEvidence `json:"policyRules"`
 }
 
@@ -114,7 +115,7 @@ func (c *Controller) Diagnostics(ctx context.Context) DatapathDiagnostics {
 	report.State = "complete"
 	report.InstalledClients = installedClients(saved.Ownership)
 	for _, chain := range saved.Ownership.Chains {
-		entry := DiagnosticChain{Family: chain.Family, Table: chain.Table, Chain: chain.Name}
+		entry := DiagnosticChain{Family: chain.Family, Table: chain.Table, Chain: chain.Name, Role: diagnosticTUNRole(chain)}
 		if !diagnosticOwnedChain(chain) {
 			entry.State, entry.Error = "unsupported", "capture_diagnostic_chain_unsupported"
 		} else {
@@ -149,7 +150,7 @@ func (c *Controller) Diagnostics(ctx context.Context) DatapathDiagnostics {
 		route, routeCode := diagnosticRead(ctx, runner, routeShow(family))
 		rules, ruleCode := diagnosticRead(ctx, runner, ruleShow(family))
 		entry := DiagnosticFamily{Family: family,
-			LocalRoute:  diagnosticRoute(route, routeCode, family),
+			LocalRoute:  diagnosticOwnedRoute(route, routeCode, saved.Ownership, family),
 			PolicyRules: diagnosticRules(rules, ruleCode, saved.Ownership, family)}
 		if entry.LocalRoute.State != "ok" || entry.PolicyRules.State != "ok" {
 			report.State = "partial"
@@ -177,7 +178,26 @@ func (c *Controller) Diagnostics(ctx context.Context) DatapathDiagnostics {
 
 func diagnosticOwnedChain(chain proxy.OwnedChain) bool {
 	return (chain.Family == 4 || chain.Family == 6) &&
-		(chain.Table == "mangle" || chain.Table == "nat") && ownedChain(chain.Family, chain.Table, chain.Name)
+		(chain.Table == "mangle" || chain.Table == "nat" || diagnosticTUNRole(chain) != "") && ownedChain(chain.Family, chain.Table, chain.Name)
+}
+
+func diagnosticTUNRole(chain proxy.OwnedChain) string {
+	if chain.Family != 4 || !ownedChain(chain.Family, chain.Table, chain.Name) {
+		return ""
+	}
+	switch chain.Name {
+	case "B6P_V4_TUN_MARK":
+		return "original-ingress"
+	case "B6P_V4_TUN_FORWARD":
+		return "forward"
+	case "B6P_V4_TUN_RETURN":
+		return "return"
+	case "B6P_V4_TUN_INPUT":
+		return "private-input"
+	case "B6P_V4_TUN_OUTPUT":
+		return "private-output"
+	}
+	return ""
 }
 
 func diagnosticChainArgs(chain proxy.OwnedChain) []string {
@@ -185,6 +205,17 @@ func diagnosticChainArgs(chain proxy.OwnedChain) []string {
 }
 
 func diagnosticReadAllowed(argv []string) bool {
+	for _, chain := range []proxy.OwnedChain{
+		{Family: 4, Table: "mangle", Name: "B6P_V4_TUN_MARK"},
+		{Family: 4, Table: "filter", Name: "B6P_V4_TUN_FORWARD"},
+		{Family: 4, Table: "filter", Name: "B6P_V4_TUN_RETURN"},
+		{Family: 4, Table: "filter", Name: "B6P_V4_TUN_INPUT"},
+		{Family: 4, Table: "filter", Name: "B6P_V4_TUN_OUTPUT"},
+	} {
+		if slices.Equal(argv, diagnosticChainArgs(chain)) {
+			return true
+		}
+	}
 	for _, family := range []int{4, 6} {
 		if slices.Equal(argv, routeShow(family)) || slices.Equal(argv, ruleShow(family)) {
 			return true
@@ -299,7 +330,7 @@ func diagnosticCounts(out []byte, chain proxy.OwnedChain) ([]DiagnosticCount, bo
 		if row > diagnosticMaxRows {
 			return counts, true, "capture_diagnostic_row_limit"
 		}
-		count, ok := diagnosticCount(fields, chain.Family, row)
+		count, ok := diagnosticCountForChain(fields, chain, row)
 		if !ok {
 			code = "capture_diagnostic_malformed"
 			continue
@@ -313,6 +344,11 @@ func diagnosticCounts(out []byte, chain proxy.OwnedChain) ([]DiagnosticCount, bo
 }
 
 func diagnosticCount(fields []string, family, row int) (DiagnosticCount, bool) {
+	return diagnosticCountForChain(fields, proxy.OwnedChain{Family: family}, row)
+}
+
+func diagnosticCountForChain(fields []string, chain proxy.OwnedChain, row int) (DiagnosticCount, bool) {
+	family := chain.Family
 	count := DiagnosticCount{Row: row}
 	if len(fields) < 8 {
 		return count, false
@@ -327,7 +363,16 @@ func diagnosticCount(fields []string, family, row int) (DiagnosticCount, bool) {
 		return count, false
 	}
 	count.Target, count.Protocol = fields[2], fields[3]
-	if count.Target != "RETURN" && count.Target != "TPROXY" && count.Target != "REDIRECT" {
+	allowed := count.Target == "RETURN" || count.Target == "TPROXY" || count.Target == "REDIRECT"
+	if role := diagnosticTUNRole(chain); role != "" {
+		allowed = count.Target == "RETURN"
+		if role == "original-ingress" {
+			allowed = allowed || count.Target == "MARK"
+		} else {
+			allowed = allowed || count.Target == "ACCEPT" || count.Target == "DROP"
+		}
+	}
+	if !allowed {
 		return count, false
 	}
 	if count.Protocol != "all" && count.Protocol != "tcp" && count.Protocol != "udp" {
@@ -422,6 +467,10 @@ func diagnosticProof(present bool) DiagnosticEvidence {
 }
 
 func diagnosticRoute(out []byte, code string, family int) DiagnosticEvidence {
+	return diagnosticOwnedRoute(out, code, proxy.RulesOwnership{}, family)
+}
+
+func diagnosticOwnedRoute(out []byte, code string, own proxy.RulesOwnership, family int) DiagnosticEvidence {
 	if code != "" {
 		if code == "capture_diagnostic_command_failed" && strings.HasPrefix(strings.TrimSpace(string(out)), "Error: ipv"+strconv.Itoa(family)+":") && emptyFIB(out, errors.New("read failed")) {
 			return diagnosticProof(false)
@@ -438,7 +487,7 @@ func diagnosticRoute(out []byte, code string, family int) DiagnosticEvidence {
 			return DiagnosticEvidence{State: "unavailable", Error: "capture_diagnostic_malformed"}
 		}
 	}
-	return diagnosticProof(hasLocalRoute(out, family))
+	return diagnosticProof(hasOwnedRoute(out, own, family))
 }
 
 func diagnosticRouteRow(fields []string, family int) bool {

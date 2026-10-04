@@ -3,6 +3,7 @@ package capture
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -156,6 +157,11 @@ func (c *Controller) preflight(ctx context.Context, plan proxy.OwnedRulesPlan) e
 	if err != nil {
 		return fmt.Errorf("capture table alias preflight: %w", err)
 	}
+	if plan.Ownership.Datapath == proxy.DatapathRoutedTUN {
+		if err := c.preflightTUN(ctx, plan.Ownership); err != nil {
+			return err
+		}
+	}
 	for _, family := range plan.Ownership.RouteFamilies {
 		out, err := c.showCaptureTable(ctx, family, names)
 		if err != nil {
@@ -191,6 +197,123 @@ func (c *Controller) preflight(ctx context.Context, plan proxy.OwnedRulesPlan) e
 	}
 	return nil
 }
+
+// The application readiness lane separately proves the running main core's
+// PID/executable and TUN fd ownership. Capture verifies address state, not PID
+// identity, and must not demand absence of a core-created interface.
+func (c *Controller) preflightTUN(ctx context.Context, own proxy.RulesOwnership) error {
+	if !captureTUNInterface.MatchString(own.TUNInterface) {
+		return errors.New("capture TUN interface invalid")
+	}
+	prefix, err := captureTUNPrefix(own.TUNAddress)
+	if err != nil {
+		return err
+	}
+	out, err := c.execute(ctx, tunAddressShow(own.TUNInterface))
+	if err != nil {
+		return err
+	}
+	if err = verifyTUNAddress(out, own); err != nil {
+		return err
+	}
+	out, err = c.execute(ctx, tunRPFilterShow(own.TUNInterface))
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(out)) != "2" {
+		return errors.New("capture TUN requires rp_filter 2")
+	}
+	out, err = c.execute(ctx, []string{"ip", "-4", "route", "show", "table", "all"})
+	if err != nil {
+		return err
+	}
+	return tunRouteCollisions(out, prefix, own)
+}
+
+func tunAddressShow(name string) []string {
+	return []string{"ip", "-j", "-4", "address", "show", "dev", name}
+}
+func tunRPFilterShow(name string) []string {
+	return []string{"sysctl", "-n", "net.ipv4.conf." + name + ".rp_filter"}
+}
+func verifyTUNAddress(out []byte, own proxy.RulesOwnership) error {
+	var interfaces []struct {
+		Name  string   `json:"ifname"`
+		Flags []string `json:"flags"`
+		MTU   int      `json:"mtu"`
+		Addrs []struct {
+			Family string `json:"family"`
+			Local  string `json:"local"`
+			Bits   int    `json:"prefixlen"`
+		} `json:"addr_info"`
+	}
+	address, err := netip.ParsePrefix(own.TUNAddress)
+	if err != nil || json.Unmarshal(out, &interfaces) != nil || len(interfaces) != 1 {
+		return errors.New("capture TUN address unavailable")
+	}
+	iface := interfaces[0]
+	if iface.Name != own.TUNInterface || !slices.Contains(iface.Flags, "UP") || iface.MTU != 1500 || len(iface.Addrs) != 1 ||
+		iface.Addrs[0].Family != "inet" || iface.Addrs[0].Local != address.Addr().String() || iface.Addrs[0].Bits != 30 {
+		return errors.New("capture TUN address mismatch")
+	}
+	return nil
+}
+
+// A normal factory default route overlaps every address but does not allocate
+// an interface prefix. Every non-default allocation that overlaps the private
+// /30 must be exactly the core-created connected/local/broadcast route, never a
+// route on another interface or a broader private route.
+func tunRouteCollisions(out []byte, prefix netip.Prefix, own proxy.RulesOwnership) error {
+	address := netip.MustParsePrefix(own.TUNAddress).Addr()
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if !diagnosticRouteRow(fields, 4) {
+			return errors.New("cannot verify TUN prefix route collisions")
+		}
+		destination, kind := fields[0], "unicast"
+		switch destination {
+		case "local", "broadcast", "unicast", "unreachable", "prohibit", "blackhole", "throw", "nat", "anycast", "multicast":
+			kind, destination = destination, fields[1]
+		}
+		if destination == "default" || destination == "0.0.0.0/0" {
+			if dev, _, _ := option(fields, "dev"); dev == own.TUNInterface {
+				return errors.New("capture TUN interface already has a default route")
+			}
+			continue
+		}
+		route, err := netip.ParsePrefix(destination)
+		if err != nil {
+			addr, parseErr := netip.ParseAddr(destination)
+			if parseErr != nil || !addr.Is4() {
+				return errors.New("cannot verify TUN prefix route collisions")
+			}
+			route = netip.PrefixFrom(addr, 32)
+		}
+		if !prefix.Overlaps(route) {
+			continue
+		}
+		dev, hasDev, _ := option(fields, "dev")
+		proto, hasProto, _ := option(fields, "proto")
+		scope, hasScope, _ := option(fields, "scope")
+		source, hasSource, _ := option(fields, "src")
+		table, hasTable, _ := option(fields, "table")
+		_, hasVia, _ := option(fields, "via")
+		if !hasDev || dev != own.TUNInterface || !hasProto || proto != "kernel" || hasVia || (hasSource && source != address.String()) {
+			return errors.New("capture TUN prefix route collision")
+		}
+		allowed := kind == "unicast" && route == prefix && hasScope && scope == "link" && (!hasTable || table == "main" || table == "254")
+		allowed = allowed || kind == "local" && route.Bits() == 32 && route.Addr() == address && hasScope && scope == "host" && hasTable && (table == "local" || table == "255")
+		allowed = allowed || kind == "broadcast" && route.Bits() == 32 && (route.Addr() == prefix.Addr() || route.Addr() == address.Next().Next()) && hasScope && scope == "link" && hasTable && (table == "local" || table == "255")
+		if !allowed {
+			return errors.New("capture TUN prefix route collision")
+		}
+	}
+	return nil
+}
+
 func ipTables(family int) string {
 	if family == 6 {
 		return "ip6tables"
@@ -454,6 +577,11 @@ func (c *Controller) observeLocked(ctx context.Context) error {
 			}
 			continue
 		}
+		if c.plan.Ownership.Datapath == proxy.DatapathRoutedTUN {
+			if err := tunChainShape(out, chain, c.plan.Apply); err != nil {
+				pending = errors.Join(pending, err)
+			}
+		}
 		// Compare each exact generated rule with -C, allowing the kernel's -S
 		// spelling to vary (for example IPv6 /128 and printed match modules).
 		for _, cmd := range c.plan.Apply {
@@ -494,7 +622,7 @@ func (c *Controller) observeLocked(ctx context.Context) error {
 		out, err := c.showCaptureTable(ctx, family, names)
 		if err != nil {
 			pending = errors.Join(pending, err)
-		} else if !hasLocalRoute(out, family) {
+		} else if !hasOwnedRoute(out, c.plan.Ownership, family) {
 			missing = true
 		}
 		out, err = c.execute(ctx, ruleShow(family))
@@ -510,6 +638,165 @@ func (c *Controller) observeLocked(ctx context.Context) error {
 	}
 	return pending
 }
+
+// Ordered semantic rows complement exact -C checks. Kernel spelling may add
+// tcp/udp match modules or omit /32, but a same-length rule permutation must
+// not prove the compiled TUN chain: bypass and final action order matters.
+func tunChainShape(out []byte, chain proxy.OwnedChain, apply [][]string) error {
+	expected := []string{}
+	for _, cmd := range apply {
+		if len(cmd) > 6 && cmd[0] == ipTables(chain.Family) && cmd[4] == chain.Table && cmd[5] == "-A" && cmd[6] == chain.Name {
+			row, err := tunChainRow(cmd[5:], chain)
+			if err != nil {
+				return err
+			}
+			expected = append(expected, row)
+		}
+	}
+	actual, declared := []string{}, false
+	for _, line := range strings.Split(string(out), "\n") {
+		args, err := splitArgs(line)
+		if err != nil {
+			return err
+		}
+		if len(args) == 0 {
+			continue
+		}
+		if len(args) == 2 && args[0] == "-N" && args[1] == chain.Name && !declared && len(actual) == 0 {
+			declared = true
+			continue
+		}
+		row, err := tunChainRow(args, chain)
+		if err != nil {
+			return err
+		}
+		actual = append(actual, row)
+	}
+	if !declared || !slices.Equal(actual, expected) {
+		return errors.New("owned TUN chain order or rules do not match compiled shape")
+	}
+	return nil
+}
+
+func tunChainRow(args []string, chain proxy.OwnedChain) (string, error) {
+	bad := errors.New("owned TUN chain listing does not match compiled shape")
+	if len(args) < 4 || args[0] != "-A" || args[1] != chain.Name {
+		return "", bad
+	}
+	protocol, _, err := option(args, "-p")
+	if err != nil {
+		return "", bad
+	}
+	parts, seen := []string{}, map[string]bool{}
+	for i := 2; i < len(args); i += 2 {
+		if i+1 >= len(args) {
+			return "", bad
+		}
+		key, value := args[i], args[i+1]
+		if key == "-m" && (value == "tcp" || value == "udp") && value == protocol {
+			continue // kernel's implied transport module carries no new match
+		}
+		if seen[key] {
+			return "", bad
+		}
+		seen[key] = true
+		switch key {
+		case "-d":
+			prefix, err := netip.ParsePrefix(value)
+			if err != nil {
+				addr, err := netip.ParseAddr(value)
+				if err != nil || !addr.Is4() {
+					return "", bad
+				}
+				prefix = netip.PrefixFrom(addr, 32)
+			}
+			if !prefix.Addr().Is4() {
+				return "", bad
+			}
+			value = prefix.Masked().String()
+		case "-p":
+			if value != "tcp" && value != "udp" {
+				return "", bad
+			}
+		case "-m":
+			if value != "addrtype" {
+				return "", bad
+			}
+		case "--dst-type":
+			if value != "LOCAL" {
+				return "", bad
+			}
+		case "--dport", "--to-ports":
+			port, err := strconv.ParseUint(value, 10, 16)
+			if err != nil || port == 0 {
+				return "", bad
+			}
+			value = strconv.FormatUint(port, 10)
+		case "--set-xmark":
+			mark, mask, err := markMask(value)
+			if err != nil {
+				return "", bad
+			}
+			value = fmt.Sprintf("0x%x/0x%x", mark, mask)
+		case "-j":
+			if !slices.Contains([]string{"RETURN", "MARK", "REDIRECT", "ACCEPT"}, value) {
+				return "", bad
+			}
+		default:
+			return "", bad
+		}
+		parts = append(parts, key+"="+value)
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, " "), nil
+}
+
+func hasOwnedRoute(out []byte, own proxy.RulesOwnership, family int) bool {
+	if own.Datapath != proxy.DatapathRoutedTUN {
+		return hasLocalRoute(out, family)
+	}
+	if family != 4 || !captureTUNInterface.MatchString(own.TUNInterface) {
+		return false
+	}
+	// The TUN table is owned exclusively. A local route, a via gateway or an
+	// extra route cannot prove the compiled ordinary default-dev intent.
+	lines := []string{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) != 1 {
+		return false
+	}
+	fields := strings.Fields(lines[0])
+	if len(fields) < 3 || (fields[0] != "default" && fields[0] != "0.0.0.0/0") || fields[1] != "dev" || fields[2] != own.TUNInterface {
+		return false
+	}
+	for i := 3; i < len(fields); i += 2 {
+		if i+1 >= len(fields) {
+			return false
+		}
+		switch fields[i] {
+		case "scope":
+			if fields[i+1] != "link" {
+				return false
+			}
+		case "table":
+			if fields[i+1] != strconv.Itoa(proxy.CaptureTable) {
+				return false
+			}
+		case "proto":
+			if fields[i+1] != "boot" && fields[i+1] != "static" {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func hasLocalRoute(out []byte, family int) bool {
 	prefix := "0.0.0.0/0"
 	if family == 6 {

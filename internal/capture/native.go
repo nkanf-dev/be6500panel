@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"regexp"
 	"slices"
 
 	"be6500panel/internal/proxy"
@@ -64,14 +65,7 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 		return bad("capture_device_conflict")
 	}
 	var native struct {
-		Inbounds []struct {
-			Type     string `json:"type"`
-			Tag      string `json:"tag"`
-			Listen   string `json:"listen"`
-			Port     uint16 `json:"listen_port"`
-			Network  string `json:"network"`
-			IPv6Only bool   `json:"ipv6_only"`
-		} `json:"inbounds"`
+		Inbounds  []json.RawMessage `json:"inbounds"`
 		Outbounds []struct {
 			Server string `json:"server"`
 		} `json:"outbounds"`
@@ -83,12 +77,7 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 			} `json:"servers"`
 		} `json:"dns"`
 		Route struct {
-			Rules []struct {
-				Inbound   []string `json:"inbound"`
-				Action    string   `json:"action"`
-				Outbound  string   `json:"outbound"`
-				IPVersion int      `json:"ip_version"`
-			} `json:"rules"`
+			Rules []json.RawMessage `json:"rules"`
 		} `json:"route"`
 	}
 	if json.Unmarshal(raw, &native) != nil {
@@ -113,12 +102,34 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 	}
 	dnsBind, tproxyBind := "", ""
 	seen := map[string]bool{}
-	for _, inbound := range native.Inbounds {
+	for _, rawInbound := range native.Inbounds {
+		var inbound acceptedInbound
+		if json.Unmarshal(rawInbound, &inbound) != nil {
+			return bad("capture_native_invalid")
+		}
+		if inbound.Type == "tun" {
+			if seen["tun"] || seen["tproxy"] {
+				return bad("capture_datapath_ambiguous")
+			}
+			if err := acceptedTUN(rawInbound, inbound, observed); err != nil {
+				return bad(err.Error())
+			}
+			seen["tun"] = true
+			input.Datapath = proxy.DatapathRoutedTUN
+			input.TUNInterface, input.TUNAddress = inbound.InterfaceName, inbound.Address[0]
+			// This backend has no TPROXY listener. Reserve the legacy native
+			// compiler port only for shared port-conflict validation.
+			input.Ports.TProxy = 7893
+			continue
+		}
 		key := ""
 		switch {
 		case inbound.Type == "mixed":
 			key = "mixed"
 		case inbound.Type == "tproxy":
+			if seen["tun"] {
+				return bad("capture_datapath_ambiguous")
+			}
 			key = "tproxy"
 		case inbound.Type == "direct" && inbound.Tag == "dns-in":
 			key = "dns"
@@ -150,7 +161,10 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 	if len(seen) != 3 {
 		return bad("capture_listener_missing")
 	}
-	if tproxyBind != "127.0.0.1" && tproxyBind != "0.0.0.0" && tproxyBind != "::" {
+	if seen["tun"] && d.IPv6 != proxy.IPv6Direct {
+		return bad("capture_tun_ipv6_unsupported")
+	}
+	if seen["tproxy"] && tproxyBind != "127.0.0.1" && tproxyBind != "0.0.0.0" && tproxyBind != "::" {
 		return bad("capture_tproxy_bind_mismatch")
 	}
 	dnsAddress, _ := netip.ParseAddr(dnsBind)
@@ -159,23 +173,58 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 	}
 	dnsHijack := false
 	acceptedIPv6 := proxy.IPv6Follow
-	for _, rule := range native.Route.Rules {
+	acceptedIPv6Explicit := false
+	for _, rawRule := range native.Route.Rules {
+		var rule struct {
+			Inbound   []string `json:"inbound"`
+			Action    string   `json:"action"`
+			Outbound  string   `json:"outbound"`
+			IPVersion int      `json:"ip_version"`
+		}
+		if json.Unmarshal(rawRule, &rule) != nil {
+			return bad("capture_native_invalid")
+		}
 		if rule.Action == "hijack-dns" && slices.Contains(rule.Inbound, "dns-in") {
 			dnsHijack = true
 		}
 		if rule.IPVersion == 6 && len(rule.Inbound) == 0 {
+			if seen["tun"] {
+				var fields map[string]json.RawMessage
+				if json.Unmarshal(rawRule, &fields) != nil || len(fields) != 2 || fields["outbound"] == nil || rule.Outbound != "direct" {
+					return bad("capture_ipv6_policy_mismatch")
+				}
+			}
 			if rule.Outbound == "direct" {
 				acceptedIPv6 = proxy.IPv6Direct
+				acceptedIPv6Explicit = true
 			}
 			if rule.Action == "reject" {
 				acceptedIPv6 = proxy.IPv6Block
+				acceptedIPv6Explicit = true
+			}
+		}
+	}
+	if seen["tun"] {
+		prefix, _ := captureTUNPrefix(input.TUNAddress)
+		// Keep proxy-DNS and mixed-listener semantics unchanged, but reject a
+		// known accepted literal that the connected private /30 would steal.
+		for _, inboundRaw := range native.Inbounds {
+			var inbound acceptedInbound
+			_ = json.Unmarshal(inboundRaw, &inbound)
+			if addr, err := netip.ParseAddr(inbound.Listen); err == nil && prefix.Contains(addr.Unmap()) {
+				return bad("capture_tun_prefix_collision")
+			}
+		}
+		for _, server := range native.DNS.Servers {
+			if addr, err := netip.ParseAddr(server.Server); err == nil && prefix.Contains(addr.Unmap()) {
+				return bad("capture_tun_prefix_collision")
 			}
 		}
 	}
 	if !dnsHijack {
 		return bad("capture_dns_route_missing")
 	}
-	if acceptedIPv6 != d.IPv6 {
+	if acceptedIPv6 != d.IPv6 || (seen["tun"] && !acceptedIPv6Explicit) {
 		return bad("capture_ipv6_policy_mismatch")
 	}
 	if d.IPv6 == proxy.IPv6Follow && (tproxyBind != "::" || dnsBind != "::") {
@@ -221,6 +270,85 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 		return input, clients, &PartialScopeError{}
 	}
 	return input, clients, nil
+}
+
+// acceptedInbound retains only capture intent. TUN's raw object is also
+// checked against a closed field set before trusting its interface or address.
+type acceptedInbound struct {
+	Type          string   `json:"type"`
+	Tag           string   `json:"tag"`
+	Listen        string   `json:"listen"`
+	Port          uint16   `json:"listen_port"`
+	Network       string   `json:"network"`
+	IPv6Only      bool     `json:"ipv6_only"`
+	InterfaceName string   `json:"interface_name"`
+	Address       []string `json:"address"`
+	MTU           int      `json:"mtu"`
+	Stack         string   `json:"stack"`
+	DNSMode       string   `json:"dns_mode"`
+	AutoRoute     *bool    `json:"auto_route"`
+	AutoRedirect  *bool    `json:"auto_redirect"`
+	UDPTimeout    string   `json:"udp_timeout"`
+	UDPNATMax     int      `json:"udp_nat_max"`
+}
+
+var captureTUNInterface = regexp.MustCompile(`^b6p-[A-Za-z0-9_][A-Za-z0-9_-]{0,10}$`)
+
+func acceptedTUN(raw []byte, inbound acceptedInbound, observed router.CaptureObservation) error {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return errors.New("capture_tun_invalid")
+	}
+	for key := range fields {
+		switch key {
+		case "type", "tag", "interface_name", "address", "mtu", "stack", "dns_mode", "auto_route", "auto_redirect", "udp_timeout", "udp_nat_max":
+		default:
+			return errors.New("capture_tun_invalid")
+		}
+	}
+	if inbound.Tag != "tun-in" || !captureTUNInterface.MatchString(inbound.InterfaceName) ||
+		len(inbound.Address) != 1 || inbound.MTU != 1500 || inbound.Stack != "system" || inbound.DNSMode != "disabled" ||
+		inbound.AutoRoute == nil || *inbound.AutoRoute || inbound.AutoRedirect == nil || *inbound.AutoRedirect ||
+		inbound.UDPTimeout != "2m" || inbound.UDPNATMax != 1024 {
+		return errors.New("capture_tun_invalid")
+	}
+	prefix, err := captureTUNPrefix(inbound.Address[0])
+	if err != nil {
+		return err
+	}
+	for _, value := range observed.LANPrefixes {
+		lan, err := netip.ParsePrefix(value)
+		if err != nil {
+			return errors.New("capture_lan_unavailable")
+		}
+		if prefix.Overlaps(lan) {
+			return errors.New("capture_tun_prefix_collision")
+		}
+	}
+	for _, value := range observed.ManagementIPs {
+		addr, err := netip.ParseAddr(value)
+		if err != nil || addr.Zone() != "" || addr.Is4In6() {
+			return errors.New("capture_lan_unavailable")
+		}
+		if prefix.Contains(addr) {
+			return errors.New("capture_tun_prefix_collision")
+		}
+	}
+	return nil
+}
+
+// captureTUNPrefix validates the private /30 host and its next usable peer.
+// It returns the entire prefix: collision checks must not test just the host.
+func captureTUNPrefix(value string) (netip.Prefix, error) {
+	prefix, err := netip.ParsePrefix(value)
+	if err != nil || !prefix.Addr().Is4() || prefix.Bits() != 30 || !prefix.Addr().IsPrivate() || prefix.String() != value {
+		return netip.Prefix{}, errors.New("capture_tun_address_invalid")
+	}
+	network := prefix.Masked()
+	if prefix.Addr() != network.Addr().Next() || !network.Contains(prefix.Addr().Next()) {
+		return netip.Prefix{}, errors.New("capture_tun_address_invalid")
+	}
+	return network, nil
 }
 
 // PartialScopeError is a warning: input contains only current resolved devices.
