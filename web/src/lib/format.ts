@@ -1,8 +1,7 @@
-export function bytes(value: number): string {
-  if (!Number.isFinite(value) || value < 0) return "—";
-  if (value < 1024) return `${value} B`;
-  const exponent = Math.min(3, Math.floor(Math.log(value) / Math.log(1024)));
-  return `${(value / 1024 ** exponent).toFixed(1)} ${["B", "KiB", "MiB", "GiB"][exponent]}`;
+import { formatBytes } from "./byte-scale";
+
+export function bytes(value: number | null | undefined): string {
+  return formatBytes(value);
 }
 export function uptime(value: number): string {
   const days = Math.floor(value / 86400);
