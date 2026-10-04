@@ -209,6 +209,20 @@ func (c *Controller) preflightTUN(ctx context.Context, own proxy.RulesOwnership)
 	if err != nil {
 		return err
 	}
+	if err := c.observeTUNState(ctx, own); err != nil {
+		return err
+	}
+	out, err := c.execute(ctx, []string{"ip", "-4", "route", "show", "table", "all"})
+	if err != nil {
+		return err
+	}
+	return tunRouteCollisions(out, prefix, own)
+}
+
+// Repeat fixed interface state reads during observation. Route/hooks remaining
+// installed do not prove that the core-created TUN still has the right address,
+// UP state or reverse-path setting. PID/fd owner proof remains application-owned.
+func (c *Controller) observeTUNState(ctx context.Context, own proxy.RulesOwnership) error {
 	out, err := c.execute(ctx, tunAddressShow(own.TUNInterface))
 	if err != nil {
 		return err
@@ -223,11 +237,7 @@ func (c *Controller) preflightTUN(ctx context.Context, own proxy.RulesOwnership)
 	if strings.TrimSpace(string(out)) != "2" {
 		return errors.New("capture TUN requires rp_filter 2")
 	}
-	out, err = c.execute(ctx, []string{"ip", "-4", "route", "show", "table", "all"})
-	if err != nil {
-		return err
-	}
-	return tunRouteCollisions(out, prefix, own)
+	return nil
 }
 
 func tunAddressShow(name string) []string {
@@ -566,6 +576,9 @@ func (c *Controller) observeStatusLocked(ctx context.Context) error {
 func (c *Controller) observeLocked(ctx context.Context) error {
 	missing := false
 	var pending error
+	if c.plan.Ownership.Datapath == proxy.DatapathRoutedTUN {
+		pending = errors.Join(pending, c.observeTUNState(ctx, c.plan.Ownership))
+	}
 	for _, chain := range c.plan.Ownership.Chains {
 		args := []string{ipTables(chain.Family), "-w", "5", "-t", chain.Table, "-S", chain.Name}
 		out, err := c.execute(ctx, args)

@@ -417,6 +417,12 @@ func tunObservedRunner(t *testing.T, plan proxy.OwnedRulesPlan, route string, mi
 		if !isReadCommand(argv) {
 			t.Fatalf("observation mutated: %v", argv)
 		}
+		if slices.Equal(argv, tunAddressShow("b6p-tun")) {
+			return tunAddressFixture(), nil
+		}
+		if slices.Equal(argv, tunRPFilterShow("b6p-tun")) {
+			return []byte("2"), nil
+		}
 		if slices.Equal(argv, routeShow(4)) {
 			return []byte(route), nil
 		}
@@ -646,5 +652,38 @@ func TestCompiledRoutedTUNAcceptedNativeRoundTrip(t *testing.T) {
 		if !reflect.DeepEqual(input.EndpointIPs, []string{"127.0.0.1", "203.0.113.4", "223.5.5.5"}) || !reflect.DeepEqual(input.RouterDNSAddresses, []string{"192.0.2.1"}) {
 			t.Fatal("compiled local/direct DNS source changed", input)
 		}
+	}
+}
+
+func TestRoutedTUNObservationRejectsInterfaceStateDriftReadOnly(t *testing.T) {
+	plan := routedTUNPlan(t)
+	for _, tc := range []struct {
+		name, address, rpf string
+		failure            error
+	}{
+		{name: "missing", address: `[]`, rpf: "2"},
+		{name: "address", address: strings.Replace(string(tunAddressFixture()), "172.31.255.253", "172.31.255.254", 1), rpf: "2"},
+		{name: "down", address: strings.Replace(string(tunAddressFixture()), `"UP",`, ``, 1), rpf: "2"},
+		{name: "mtu", address: strings.Replace(string(tunAddressFixture()), `"mtu":1500`, `"mtu":1400`, 1), rpf: "2"},
+		{name: "strict-rpf", address: string(tunAddressFixture()), rpf: "1"},
+		{name: "unavailable", failure: errors.New("permission denied")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := tunObservedRunner(t, plan, "default dev b6p-tun", "")
+			c := testController(t, func(ctx context.Context, argv []string) ([]byte, error) {
+				if slices.Equal(argv, tunAddressShow("b6p-tun")) {
+					return []byte(tc.address), tc.failure
+				}
+				if slices.Equal(argv, tunRPFilterShow("b6p-tun")) {
+					return []byte(tc.rpf), nil
+				}
+				return base(ctx, argv)
+			})
+			c.plan, c.active = &plan, true
+			state, err := c.Reconcile(context.Background())
+			if err == nil || state.Active || !state.CleanupPending || c.plan == nil {
+				t.Fatalf("state drift claimed active or discarded ownership: %+v %v", state, err)
+			}
+		})
 	}
 }
