@@ -47,7 +47,7 @@ func (s *Server) proxyCapture(w http.ResponseWriter, r *http.Request) {
 			}{apiError{Code: code, Message: message}, status})
 			return
 		}
-		s.logger.Info("Selected-device capture withdrawn", "code", "capture_disabled", "module", "proxy")
+		s.logger.Info("Capture withdrawn", "code", "capture_disabled", "module", "proxy")
 		writeJSON(w, 200, s.capture.Status())
 		return
 	}
@@ -55,12 +55,21 @@ func (s *Server) proxyCapture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
+		Scope      proxy.CaptureScope        `json:"scope"`
 		Devices    []capture.DeviceSelection `json:"devices"`
 		ClientIPv4 string                    `json:"clientIPv4"`
 		ClientIPv6 string                    `json:"clientIPv6"`
 		IPv6       proxy.IPv6Mode            `json:"ipv6"`
 	}
 	if !decodeJSON(w, r, &input, "ipv6") {
+		return
+	}
+	if input.Scope != "" && input.Scope != proxy.CaptureScopeDevices && input.Scope != proxy.CaptureScopeGateway {
+		fail(w, 400, "invalid_input", "接管范围无效")
+		return
+	}
+	if input.Scope == proxy.CaptureScopeGateway && (len(input.Devices) > 0 || input.ClientIPv4 != "" || input.ClientIPv6 != "" || input.IPv6 != proxy.IPv6Direct) {
+		fail(w, 400, "invalid_input", "网关范围使用观测到的 IPv4 局域网网段")
 		return
 	}
 	// Legacy explicit IPv4 selects a stable observed MAC. An unresolved address
@@ -88,8 +97,22 @@ func (s *Server) proxyCapture(w http.ResponseWriter, r *http.Request) {
 				return errors.New("capture_configuration_pending")
 			}
 		}
+		desired := capture.Desired{Scope: input.Scope, Devices: input.Devices, ClientIPv4: input.ClientIPv4, ClientIPv6: input.ClientIPv6, IPv6: input.IPv6}
+		if input.Scope == proxy.CaptureScopeGateway {
+			if s.router == nil {
+				return errors.New("capture_lan_unavailable")
+			}
+			observed, err := s.router.CaptureObservation(ctx)
+			if err != nil {
+				return errors.New("capture_lan_unavailable")
+			}
+			desired, err = gatewayDesiredFromObservation(observed)
+			if err != nil {
+				return err
+			}
+		}
 		var err error
-		status, err = s.capture.Select(ctx, capture.Desired{Devices: input.Devices, ClientIPv4: input.ClientIPv4, ClientIPv6: input.ClientIPv6, IPv6: input.IPv6})
+		status, err = s.capture.Select(ctx, desired)
 		return err
 	})
 	if err != nil {
@@ -105,7 +128,7 @@ func (s *Server) proxyCapture(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "capture_failed", "接管应用失败，查看日志与规则状态")
 		return
 	}
-	s.logger.Info("Selected-device capture active", "code", "capture_active", "module", "proxy")
+	s.logger.Info("Gateway or diagnostic capture active", "code", "capture_active", "module", "proxy")
 	writeJSON(w, 200, status)
 }
 
