@@ -22,12 +22,36 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 	bad := func(code string) (proxy.RulesPlanInput, []Client, error) {
 		return proxy.RulesPlanInput{}, clients, errors.New(code)
 	}
+	gateway := d.Scope == proxy.CaptureScopeGateway
+	if gateway {
+		normalized, err := normalizeDesired(d)
+		if err != nil {
+			return bad("capture_gateway_scope_invalid")
+		}
+		d = normalized
+	} else if (d.Scope != "" && d.Scope != proxy.CaptureScopeDevices) || len(d.LANIPv4Prefixes) != 0 {
+		return bad("capture_native_scope_invalid")
+	}
 	if len(observed.ManagementIPs) == 0 || len(observed.LANPrefixes) == 0 {
 		return bad("capture_lan_unavailable")
 	}
 	addresses := []string{}
 	pendingDevices := false
-	if len(d.Devices) > 0 {
+	if gateway {
+		// These are fresh main br-lan observations, not inventory addresses.
+		// A trusted /32 canary may be narrower than its observed segment.
+		// Never substitute the observed segment for a saved declaration.
+		prefixes, err := proxy.CanonicalGatewayPrefixes(observed.LANPrefixes)
+		if err != nil {
+			return bad("capture_lan_unavailable")
+		}
+		observed.LANPrefixes = prefixes
+		for _, declared := range d.LANIPv4Prefixes {
+			if !gatewayPrefixObserved(declared, prefixes) {
+				return bad("capture_gateway_scope_missing")
+			}
+		}
+	} else if len(d.Devices) > 0 {
 		unresolved := false
 		for i, selection := range d.Devices {
 			matches := []router.Device{}
@@ -83,22 +107,27 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 	if json.Unmarshal(raw, &native) != nil {
 		return bad("capture_native_invalid")
 	}
-	input := proxy.RulesPlanInput{LANInterface: "br-lan", IPv6: d.IPv6, Failure: proxy.FailureDirect, ManagementIPs: slices.Clone(observed.ManagementIPs), RouterDNSAddresses: captureRouterDNSAddresses(observed.LANAddresses, d.IPv6), ClientIPv6: d.ClientIPv6}
-	if len(addresses) == 1 {
-		input.ClientIPv4 = addresses[0]
+	input := proxy.RulesPlanInput{Scope: d.Scope, LANInterface: "br-lan", IPv6: d.IPv6, Failure: proxy.FailureDirect, ManagementIPs: slices.Clone(observed.ManagementIPs), RouterDNSAddresses: captureRouterDNSAddresses(observed.LANAddresses, d.IPv6)}
+	if gateway {
+		input.LANIPv4Prefixes = slices.Clone(d.LANIPv4Prefixes)
 	} else {
-		input.ClientIPv4s = addresses
-	}
-	// Enforce both current IP and authorized layer-2 identity at the hook.
-	// A DHCP address reused between observations cannot intercept a new MAC.
-	input.ClientMACs = make(map[string]string, len(addresses)+1)
-	for _, client := range clients {
-		if client.IP != "" {
-			input.ClientMACs[client.IP] = client.MAC
+		input.ClientIPv6 = d.ClientIPv6
+		if len(addresses) == 1 {
+			input.ClientIPv4 = addresses[0]
+		} else {
+			input.ClientIPv4s = addresses
 		}
-	}
-	if d.IPv6 != proxy.IPv6Direct && len(d.Devices) == 1 {
-		input.ClientMACs[d.ClientIPv6] = d.Devices[0].MAC
+		// Device diagnostics retain both current IP and authorized MAC.
+		// DHCP reuse cannot intercept another device with the same old IP.
+		input.ClientMACs = make(map[string]string, len(addresses)+1)
+		for _, client := range clients {
+			if client.IP != "" {
+				input.ClientMACs[client.IP] = client.MAC
+			}
+		}
+		if d.IPv6 != proxy.IPv6Direct && len(d.Devices) == 1 {
+			input.ClientMACs[d.ClientIPv6] = d.Devices[0].MAC
+		}
 	}
 	dnsBind, tproxyBind := "", ""
 	seen := map[string]bool{}
@@ -162,6 +191,9 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 			input.Ports.DNS = inbound.Port
 			dnsBind = listen.String()
 		}
+	}
+	if gateway && !seen["tun"] {
+		return bad("capture_gateway_tun_required")
 	}
 	if len(seen) != 3 {
 		return bad("capture_listener_missing")
@@ -378,6 +410,20 @@ func captureRouterDNSAddresses(addresses []string, ipv6 proxy.IPv6Mode) []string
 		out = append(out, addr.String())
 	}
 	return out
+}
+
+func gatewayPrefixObserved(declared string, observed []string) bool {
+	prefix, err := netip.ParsePrefix(declared)
+	if err != nil {
+		return false
+	}
+	for _, value := range observed {
+		lan, err := netip.ParsePrefix(value)
+		if err == nil && prefix.Bits() >= lan.Bits() && lan.Contains(prefix.Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 func insideLAN(raw string, prefixes []string) bool {

@@ -1,4 +1,4 @@
-// Package capture applies only internally compiled exact-client network intent.
+// Package capture applies only internally compiled declared network intent.
 package capture
 
 import (
@@ -111,7 +111,10 @@ func New(dataDir string, runner Runner) (*Controller, error) {
 }
 func (c *Controller) Status() Status { c.mu.Lock(); defer c.mu.Unlock(); return c.statusLocked() }
 func (c *Controller) statusLocked() Status {
-	state := Status{Active: c.active, CleanupPending: c.cleanupPending, State: "inactive", Desired: c.desired.Enabled, Clients: slices.Clone(c.clients), ScopeState: c.scopeState, IPv6: c.desired.IPv6, Error: c.restoreError}
+	state := Status{Scope: c.desired.Scope, LANIPv4Prefixes: slices.Clone(c.desired.LANIPv4Prefixes), Active: c.active, CleanupPending: c.cleanupPending, State: "inactive", Desired: c.desired.Enabled, Clients: slices.Clone(c.clients), ScopeState: c.scopeState, IPv6: c.desired.IPv6, Error: c.restoreError}
+	if state.Scope == proxy.CaptureScopeGateway {
+		state.Clients = []Client{}
+	}
 	if c.disableNotPersisted {
 		state.Error = "capture_disable_not_persisted"
 	}
@@ -122,6 +125,10 @@ func (c *Controller) statusLocked() Status {
 		state.State = "suspended"
 	}
 	if c.plan != nil {
+		if state.Scope == "" {
+			state.Scope = c.plan.Ownership.Scope
+		}
+		state.InstalledLANIPv4Prefixes = slices.Clone(c.plan.Ownership.LANIPv4Prefixes)
 		state.InstalledClients = installedClients(c.plan.Ownership)
 		state.ClientIPv4 = c.plan.Ownership.ClientIPv4
 		state.ClientIPv6 = c.plan.Ownership.ClientIPv6
@@ -151,6 +158,9 @@ func (c *Controller) statusLocked() Status {
 // installedClients describes saved ownership even when its kernel resources are
 // missing or uncertain. Never bind fresh device observations to these old IPs.
 func installedClients(own proxy.RulesOwnership) []Client {
+	if own.Scope == proxy.CaptureScopeGateway {
+		return nil
+	}
 	addresses := append(slices.Clone(own.ClientIPv4s), own.ClientIPv6s...)
 	if own.ClientIPv4 != "" {
 		addresses = append(addresses, own.ClientIPv4)
@@ -397,6 +407,7 @@ func (c *Controller) absentMACChain(ctx context.Context, args []string, out []by
 }
 
 func cloneInput(input proxy.RulesPlanInput) proxy.RulesPlanInput {
+	input.LANIPv4Prefixes = slices.Clone(input.LANIPv4Prefixes)
 	input.ClientMACs = maps.Clone(input.ClientMACs)
 	input.ClientIPv4s = slices.Clone(input.ClientIPv4s)
 	input.ClientIPv6s = slices.Clone(input.ClientIPv6s)

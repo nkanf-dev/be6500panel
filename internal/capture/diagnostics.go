@@ -33,13 +33,15 @@ const (
 // scope-unverified. Complete means only that the allowed reads completed, not
 // that the transparent datapath is healthy.
 type DatapathDiagnostics struct {
-	MeasuredAt       time.Time          `json:"measuredAt"`
-	DurationMS       int64              `json:"durationMs"`
-	State            string             `json:"state"`
-	Error            string             `json:"error,omitempty"`
-	InstalledClients []Client           `json:"installedClients,omitempty"`
-	Chains           []DiagnosticChain  `json:"chains,omitempty"`
-	Routing          []DiagnosticFamily `json:"routing,omitempty"`
+	Scope                    proxy.CaptureScope `json:"scope,omitempty"`
+	InstalledLANIPv4Prefixes []string           `json:"installedLanIPv4Prefixes,omitempty"`
+	MeasuredAt               time.Time          `json:"measuredAt"`
+	DurationMS               int64              `json:"durationMs"`
+	State                    string             `json:"state"`
+	Error                    string             `json:"error,omitempty"`
+	InstalledClients         []Client           `json:"installedClients,omitempty"`
+	Chains                   []DiagnosticChain  `json:"chains,omitempty"`
+	Routing                  []DiagnosticFamily `json:"routing,omitempty"`
 }
 
 // DiagnosticChain retains distinct rows, including identical rules. Counts are
@@ -113,6 +115,8 @@ func (c *Controller) Diagnostics(ctx context.Context) DatapathDiagnostics {
 	ctx, cancel := context.WithTimeout(ctx, diagnosticTimeout)
 	defer cancel()
 	report.State = "complete"
+	report.Scope = saved.Ownership.Scope
+	report.InstalledLANIPv4Prefixes = slices.Clone(saved.Ownership.LANIPv4Prefixes)
 	report.InstalledClients = installedClients(saved.Ownership)
 	for _, chain := range saved.Ownership.Chains {
 		entry := DiagnosticChain{Family: chain.Family, Table: chain.Table, Chain: chain.Name, Role: diagnosticTUNRole(chain)}
@@ -162,6 +166,7 @@ func (c *Controller) Diagnostics(ctx context.Context) DatapathDiagnostics {
 		// A concurrent lifecycle operation may be replacing ownership. Without
 		// a final comparison, counts must not be attached to any saved scope.
 		report.State, report.Error = "scope-unverified", "capture_diagnostic_scope_unverified"
+		report.Scope, report.InstalledLANIPv4Prefixes = "", nil
 		report.InstalledClients, report.Chains, report.Routing = nil, nil, nil
 	} else {
 		// Identity also detects cleanup followed by an identical new plan (ABA).
@@ -169,6 +174,7 @@ func (c *Controller) Diagnostics(ctx context.Context) DatapathDiagnostics {
 		c.mu.Unlock()
 		if changed {
 			report.State, report.Error = "scope-changed", "capture_diagnostic_scope_changed"
+			report.Scope, report.InstalledLANIPv4Prefixes = "", nil
 			report.InstalledClients, report.Chains, report.Routing = nil, nil, nil
 		}
 	}

@@ -15,8 +15,9 @@ import (
 	"be6500panel/internal/proxy"
 )
 
-// Desired is saved separately from live ownership. It contains identity and
-// policy only: no commands, listener ports, endpoints or last-known device IPs.
+// Desired is saved separately from live ownership. It contains selected device
+// identities or explicitly approved gateway prefixes and policy only: no
+// commands, listener ports, endpoints or last-known device IPs.
 type Desired struct {
 	Scope           proxy.CaptureScope `json:"scope,omitempty"`
 	LANIPv4Prefixes []string           `json:"lanIPv4Prefixes,omitempty"`
@@ -35,8 +36,9 @@ type Client struct {
 	Hostname string `json:"hostname"`
 }
 
-// Builder resolves current device observations and accepted native configuration.
-// It must return every selected MAC in clients, including unresolved identities.
+// Builder resolves current LAN observations and accepted native configuration.
+// Device scope returns every selected MAC, including unresolved identities.
+// Gateway scope verifies the saved declaration and returns no inventory clients.
 // Datapath and TUN fields come only from that accepted config, never Desired or
 // a recovery journal. GET reconciliation only compares the resulting intent.
 // Builders must honor context cancellation and deadlines. GET invokes them
@@ -47,6 +49,24 @@ type Builder func(context.Context, Desired) (proxy.RulesPlanInput, []Client, err
 func normalizeDesired(d Desired) (Desired, error) {
 	if d.IPv6 == "" {
 		d.IPv6 = proxy.IPv6Direct
+	}
+	switch d.Scope {
+	case proxy.CaptureScopeGateway:
+		if d.IPv6 != proxy.IPv6Direct || len(d.Devices) != 0 || d.ClientIPv4 != "" || d.ClientIPv6 != "" {
+			return Desired{}, errors.New("gateway scope requires IPv6 direct and no device or client addresses")
+		}
+		prefixes, err := proxy.CanonicalGatewayPrefixes(d.LANIPv4Prefixes)
+		if err != nil {
+			return Desired{}, fmt.Errorf("gateway LAN declaration invalid: %w", err)
+		}
+		d.LANIPv4Prefixes = prefixes
+		return d, nil // An off switch retains the explicitly approved declaration.
+	case "", proxy.CaptureScopeDevices:
+		if len(d.LANIPv4Prefixes) != 0 {
+			return Desired{}, errors.New("LAN prefixes require gateway scope")
+		}
+	default:
+		return Desired{}, errors.New("invalid capture scope")
 	}
 	if !d.Enabled {
 		if len(d.Devices) == 0 {
@@ -108,7 +128,18 @@ func normalizeDesired(d Desired) (Desired, error) {
 	}
 	return d, nil
 }
+
+// cloneDesired owns every saved declaration and selected identity slice.
+func cloneDesired(d Desired) Desired {
+	d.Devices = slices.Clone(d.Devices)
+	d.LANIPv4Prefixes = slices.Clone(d.LANIPv4Prefixes)
+	return d
+}
+
 func desiredClients(d Desired) []Client {
+	if d.Scope == proxy.CaptureScopeGateway {
+		return []Client{} // Inventory is not a count of clients covered by a prefix.
+	}
 	clients := make([]Client, 0, len(d.Devices))
 	for _, device := range d.Devices {
 		clients = append(clients, Client{MAC: device.MAC})
@@ -145,16 +176,25 @@ func (c *Controller) SetBuilder(builder Builder) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.observationEpoch++
-	c.builder = builder
+	if builder == nil {
+		c.builder = nil
+		return
+	}
+	c.builder = func(ctx context.Context, d Desired) (proxy.RulesPlanInput, []Client, error) {
+		input, clients, err := builder(ctx, cloneDesired(d))
+		if d.Scope == proxy.CaptureScopeGateway {
+			clients = []Client{}
+		}
+		return cloneInput(input), slices.Clone(clients), err
+	}
 }
 func (c *Controller) Desired() Desired {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	d := c.desired
-	d.Devices = slices.Clone(d.Devices)
-	return d
+	return cloneDesired(c.desired)
 }
 func (c *Controller) saveDesiredLocked(ctx context.Context, d Desired, recovery bool) error {
+	d = cloneDesired(d)
 	raw, err := json.Marshal(d)
 	if err != nil {
 		return err
@@ -203,7 +243,12 @@ func (c *Controller) Disable(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.observationEpoch++
-	return c.disableLocked(ctx, Desired{IPv6: c.desired.IPv6})
+	d := Desired{IPv6: c.desired.IPv6}
+	if c.desired.Scope == proxy.CaptureScopeGateway {
+		d = cloneDesired(c.desired)
+		d.Enabled = false
+	}
+	return c.disableLocked(ctx, d)
 }
 
 // Restore is invoked only after accepted core listeners pass readiness.
@@ -226,16 +271,21 @@ func (c *Controller) restoreLocked(ctx context.Context) (Status, error) {
 		c.restoreError = "capture_configuration_unavailable"
 		return c.statusLocked(), errors.New(c.restoreError)
 	}
-	d := c.desired
-	d.Devices = slices.Clone(d.Devices)
+	d := cloneDesired(c.desired)
 	input, clients, err := c.builder(ctx, d)
 	return c.restoreBuiltLocked(ctx, input, clients, err)
 }
 func (c *Controller) restoreBuiltLocked(ctx context.Context, input proxy.RulesPlanInput, clients []Client, err error) (Status, error) {
 	c.clients = slices.Clone(clients)
+	if c.desired.Scope == proxy.CaptureScopeGateway {
+		c.clients = []Client{}
+	}
 	var partial *PartialScopeError
 	pendingDevices := errors.As(err, &partial)
 	if err != nil && !pendingDevices {
+		if c.desired.Scope == proxy.CaptureScopeGateway {
+			c.scopeState = "unresolved"
+		}
 		c.restoreError = err.Error()
 		return c.statusLocked(), err
 	}
@@ -285,8 +335,7 @@ type observationSnapshot struct {
 }
 
 func (c *Controller) observationSnapshotLocked() observationSnapshot {
-	d := c.desired
-	d.Devices = slices.Clone(d.Devices)
+	d := cloneDesired(c.desired)
 	snapshot := observationSnapshot{
 		epoch: c.observationEpoch, desired: d, builder: c.builder,
 		planIdentity: c.plan, failedPlanIdentity: c.failedPlan,
@@ -343,15 +392,14 @@ func (c *Controller) reconcileObservation(ctx context.Context, desiredScope bool
 	scopeState := ""
 	var scopeErr error
 	var partial *PartialScopeError
-	if desiredScope && (snapshot.desired.Enabled || len(snapshot.desired.Devices) > 0) {
+	if desiredScope && (snapshot.desired.Enabled || len(snapshot.desired.Devices) > 0 || snapshot.desired.Scope == proxy.CaptureScopeGateway) {
 		if snapshot.builder == nil {
 			clients = desiredClients(snapshot.desired)
 			if snapshot.desired.Enabled {
 				scopeErr = errors.New("capture_configuration_unavailable")
 			}
 		} else {
-			d := snapshot.desired
-			d.Devices = slices.Clone(d.Devices)
+			d := cloneDesired(snapshot.desired)
 			buildCtx, stopBuild := context.WithTimeout(ctx, observationBuilderBudget)
 			input, builtClients, buildErr := snapshot.builder(buildCtx, d)
 			// An expired callback is never fresh scope proof, even if it
@@ -454,12 +502,13 @@ func (c *Controller) Suspend(ctx context.Context, code string) error {
 }
 
 // DisableRetainingSelection prevents native reload/rollback auto-restoration but
-// retains the checkboxes for a later explicit Apply. DELETE uses Disable instead.
+// retains the selected devices or gateway declaration for a later explicit Apply.
+// Disable clears device selection but also retains an approved gateway declaration.
 func (c *Controller) DisableRetainingSelection(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.observationEpoch++
-	desired := c.desired
+	desired := cloneDesired(c.desired)
 	desired.Enabled = false
 	return c.disableLocked(ctx, desired)
 }
@@ -478,15 +527,18 @@ func (c *Controller) Refresh(ctx context.Context) (Status, error) {
 		c.restoreError = "capture_configuration_unavailable"
 		return c.statusLocked(), errors.New(c.restoreError)
 	}
-	desired := c.desired
-	desired.Devices = slices.Clone(desired.Devices)
+	desired := cloneDesired(c.desired)
 	input, clients, buildErr := c.builder(ctx, desired)
 	c.clients = slices.Clone(clients)
 	var partial *PartialScopeError
 	pending := errors.As(buildErr, &partial)
 	if buildErr != nil && !pending {
 		c.restoreError = buildErr.Error()
-		return c.statusLocked(), errors.Join(buildErr, c.cleanupLocked(ctx))
+		cleanupErr := c.cleanupLocked(ctx)
+		if c.desired.Scope == proxy.CaptureScopeGateway {
+			c.scopeState = "unresolved"
+		}
+		return c.statusLocked(), errors.Join(buildErr, cleanupErr)
 	}
 	expected, err := proxy.PlanOwnedRules(input)
 	if err != nil {

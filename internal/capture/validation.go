@@ -22,6 +22,7 @@ type journal struct {
 func recoveredPlan(stored journal) (proxy.OwnedRulesPlan, error) {
 	ownership := stored.Ownership
 	input := proxy.RulesPlanInput{
+		Scope: ownership.Scope, LANIPv4Prefixes: slices.Clone(ownership.LANIPv4Prefixes),
 		ClientIPv4: ownership.ClientIPv4, ClientIPv6: ownership.ClientIPv6,
 		ClientIPv4s: slices.Clone(ownership.ClientIPv4s), ClientIPv6s: slices.Clone(ownership.ClientIPv6s),
 		ClientMACs:   maps.Clone(ownership.ClientMACs),
@@ -29,8 +30,15 @@ func recoveredPlan(stored journal) (proxy.OwnedRulesPlan, error) {
 		Datapath: ownership.Datapath, TUNInterface: ownership.TUNInterface, TUNAddress: ownership.TUNAddress,
 	}
 	if stored.Input != nil {
-		input = *stored.Input
+		input = cloneInput(*stored.Input)
 	} else {
+		if ownership.Scope == proxy.CaptureScopeGateway {
+			// Older ownership-only cleanup has no accepted listener metadata.
+			// Fixed compiler placeholders reproduce exact cleanup/ownership;
+			// this recovered Apply is never replayed after restart. Restore
+			// still requires a fresh builder with actual accepted listeners.
+			input.Ports = proxy.Ports{Mixed: 2080, TProxy: 7893, DNS: 1053}
+		}
 		for _, chain := range ownership.Chains {
 			if chain.Family == 6 {
 				if chain.Name == "B6P_V6_BLOCK" {
@@ -63,6 +71,7 @@ func clonePlan(plan proxy.OwnedRulesPlan) proxy.OwnedRulesPlan {
 	plan.Cleanup = cloneCommands(plan.Cleanup)
 	plan.OnFailure = cloneCommands(plan.OnFailure)
 	plan.Warnings = slices.Clone(plan.Warnings)
+	plan.Ownership.LANIPv4Prefixes = slices.Clone(plan.Ownership.LANIPv4Prefixes)
 	plan.Ownership.ClientIPv4s = slices.Clone(plan.Ownership.ClientIPv4s)
 	plan.Ownership.ClientIPv6s = slices.Clone(plan.Ownership.ClientIPv6s)
 	plan.Ownership.ClientMACs = maps.Clone(plan.Ownership.ClientMACs)

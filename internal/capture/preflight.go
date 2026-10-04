@@ -703,7 +703,7 @@ func tunChainRow(args []string, chain proxy.OwnedChain) (string, error) {
 		}
 		seen[key] = true
 		switch key {
-		case "-d":
+		case "-s", "-d":
 			prefix, err := netip.ParsePrefix(value)
 			if err != nil {
 				addr, err := netip.ParseAddr(value)
@@ -819,6 +819,9 @@ func hasLocalRoute(out []byte, family int) bool {
 // Source MAC is enforced by the exact hooks checked above, not by ip rule (which
 // has no MAC selector). The masked mark is set only after that hook matches.
 func hasOwnedRule(out []byte, own proxy.RulesOwnership, family int, names map[string]int) bool {
+	if own.Scope == proxy.CaptureScopeGateway {
+		return hasOwnedGatewayRule(out, own, family, names)
+	}
 	clients := own.ClientIPv4s
 	singular := own.ClientIPv4
 	if family == 6 {
@@ -879,6 +882,86 @@ func hasOwnedRule(out []byte, own proxy.RulesOwnership, family int, names map[st
 		if e == nil && number == proxy.CaptureTable {
 			delete(remaining, addr.String())
 		}
+	}
+	return len(remaining) == 0
+}
+
+// Gateway proof requires each saved prefix once and no other rule using the
+// reserved priority, table or mark. A broader, duplicate or extra prefix is
+// foreign scope even when all declared rows are also present.
+func hasOwnedGatewayRule(out []byte, own proxy.RulesOwnership, family int, names map[string]int) bool {
+	if family != 4 || own.Datapath != proxy.DatapathRoutedTUN || own.LANInterface == "" {
+		return false
+	}
+	prefixes, err := proxy.CanonicalGatewayPrefixes(own.LANIPv4Prefixes)
+	if err != nil {
+		return false
+	}
+	remaining := make(map[string]bool, len(prefixes))
+	for _, prefix := range prefixes {
+		remaining[prefix] = true
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		candidate := fields[0] == strconv.Itoa(proxy.CapturePriority)+":"
+		for i := 1; i+1 < len(fields); i++ {
+			switch fields[i] {
+			case "table", "lookup":
+				if table, err := tableNumber(fields[i+1], names); err == nil && table == proxy.CaptureTable {
+					candidate = true
+				}
+			case "fwmark":
+				if _, mask, err := markMask(fields[i+1]); err == nil && mask&proxy.CaptureMask != 0 {
+					candidate = true
+				}
+			}
+		}
+		if !candidate {
+			continue
+		}
+		if len(fields) != 9 || fields[0] != strconv.Itoa(proxy.CapturePriority)+":" {
+			return false
+		}
+		values := make(map[string]string, 4)
+		for i := 1; i < len(fields); i += 2 {
+			key := fields[i]
+			if key == "table" {
+				key = "lookup"
+			}
+			if key != "from" && key != "iif" && key != "fwmark" && key != "lookup" {
+				return false
+			}
+			if _, duplicate := values[key]; duplicate {
+				return false
+			}
+			values[key] = fields[i+1]
+		}
+		if values["iif"] != own.LANInterface {
+			return false
+		}
+		source, err := netip.ParsePrefix(values["from"])
+		if err != nil {
+			addr, err := netip.ParseAddr(values["from"])
+			if err != nil || !addr.Is4() {
+				return false
+			}
+			source = netip.PrefixFrom(addr, 32)
+		}
+		if !source.Addr().Is4() || source != source.Masked() || !remaining[source.String()] {
+			return false
+		}
+		value, mask, err := markMask(values["fwmark"])
+		if err != nil || value != proxy.CaptureMark || mask != proxy.CaptureMask {
+			return false
+		}
+		table, err := tableNumber(values["lookup"], names)
+		if err != nil || table != proxy.CaptureTable {
+			return false
+		}
+		delete(remaining, source.String())
 	}
 	return len(remaining) == 0
 }
