@@ -1,0 +1,2830 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "empty",
+      "subscription": [],
+      "policy": {
+        "rules": [],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "f3c2c79eda3a70f9b8fb723217adf477b512cbd41ce58234b2d2e58ae6e10367",
+      "fingerprints": [],
+      "effective": {
+        "rules": [],
+        "provenance": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "local-gpt-exact-direct-before-proxy",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "gpt.example.com",
+          "target": "proxy",
+          "index": 19
+        },
+        {
+          "kind": "match",
+          "target": "proxy",
+          "index": 81
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "gpt-direct",
+            "enabled": true,
+            "label": "gpt-direct",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "gpt.example.com",
+              "target": "direct",
+              "index": 700
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "8a992e842fe8f0c93cf1c469890f2fe56a216439f90f00a383ce015b34772ff3",
+      "fingerprints": [
+        "e1e4379e70e8b7b18093d1d4af1a10f2885f051176e1fd57c95b6d772f50fac3:1",
+        "b01deda0c97c2c27a53ab81b4e5e2ba0dbfa2e7aa020dd5a54baac4b61df78e8:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "gpt.example.com",
+            "target": "direct",
+            "index": 700
+          },
+          {
+            "kind": "domain",
+            "value": "gpt.example.com",
+            "target": "proxy",
+            "index": 19
+          },
+          {
+            "kind": "match",
+            "target": "proxy",
+            "index": 81
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "gpt-direct",
+            "label": "gpt-direct",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "gpt.example.com",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "subscription",
+            "stableId": "e1e4379e70e8b7b18093d1d4af1a10f2885f051176e1fd57c95b6d772f50fac3:1",
+            "label": "",
+            "sourceFingerprint": "e1e4379e70e8b7b18093d1d4af1a10f2885f051176e1fd57c95b6d772f50fac3:1",
+            "sourceIndex": 19,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "gpt.example.com",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 2,
+            "layer": "subscription",
+            "stableId": "b01deda0c97c2c27a53ab81b4e5e2ba0dbfa2e7aa020dd5a54baac4b61df78e8:1",
+            "label": "",
+            "sourceFingerprint": "b01deda0c97c2c27a53ab81b4e5e2ba0dbfa2e7aa020dd5a54baac4b61df78e8:1",
+            "sourceIndex": 81,
+            "sourceOrdinal": 1,
+            "kind": "match",
+            "target": "proxy"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "enabled-order-disabled-terminal",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "source.example",
+          "target": "proxy",
+          "index": 45
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "first",
+            "enabled": true,
+            "label": "first",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "first.example",
+              "target": "direct",
+              "index": 501
+            }
+          },
+          {
+            "id": "inactive-match",
+            "enabled": false,
+            "label": "inactive-match",
+            "note": "",
+            "rule": {
+              "kind": "match",
+              "target": "block",
+              "index": 502
+            }
+          },
+          {
+            "id": "second",
+            "enabled": true,
+            "label": "second",
+            "note": "",
+            "rule": {
+              "kind": "domain-suffix",
+              "value": "second.example",
+              "target": "proxy",
+              "index": 503
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "962c3bc63ba0fff9d9122150e2ec05190a1a4f4fc1cb766306ff1a95f725e26b",
+      "fingerprints": [
+        "3c518d6a274940095a756aa24edc0da54b26dd75c4c8b7196bf040ec4b9bee14:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "first.example",
+            "target": "direct",
+            "index": 501
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "second.example",
+            "target": "proxy",
+            "index": 503
+          },
+          {
+            "kind": "domain",
+            "value": "source.example",
+            "target": "proxy",
+            "index": 45
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "first",
+            "label": "first",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "first.example",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "local",
+            "stableId": "second",
+            "label": "second",
+            "sourceIndex": -1,
+            "sourceOrdinal": 2,
+            "kind": "domain-suffix",
+            "value": "second.example",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 2,
+            "layer": "subscription",
+            "stableId": "3c518d6a274940095a756aa24edc0da54b26dd75c4c8b7196bf040ec4b9bee14:1",
+            "label": "",
+            "sourceFingerprint": "3c518d6a274940095a756aa24edc0da54b26dd75c4c8b7196bf040ec4b9bee14:1",
+            "sourceIndex": 45,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "source.example",
+            "target": "proxy"
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "local-rule",
+            "index": 1,
+            "code": "disabled-rule",
+            "message": "disabled local rule is not compiled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "local-block-before-subscription-direct",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "blocked.example",
+          "target": "direct",
+          "index": 12
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "block-domain",
+            "enabled": true,
+            "label": "block-domain",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "blocked.example",
+              "target": "block",
+              "index": 900
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "5c9fcc9154813ae23db35d58292773b6992632fc2cee8127e7596f685ef01d1a",
+      "fingerprints": [
+        "67fc98fb514403b0b00b00fb298f564a94bd2aea97a9faee529a11840bb51867:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "blocked.example",
+            "target": "block",
+            "index": 900
+          },
+          {
+            "kind": "domain",
+            "value": "blocked.example",
+            "target": "direct",
+            "index": 12
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "block-domain",
+            "label": "block-domain",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "blocked.example",
+            "target": "block"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "subscription",
+            "stableId": "67fc98fb514403b0b00b00fb298f564a94bd2aea97a9faee529a11840bb51867:1",
+            "label": "",
+            "sourceFingerprint": "67fc98fb514403b0b00b00fb298f564a94bd2aea97a9faee529a11840bb51867:1",
+            "sourceIndex": 12,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "blocked.example",
+            "target": "direct"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "subscription-disable-replace-exact-refs",
+      "subscription": [
+        {
+          "kind": "domain-suffix",
+          "value": "EXAMPLE.com",
+          "target": "proxy",
+          "index": 5
+        },
+        {
+          "kind": "domain-suffix",
+          "value": "example.com",
+          "target": "proxy",
+          "index": 8
+        },
+        {
+          "kind": "ip-cidr",
+          "value": "192.0.2.129/24",
+          "target": "direct",
+          "index": 20
+        }
+      ],
+      "policy": {
+        "rules": [],
+        "subscriptionEdits": [
+          {
+            "id": "rewrite-second",
+            "sourceFingerprint": "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:2",
+            "disabled": false,
+            "replacement": {
+              "kind": "domain",
+              "value": "replacement.example",
+              "target": "block",
+              "index": 999
+            },
+            "label": "rewritten",
+            "note": "second semantic occurrence"
+          },
+          {
+            "id": "disable-cidr",
+            "sourceFingerprint": "52c8f4a79fc438b9b93e2456ab46e885d260b28f07a1095fd5210e48f8c286e8:1",
+            "disabled": true,
+            "label": "disabled CIDR",
+            "note": ""
+          }
+        ]
+      },
+      "valid": true,
+      "revision": "9830435afa4e76aa5c5f59a7109eddb5a0aa87e84d65a79bdb004c9b81d818a9",
+      "fingerprints": [
+        "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:1",
+        "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:2",
+        "52c8f4a79fc438b9b93e2456ab46e885d260b28f07a1095fd5210e48f8c286e8:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain-suffix",
+            "value": "EXAMPLE.com",
+            "target": "proxy",
+            "index": 5
+          },
+          {
+            "kind": "domain",
+            "value": "replacement.example",
+            "target": "block",
+            "index": 8
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "subscription",
+            "stableId": "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:1",
+            "label": "",
+            "sourceFingerprint": "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:1",
+            "sourceIndex": 5,
+            "sourceOrdinal": 0,
+            "kind": "domain-suffix",
+            "value": "EXAMPLE.com",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "subscription",
+            "stableId": "rewrite-second",
+            "label": "rewritten",
+            "sourceFingerprint": "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:2",
+            "sourceIndex": 8,
+            "sourceOrdinal": 1,
+            "kind": "domain",
+            "value": "replacement.example",
+            "target": "block"
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "subscription-edit",
+            "index": 1,
+            "code": "disabled-rule",
+            "message": "explicitly disabled subscription rule is not compiled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "subscription-refresh-index-spelling-stable-refs",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "inserted.example",
+          "target": "direct",
+          "index": 30
+        },
+        {
+          "kind": "domain-suffix",
+          "value": "example.com",
+          "target": "proxy",
+          "index": 900
+        },
+        {
+          "kind": "domain-suffix",
+          "value": "EXAMPLE.COM",
+          "target": "proxy",
+          "index": 901
+        },
+        {
+          "kind": "ip-cidr",
+          "value": "192.0.2.0/24",
+          "target": "direct",
+          "index": 902
+        }
+      ],
+      "policy": {
+        "rules": [],
+        "subscriptionEdits": [
+          {
+            "id": "rewrite-second",
+            "sourceFingerprint": "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:2",
+            "disabled": false,
+            "replacement": {
+              "kind": "domain",
+              "value": "replacement.example",
+              "target": "block",
+              "index": 999
+            },
+            "label": "rewritten",
+            "note": "second semantic occurrence"
+          },
+          {
+            "id": "disable-cidr",
+            "sourceFingerprint": "52c8f4a79fc438b9b93e2456ab46e885d260b28f07a1095fd5210e48f8c286e8:1",
+            "disabled": true,
+            "label": "disabled CIDR",
+            "note": ""
+          }
+        ]
+      },
+      "valid": true,
+      "revision": "9830435afa4e76aa5c5f59a7109eddb5a0aa87e84d65a79bdb004c9b81d818a9",
+      "fingerprints": [
+        "3f4a551eaf11cd54ecb4da59f90a09e21d85b3f60312bff89f1293109b3b445d:1",
+        "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:1",
+        "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:2",
+        "52c8f4a79fc438b9b93e2456ab46e885d260b28f07a1095fd5210e48f8c286e8:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "inserted.example",
+            "target": "direct",
+            "index": 30
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "example.com",
+            "target": "proxy",
+            "index": 900
+          },
+          {
+            "kind": "domain",
+            "value": "replacement.example",
+            "target": "block",
+            "index": 901
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "subscription",
+            "stableId": "3f4a551eaf11cd54ecb4da59f90a09e21d85b3f60312bff89f1293109b3b445d:1",
+            "label": "",
+            "sourceFingerprint": "3f4a551eaf11cd54ecb4da59f90a09e21d85b3f60312bff89f1293109b3b445d:1",
+            "sourceIndex": 30,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "inserted.example",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "subscription",
+            "stableId": "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:1",
+            "label": "",
+            "sourceFingerprint": "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:1",
+            "sourceIndex": 900,
+            "sourceOrdinal": 1,
+            "kind": "domain-suffix",
+            "value": "example.com",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 2,
+            "layer": "subscription",
+            "stableId": "rewrite-second",
+            "label": "rewritten",
+            "sourceFingerprint": "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:2",
+            "sourceIndex": 901,
+            "sourceOrdinal": 2,
+            "kind": "domain",
+            "value": "replacement.example",
+            "target": "block"
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "subscription-edit",
+            "index": 1,
+            "code": "disabled-rule",
+            "message": "explicitly disabled subscription rule is not compiled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "orphan-after-refresh",
+      "subscription": [
+        {
+          "kind": "domain-suffix",
+          "value": "example.com",
+          "target": "direct",
+          "index": 8
+        }
+      ],
+      "policy": {
+        "rules": [],
+        "subscriptionEdits": [
+          {
+            "id": "rewrite-second",
+            "sourceFingerprint": "3e42bf4d2f3d2def25a4fd8cafd0cd80e55c577f3fbd129d0016ddb6c6c1396b:2",
+            "disabled": false,
+            "replacement": {
+              "kind": "domain",
+              "value": "replacement.example",
+              "target": "block",
+              "index": 999
+            },
+            "label": "rewritten",
+            "note": "second semantic occurrence"
+          },
+          {
+            "id": "disable-cidr",
+            "sourceFingerprint": "52c8f4a79fc438b9b93e2456ab46e885d260b28f07a1095fd5210e48f8c286e8:1",
+            "disabled": true,
+            "label": "disabled CIDR",
+            "note": ""
+          }
+        ]
+      },
+      "valid": true,
+      "revision": "9830435afa4e76aa5c5f59a7109eddb5a0aa87e84d65a79bdb004c9b81d818a9",
+      "fingerprints": [
+        "62c521e539d3aee9faf717df9b464f4932d1fa8858aacf2fc949d36ae07a6c89:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain-suffix",
+            "value": "example.com",
+            "target": "direct",
+            "index": 8
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "subscription",
+            "stableId": "62c521e539d3aee9faf717df9b464f4932d1fa8858aacf2fc949d36ae07a6c89:1",
+            "label": "",
+            "sourceFingerprint": "62c521e539d3aee9faf717df9b464f4932d1fa8858aacf2fc949d36ae07a6c89:1",
+            "sourceIndex": 8,
+            "sourceOrdinal": 0,
+            "kind": "domain-suffix",
+            "value": "example.com",
+            "target": "direct"
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "subscription-edit",
+            "index": 0,
+            "code": "orphaned-edit",
+            "message": "subscription edit reference is absent and remains inactive"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 1,
+            "code": "orphaned-edit",
+            "message": "subscription edit reference is absent and remains inactive"
+          }
+        ]
+      }
+    },
+    {
+      "name": "terminal-match-unreachable-preview",
+      "subscription": [
+        {
+          "kind": "domain-suffix",
+          "value": "source.example",
+          "target": "proxy",
+          "index": 77
+        },
+        {
+          "kind": "match",
+          "target": "proxy",
+          "index": 88
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "terminal",
+            "enabled": true,
+            "label": "terminal",
+            "note": "",
+            "rule": {
+              "kind": "match",
+              "target": "block",
+              "index": 100
+            }
+          },
+          {
+            "id": "after-terminal",
+            "enabled": true,
+            "label": "after-terminal",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "later.example",
+              "target": "direct",
+              "index": 101
+            }
+          },
+          {
+            "id": "disabled-after-terminal",
+            "enabled": false,
+            "label": "disabled-after-terminal",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "inactive.example",
+              "target": "block",
+              "index": 102
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "a15d8e867ca12eed21aafd55e85d9168862ec0f4cde2a282b8cef7265f4044e7",
+      "fingerprints": [
+        "640e5c54164e7ac3cf236d5bee39e04d8f4fc94fc74931e1f8dfbcd2c3902564:1",
+        "b01deda0c97c2c27a53ab81b4e5e2ba0dbfa2e7aa020dd5a54baac4b61df78e8:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "match",
+            "target": "block",
+            "index": 100
+          },
+          {
+            "kind": "domain",
+            "value": "later.example",
+            "target": "direct",
+            "index": 101
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "source.example",
+            "target": "proxy",
+            "index": 77
+          },
+          {
+            "kind": "match",
+            "target": "proxy",
+            "index": 88
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "terminal",
+            "label": "terminal",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "match",
+            "target": "block"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "local",
+            "stableId": "after-terminal",
+            "label": "after-terminal",
+            "sourceIndex": -1,
+            "sourceOrdinal": 1,
+            "kind": "domain",
+            "value": "later.example",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 2,
+            "layer": "subscription",
+            "stableId": "640e5c54164e7ac3cf236d5bee39e04d8f4fc94fc74931e1f8dfbcd2c3902564:1",
+            "label": "",
+            "sourceFingerprint": "640e5c54164e7ac3cf236d5bee39e04d8f4fc94fc74931e1f8dfbcd2c3902564:1",
+            "sourceIndex": 77,
+            "sourceOrdinal": 0,
+            "kind": "domain-suffix",
+            "value": "source.example",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 3,
+            "layer": "subscription",
+            "stableId": "b01deda0c97c2c27a53ab81b4e5e2ba0dbfa2e7aa020dd5a54baac4b61df78e8:1",
+            "label": "",
+            "sourceFingerprint": "b01deda0c97c2c27a53ab81b4e5e2ba0dbfa2e7aa020dd5a54baac4b61df78e8:1",
+            "sourceIndex": 88,
+            "sourceOrdinal": 1,
+            "kind": "match",
+            "target": "proxy"
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "effective-rule",
+            "index": 1,
+            "code": "unreachable-rule",
+            "message": "rule follows terminal MATCH and is unreachable"
+          },
+          {
+            "scope": "local-rule",
+            "index": 2,
+            "code": "disabled-rule",
+            "message": "disabled local rule is not compiled"
+          },
+          {
+            "scope": "effective-rule",
+            "index": 2,
+            "code": "unreachable-rule",
+            "message": "rule follows terminal MATCH and is unreachable"
+          },
+          {
+            "scope": "effective-rule",
+            "index": 3,
+            "code": "unreachable-rule",
+            "message": "rule follows terminal MATCH and is unreachable"
+          }
+        ]
+      }
+    },
+    {
+      "name": "uppercase-domain-keyword-normalization",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "UPPER.Example",
+          "target": "direct",
+          "index": 41
+        },
+        {
+          "kind": "domain-suffix",
+          "value": "SUFFIX.Example",
+          "target": "proxy",
+          "index": 42
+        },
+        {
+          "kind": "domain-keyword",
+          "value": "MiXeD-Key",
+          "target": "block",
+          "index": 43
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "exact",
+            "enabled": true,
+            "label": "exact",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "UPPER.Example",
+              "target": "direct",
+              "index": 701
+            }
+          },
+          {
+            "id": "suffix",
+            "enabled": true,
+            "label": "suffix",
+            "note": "",
+            "rule": {
+              "kind": "domain-suffix",
+              "value": "SUFFIX.Example",
+              "target": "proxy",
+              "index": 702
+            }
+          },
+          {
+            "id": "keyword",
+            "enabled": true,
+            "label": "keyword",
+            "note": "",
+            "rule": {
+              "kind": "domain-keyword",
+              "value": "MiXeD-Key",
+              "target": "block",
+              "index": 703
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "7415b61f602b2a7702bfa286f3d9478282706312779873af9b03185fa5780cb6",
+      "fingerprints": [
+        "88c0f99015fcefbe3e057e68408fe9417e4c2af3ec75195ec1341227ef5bb9d7:1",
+        "99de24c99592157171d5c64a4a39839fb6eb542b4354b1e6e8bd8228fa2cbeb7:1",
+        "63fa06b8b2dac9aca18e7aae017dcfe7c4dba49c62be78d4d1ec5a89bf3c7610:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "UPPER.Example",
+            "target": "direct",
+            "index": 701
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "SUFFIX.Example",
+            "target": "proxy",
+            "index": 702
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "MiXeD-Key",
+            "target": "block",
+            "index": 703
+          },
+          {
+            "kind": "domain",
+            "value": "UPPER.Example",
+            "target": "direct",
+            "index": 41
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "SUFFIX.Example",
+            "target": "proxy",
+            "index": 42
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "MiXeD-Key",
+            "target": "block",
+            "index": 43
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "exact",
+            "label": "exact",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "UPPER.Example",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "local",
+            "stableId": "suffix",
+            "label": "suffix",
+            "sourceIndex": -1,
+            "sourceOrdinal": 1,
+            "kind": "domain-suffix",
+            "value": "SUFFIX.Example",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 2,
+            "layer": "local",
+            "stableId": "keyword",
+            "label": "keyword",
+            "sourceIndex": -1,
+            "sourceOrdinal": 2,
+            "kind": "domain-keyword",
+            "value": "MiXeD-Key",
+            "target": "block"
+          },
+          {
+            "effectiveIndex": 3,
+            "layer": "subscription",
+            "stableId": "88c0f99015fcefbe3e057e68408fe9417e4c2af3ec75195ec1341227ef5bb9d7:1",
+            "label": "",
+            "sourceFingerprint": "88c0f99015fcefbe3e057e68408fe9417e4c2af3ec75195ec1341227ef5bb9d7:1",
+            "sourceIndex": 41,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "UPPER.Example",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 4,
+            "layer": "subscription",
+            "stableId": "99de24c99592157171d5c64a4a39839fb6eb542b4354b1e6e8bd8228fa2cbeb7:1",
+            "label": "",
+            "sourceFingerprint": "99de24c99592157171d5c64a4a39839fb6eb542b4354b1e6e8bd8228fa2cbeb7:1",
+            "sourceIndex": 42,
+            "sourceOrdinal": 1,
+            "kind": "domain-suffix",
+            "value": "SUFFIX.Example",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 5,
+            "layer": "subscription",
+            "stableId": "63fa06b8b2dac9aca18e7aae017dcfe7c4dba49c62be78d4d1ec5a89bf3c7610:1",
+            "label": "",
+            "sourceFingerprint": "63fa06b8b2dac9aca18e7aae017dcfe7c4dba49c62be78d4d1ec5a89bf3c7610:1",
+            "sourceIndex": 43,
+            "sourceOrdinal": 2,
+            "kind": "domain-keyword",
+            "value": "MiXeD-Key",
+            "target": "block"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "lowercase-domain-keyword-same-identity",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "upper.example",
+          "target": "direct",
+          "index": 141
+        },
+        {
+          "kind": "domain-suffix",
+          "value": "suffix.example",
+          "target": "proxy",
+          "index": 142
+        },
+        {
+          "kind": "domain-keyword",
+          "value": "mixed-key",
+          "target": "block",
+          "index": 143
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "exact",
+            "enabled": true,
+            "label": "exact",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "upper.example",
+              "target": "direct",
+              "index": 801
+            }
+          },
+          {
+            "id": "suffix",
+            "enabled": true,
+            "label": "suffix",
+            "note": "",
+            "rule": {
+              "kind": "domain-suffix",
+              "value": "suffix.example",
+              "target": "proxy",
+              "index": 802
+            }
+          },
+          {
+            "id": "keyword",
+            "enabled": true,
+            "label": "keyword",
+            "note": "",
+            "rule": {
+              "kind": "domain-keyword",
+              "value": "mixed-key",
+              "target": "block",
+              "index": 803
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "7415b61f602b2a7702bfa286f3d9478282706312779873af9b03185fa5780cb6",
+      "fingerprints": [
+        "88c0f99015fcefbe3e057e68408fe9417e4c2af3ec75195ec1341227ef5bb9d7:1",
+        "99de24c99592157171d5c64a4a39839fb6eb542b4354b1e6e8bd8228fa2cbeb7:1",
+        "63fa06b8b2dac9aca18e7aae017dcfe7c4dba49c62be78d4d1ec5a89bf3c7610:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "upper.example",
+            "target": "direct",
+            "index": 801
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "suffix.example",
+            "target": "proxy",
+            "index": 802
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "mixed-key",
+            "target": "block",
+            "index": 803
+          },
+          {
+            "kind": "domain",
+            "value": "upper.example",
+            "target": "direct",
+            "index": 141
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "suffix.example",
+            "target": "proxy",
+            "index": 142
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "mixed-key",
+            "target": "block",
+            "index": 143
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "exact",
+            "label": "exact",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "upper.example",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "local",
+            "stableId": "suffix",
+            "label": "suffix",
+            "sourceIndex": -1,
+            "sourceOrdinal": 1,
+            "kind": "domain-suffix",
+            "value": "suffix.example",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 2,
+            "layer": "local",
+            "stableId": "keyword",
+            "label": "keyword",
+            "sourceIndex": -1,
+            "sourceOrdinal": 2,
+            "kind": "domain-keyword",
+            "value": "mixed-key",
+            "target": "block"
+          },
+          {
+            "effectiveIndex": 3,
+            "layer": "subscription",
+            "stableId": "88c0f99015fcefbe3e057e68408fe9417e4c2af3ec75195ec1341227ef5bb9d7:1",
+            "label": "",
+            "sourceFingerprint": "88c0f99015fcefbe3e057e68408fe9417e4c2af3ec75195ec1341227ef5bb9d7:1",
+            "sourceIndex": 141,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "upper.example",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 4,
+            "layer": "subscription",
+            "stableId": "99de24c99592157171d5c64a4a39839fb6eb542b4354b1e6e8bd8228fa2cbeb7:1",
+            "label": "",
+            "sourceFingerprint": "99de24c99592157171d5c64a4a39839fb6eb542b4354b1e6e8bd8228fa2cbeb7:1",
+            "sourceIndex": 142,
+            "sourceOrdinal": 1,
+            "kind": "domain-suffix",
+            "value": "suffix.example",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 5,
+            "layer": "subscription",
+            "stableId": "63fa06b8b2dac9aca18e7aae017dcfe7c4dba49c62be78d4d1ec5a89bf3c7610:1",
+            "label": "",
+            "sourceFingerprint": "63fa06b8b2dac9aca18e7aae017dcfe7c4dba49c62be78d4d1ec5a89bf3c7610:1",
+            "sourceIndex": 143,
+            "sourceOrdinal": 2,
+            "kind": "domain-keyword",
+            "value": "mixed-key",
+            "target": "block"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "ipv4-host-bits-and-no-resolve",
+      "subscription": [
+        {
+          "kind": "ip-cidr",
+          "value": "192.0.2.129/24",
+          "target": "direct",
+          "noResolve": true,
+          "index": 333
+        },
+        {
+          "kind": "ip-cidr",
+          "value": "198.51.100.129/25",
+          "target": "block",
+          "index": 334
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "cidr-no-resolve",
+            "enabled": true,
+            "label": "cidr-no-resolve",
+            "note": "",
+            "rule": {
+              "kind": "ip-cidr",
+              "value": "192.0.2.129/24",
+              "target": "direct",
+              "noResolve": true,
+              "index": 333
+            }
+          },
+          {
+            "id": "cidr-resolve",
+            "enabled": true,
+            "label": "cidr-resolve",
+            "note": "",
+            "rule": {
+              "kind": "ip-cidr",
+              "value": "198.51.100.129/25",
+              "target": "block",
+              "index": 334
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "4535e554eff1a5188b78a854ca2741c59e227913df89d02ec90da8734268841b",
+      "fingerprints": [
+        "00d5797e9a535de9a66b9a35e8fbb74cde117190b53a2ed7ab67232ff348300d:1",
+        "63f4d0059c7f21bd4a5b5264ef28d37463de777005e1e02378f8f071638f48d4:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "ip-cidr",
+            "value": "192.0.2.129/24",
+            "target": "direct",
+            "noResolve": true,
+            "index": 333
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "198.51.100.129/25",
+            "target": "block",
+            "index": 334
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "192.0.2.129/24",
+            "target": "direct",
+            "noResolve": true,
+            "index": 333
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "198.51.100.129/25",
+            "target": "block",
+            "index": 334
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "cidr-no-resolve",
+            "label": "cidr-no-resolve",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "ip-cidr",
+            "value": "192.0.2.129/24",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "local",
+            "stableId": "cidr-resolve",
+            "label": "cidr-resolve",
+            "sourceIndex": -1,
+            "sourceOrdinal": 1,
+            "kind": "ip-cidr",
+            "value": "198.51.100.129/25",
+            "target": "block"
+          },
+          {
+            "effectiveIndex": 2,
+            "layer": "subscription",
+            "stableId": "00d5797e9a535de9a66b9a35e8fbb74cde117190b53a2ed7ab67232ff348300d:1",
+            "label": "",
+            "sourceFingerprint": "00d5797e9a535de9a66b9a35e8fbb74cde117190b53a2ed7ab67232ff348300d:1",
+            "sourceIndex": 333,
+            "sourceOrdinal": 0,
+            "kind": "ip-cidr",
+            "value": "192.0.2.129/24",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 3,
+            "layer": "subscription",
+            "stableId": "63f4d0059c7f21bd4a5b5264ef28d37463de777005e1e02378f8f071638f48d4:1",
+            "label": "",
+            "sourceFingerprint": "63f4d0059c7f21bd4a5b5264ef28d37463de777005e1e02378f8f071638f48d4:1",
+            "sourceIndex": 334,
+            "sourceOrdinal": 1,
+            "kind": "ip-cidr",
+            "value": "198.51.100.129/25",
+            "target": "block"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "ipv4-masked-same-identity",
+      "subscription": [
+        {
+          "kind": "ip-cidr",
+          "value": "192.0.2.0/24",
+          "target": "direct",
+          "noResolve": true,
+          "index": 444
+        },
+        {
+          "kind": "ip-cidr",
+          "value": "198.51.100.128/25",
+          "target": "block",
+          "index": 445
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "cidr-no-resolve",
+            "enabled": true,
+            "label": "cidr-no-resolve",
+            "note": "",
+            "rule": {
+              "kind": "ip-cidr",
+              "value": "192.0.2.0/24",
+              "target": "direct",
+              "noResolve": true,
+              "index": 444
+            }
+          },
+          {
+            "id": "cidr-resolve",
+            "enabled": true,
+            "label": "cidr-resolve",
+            "note": "",
+            "rule": {
+              "kind": "ip-cidr",
+              "value": "198.51.100.128/25",
+              "target": "block",
+              "index": 445
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "4535e554eff1a5188b78a854ca2741c59e227913df89d02ec90da8734268841b",
+      "fingerprints": [
+        "00d5797e9a535de9a66b9a35e8fbb74cde117190b53a2ed7ab67232ff348300d:1",
+        "63f4d0059c7f21bd4a5b5264ef28d37463de777005e1e02378f8f071638f48d4:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "ip-cidr",
+            "value": "192.0.2.0/24",
+            "target": "direct",
+            "noResolve": true,
+            "index": 444
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "198.51.100.128/25",
+            "target": "block",
+            "index": 445
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "192.0.2.0/24",
+            "target": "direct",
+            "noResolve": true,
+            "index": 444
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "198.51.100.128/25",
+            "target": "block",
+            "index": 445
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "cidr-no-resolve",
+            "label": "cidr-no-resolve",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "ip-cidr",
+            "value": "192.0.2.0/24",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "local",
+            "stableId": "cidr-resolve",
+            "label": "cidr-resolve",
+            "sourceIndex": -1,
+            "sourceOrdinal": 1,
+            "kind": "ip-cidr",
+            "value": "198.51.100.128/25",
+            "target": "block"
+          },
+          {
+            "effectiveIndex": 2,
+            "layer": "subscription",
+            "stableId": "00d5797e9a535de9a66b9a35e8fbb74cde117190b53a2ed7ab67232ff348300d:1",
+            "label": "",
+            "sourceFingerprint": "00d5797e9a535de9a66b9a35e8fbb74cde117190b53a2ed7ab67232ff348300d:1",
+            "sourceIndex": 444,
+            "sourceOrdinal": 0,
+            "kind": "ip-cidr",
+            "value": "192.0.2.0/24",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 3,
+            "layer": "subscription",
+            "stableId": "63f4d0059c7f21bd4a5b5264ef28d37463de777005e1e02378f8f071638f48d4:1",
+            "label": "",
+            "sourceFingerprint": "63f4d0059c7f21bd4a5b5264ef28d37463de777005e1e02378f8f071638f48d4:1",
+            "sourceIndex": 445,
+            "sourceOrdinal": 1,
+            "kind": "ip-cidr",
+            "value": "198.51.100.128/25",
+            "target": "block"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "ipv6-expanded-host-bits",
+      "subscription": [
+        {
+          "kind": "ip-cidr",
+          "value": "2001:0DB8:0000:0000:0000:0000:0000:00A1/64",
+          "target": "proxy",
+          "noResolve": true,
+          "index": 616
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "ipv6",
+            "enabled": true,
+            "label": "ipv6",
+            "note": "",
+            "rule": {
+              "kind": "ip-cidr",
+              "value": "2001:0DB8:0000:0000:0000:0000:0000:00A1/64",
+              "target": "proxy",
+              "noResolve": true,
+              "index": 616
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "0ea6ad5b09566cb3247c99b8c0fbe468764515a7e1aabe6bf782b230d5d05179",
+      "fingerprints": [
+        "0b34a344bb0d17a3d2bc26f3b2d46bd588259ab90ba7b020c443455229952cb7:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "ip-cidr",
+            "value": "2001:0DB8:0000:0000:0000:0000:0000:00A1/64",
+            "target": "proxy",
+            "noResolve": true,
+            "index": 616
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "2001:0DB8:0000:0000:0000:0000:0000:00A1/64",
+            "target": "proxy",
+            "noResolve": true,
+            "index": 616
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "ipv6",
+            "label": "ipv6",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "ip-cidr",
+            "value": "2001:0DB8:0000:0000:0000:0000:0000:00A1/64",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "subscription",
+            "stableId": "0b34a344bb0d17a3d2bc26f3b2d46bd588259ab90ba7b020c443455229952cb7:1",
+            "label": "",
+            "sourceFingerprint": "0b34a344bb0d17a3d2bc26f3b2d46bd588259ab90ba7b020c443455229952cb7:1",
+            "sourceIndex": 616,
+            "sourceOrdinal": 0,
+            "kind": "ip-cidr",
+            "value": "2001:0DB8:0000:0000:0000:0000:0000:00A1/64",
+            "target": "proxy"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "ipv6-canonical-same-identity",
+      "subscription": [
+        {
+          "kind": "ip-cidr",
+          "value": "2001:db8::/64",
+          "target": "proxy",
+          "noResolve": true,
+          "index": 717
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "ipv6",
+            "enabled": true,
+            "label": "ipv6",
+            "note": "",
+            "rule": {
+              "kind": "ip-cidr",
+              "value": "2001:db8::/64",
+              "target": "proxy",
+              "noResolve": true,
+              "index": 717
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "0ea6ad5b09566cb3247c99b8c0fbe468764515a7e1aabe6bf782b230d5d05179",
+      "fingerprints": [
+        "0b34a344bb0d17a3d2bc26f3b2d46bd588259ab90ba7b020c443455229952cb7:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "ip-cidr",
+            "value": "2001:db8::/64",
+            "target": "proxy",
+            "noResolve": true,
+            "index": 717
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "2001:db8::/64",
+            "target": "proxy",
+            "noResolve": true,
+            "index": 717
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "ipv6",
+            "label": "ipv6",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "ip-cidr",
+            "value": "2001:db8::/64",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "subscription",
+            "stableId": "0b34a344bb0d17a3d2bc26f3b2d46bd588259ab90ba7b020c443455229952cb7:1",
+            "label": "",
+            "sourceFingerprint": "0b34a344bb0d17a3d2bc26f3b2d46bd588259ab90ba7b020c443455229952cb7:1",
+            "sourceIndex": 717,
+            "sourceOrdinal": 0,
+            "kind": "ip-cidr",
+            "value": "2001:db8::/64",
+            "target": "proxy"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "controlled-sets-cn-ip-no-resolve-distinct",
+      "subscription": [
+        {
+          "kind": "rule-set",
+          "value": "cn-ip",
+          "target": "direct",
+          "noResolve": true,
+          "index": 11
+        },
+        {
+          "kind": "rule-set",
+          "value": "cn-ip",
+          "target": "direct",
+          "index": 13
+        },
+        {
+          "kind": "rule-set",
+          "value": "cn-domain",
+          "target": "direct",
+          "index": 17
+        },
+        {
+          "kind": "rule-set",
+          "value": "proxy-domain",
+          "target": "proxy",
+          "index": 23
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "set-0",
+            "enabled": true,
+            "label": "set-0",
+            "note": "",
+            "rule": {
+              "kind": "rule-set",
+              "value": "cn-ip",
+              "target": "direct",
+              "noResolve": true,
+              "index": 11
+            }
+          },
+          {
+            "id": "set-1",
+            "enabled": true,
+            "label": "set-1",
+            "note": "",
+            "rule": {
+              "kind": "rule-set",
+              "value": "cn-ip",
+              "target": "direct",
+              "index": 13
+            }
+          },
+          {
+            "id": "set-2",
+            "enabled": true,
+            "label": "set-2",
+            "note": "",
+            "rule": {
+              "kind": "rule-set",
+              "value": "cn-domain",
+              "target": "direct",
+              "index": 17
+            }
+          },
+          {
+            "id": "set-3",
+            "enabled": true,
+            "label": "set-3",
+            "note": "",
+            "rule": {
+              "kind": "rule-set",
+              "value": "proxy-domain",
+              "target": "proxy",
+              "index": 23
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "e42c1e5e9e0598fcbbb1722c880cceecc58112909cfbadd320341ee73e543006",
+      "fingerprints": [
+        "75f428218f6f7f2a73e4c7ae31f26af16648bf0d49e78cea21166261dc1f0c04:1",
+        "41d91209b6946bcc77e26172b758d34635935c2ba70303a0ab0ec01dbb4ae3b9:1",
+        "b09ee96007d1c46708b1394354a30c1d43118e91a494c6bfd98ed9f80a733847:1",
+        "74794f57683cd486beca567dca4ea96d429736fdfacf7a301c361d70d8d5eb1e:1"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct",
+            "noResolve": true,
+            "index": 11
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct",
+            "index": 13
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-domain",
+            "target": "direct",
+            "index": 17
+          },
+          {
+            "kind": "rule-set",
+            "value": "proxy-domain",
+            "target": "proxy",
+            "index": 23
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct",
+            "noResolve": true,
+            "index": 11
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct",
+            "index": 13
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-domain",
+            "target": "direct",
+            "index": 17
+          },
+          {
+            "kind": "rule-set",
+            "value": "proxy-domain",
+            "target": "proxy",
+            "index": 23
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "set-0",
+            "label": "set-0",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "local",
+            "stableId": "set-1",
+            "label": "set-1",
+            "sourceIndex": -1,
+            "sourceOrdinal": 1,
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 2,
+            "layer": "local",
+            "stableId": "set-2",
+            "label": "set-2",
+            "sourceIndex": -1,
+            "sourceOrdinal": 2,
+            "kind": "rule-set",
+            "value": "cn-domain",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 3,
+            "layer": "local",
+            "stableId": "set-3",
+            "label": "set-3",
+            "sourceIndex": -1,
+            "sourceOrdinal": 3,
+            "kind": "rule-set",
+            "value": "proxy-domain",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 4,
+            "layer": "subscription",
+            "stableId": "75f428218f6f7f2a73e4c7ae31f26af16648bf0d49e78cea21166261dc1f0c04:1",
+            "label": "",
+            "sourceFingerprint": "75f428218f6f7f2a73e4c7ae31f26af16648bf0d49e78cea21166261dc1f0c04:1",
+            "sourceIndex": 11,
+            "sourceOrdinal": 0,
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 5,
+            "layer": "subscription",
+            "stableId": "41d91209b6946bcc77e26172b758d34635935c2ba70303a0ab0ec01dbb4ae3b9:1",
+            "label": "",
+            "sourceFingerprint": "41d91209b6946bcc77e26172b758d34635935c2ba70303a0ab0ec01dbb4ae3b9:1",
+            "sourceIndex": 13,
+            "sourceOrdinal": 1,
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 6,
+            "layer": "subscription",
+            "stableId": "b09ee96007d1c46708b1394354a30c1d43118e91a494c6bfd98ed9f80a733847:1",
+            "label": "",
+            "sourceFingerprint": "b09ee96007d1c46708b1394354a30c1d43118e91a494c6bfd98ed9f80a733847:1",
+            "sourceIndex": 17,
+            "sourceOrdinal": 2,
+            "kind": "rule-set",
+            "value": "cn-domain",
+            "target": "direct"
+          },
+          {
+            "effectiveIndex": 7,
+            "layer": "subscription",
+            "stableId": "74794f57683cd486beca567dca4ea96d429736fdfacf7a301c361d70d8d5eb1e:1",
+            "label": "",
+            "sourceFingerprint": "74794f57683cd486beca567dca4ea96d429736fdfacf7a301c361d70d8d5eb1e:1",
+            "sourceIndex": 23,
+            "sourceOrdinal": 3,
+            "kind": "rule-set",
+            "value": "proxy-domain",
+            "target": "proxy"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "unicode-html-line-separators-multiline-metadata",
+      "subscription": [],
+      "policy": {
+        "rules": [
+          {
+            "id": "unicode-public",
+            "enabled": true,
+            "label": "公开标签 \u003c\u003e\u0026 \u2028\u2029 中文",
+            "note": "public \u003c\u003e\u0026\u2028\u2029\nsecond line\t注释",
+            "rule": {
+              "kind": "domain",
+              "value": "unicode.example",
+              "target": "direct",
+              "index": 121
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": true,
+      "revision": "737a6514c1e380309ff07731720628be269e65f63b055afb717ffcb366dddca3",
+      "fingerprints": [],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "unicode.example",
+            "target": "direct",
+            "index": 121
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "local",
+            "stableId": "unicode-public",
+            "label": "公开标签 \u003c\u003e\u0026 \u2028\u2029 中文",
+            "sourceIndex": -1,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "unicode.example",
+            "target": "direct"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "duplicate-semantic-occurrences",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "DUPLICATE.example",
+          "target": "proxy",
+          "index": 31
+        },
+        {
+          "kind": "domain",
+          "value": "duplicate.example",
+          "target": "proxy",
+          "index": 37
+        },
+        {
+          "kind": "domain",
+          "value": "Duplicate.Example",
+          "target": "proxy",
+          "index": 41
+        }
+      ],
+      "policy": {
+        "rules": [],
+        "subscriptionEdits": [
+          {
+            "id": "only-second",
+            "sourceFingerprint": "c6117053d3e90ec08dda8fba26ae8ef825055593f4bfb92c2a881a99158f2029:2",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          }
+        ]
+      },
+      "valid": true,
+      "revision": "68a9493a2f18df8f5d9f2e149b44ebd3fc5f33e9b7b735f7b04775463a9cae73",
+      "fingerprints": [
+        "c6117053d3e90ec08dda8fba26ae8ef825055593f4bfb92c2a881a99158f2029:1",
+        "c6117053d3e90ec08dda8fba26ae8ef825055593f4bfb92c2a881a99158f2029:2",
+        "c6117053d3e90ec08dda8fba26ae8ef825055593f4bfb92c2a881a99158f2029:3"
+      ],
+      "effective": {
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "DUPLICATE.example",
+            "target": "proxy",
+            "index": 31
+          },
+          {
+            "kind": "domain",
+            "value": "Duplicate.Example",
+            "target": "proxy",
+            "index": 41
+          }
+        ],
+        "provenance": [
+          {
+            "effectiveIndex": 0,
+            "layer": "subscription",
+            "stableId": "c6117053d3e90ec08dda8fba26ae8ef825055593f4bfb92c2a881a99158f2029:1",
+            "label": "",
+            "sourceFingerprint": "c6117053d3e90ec08dda8fba26ae8ef825055593f4bfb92c2a881a99158f2029:1",
+            "sourceIndex": 31,
+            "sourceOrdinal": 0,
+            "kind": "domain",
+            "value": "DUPLICATE.example",
+            "target": "proxy"
+          },
+          {
+            "effectiveIndex": 1,
+            "layer": "subscription",
+            "stableId": "c6117053d3e90ec08dda8fba26ae8ef825055593f4bfb92c2a881a99158f2029:3",
+            "label": "",
+            "sourceFingerprint": "c6117053d3e90ec08dda8fba26ae8ef825055593f4bfb92c2a881a99158f2029:3",
+            "sourceIndex": 41,
+            "sourceOrdinal": 2,
+            "kind": "domain",
+            "value": "Duplicate.Example",
+            "target": "proxy"
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "subscription-edit",
+            "index": 0,
+            "code": "disabled-rule",
+            "message": "explicitly disabled subscription rule is not compiled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-ids-and-cross-layer-duplicates",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "public.example",
+          "target": "direct",
+          "index": 7
+        }
+      ],
+      "policy": {
+        "rules": [
+          {
+            "id": "",
+            "enabled": true,
+            "label": "public",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "empty-id.example",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "身份",
+            "enabled": true,
+            "label": "public",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "unicode-id.example",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "fake/id",
+            "enabled": true,
+            "label": "public",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "slash-id.example",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "enabled": true,
+            "label": "public",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "long-id.example",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "duplicate",
+            "enabled": true,
+            "label": "public",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "duplicate-id.example",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "duplicate",
+            "enabled": true,
+            "label": "public",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "duplicate-id-again.example",
+              "target": "block",
+              "index": 0
+            }
+          }
+        ],
+        "subscriptionEdits": [
+          {
+            "id": "duplicate",
+            "sourceFingerprint": "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:1",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          }
+        ]
+      },
+      "valid": false,
+      "fingerprints": [
+        "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:1"
+      ],
+      "effective": {
+        "rules": [],
+        "provenance": [],
+        "diagnostics": [
+          {
+            "scope": "local-rule",
+            "index": 0,
+            "code": "invalid-id",
+            "message": "rule identity must be unique bounded ASCII"
+          },
+          {
+            "scope": "local-rule",
+            "index": 1,
+            "code": "invalid-id",
+            "message": "rule identity must be unique bounded ASCII"
+          },
+          {
+            "scope": "local-rule",
+            "index": 2,
+            "code": "invalid-id",
+            "message": "rule identity must be unique bounded ASCII"
+          },
+          {
+            "scope": "local-rule",
+            "index": 3,
+            "code": "invalid-id",
+            "message": "rule identity must be unique bounded ASCII"
+          },
+          {
+            "scope": "local-rule",
+            "index": 5,
+            "code": "invalid-id",
+            "message": "rule identity must be unique bounded ASCII"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 0,
+            "code": "invalid-id",
+            "message": "rule identity must be unique bounded ASCII"
+          }
+        ]
+      },
+      "validationError": "invalid local proxy policy"
+    },
+    {
+      "name": "invalid-metadata-rune-bounds-controls",
+      "subscription": [],
+      "policy": {
+        "rules": [
+          {
+            "id": "metadata-0",
+            "enabled": true,
+            "label": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "metadata.example",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "metadata-1",
+            "enabled": true,
+            "label": "",
+            "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+            "rule": {
+              "kind": "domain",
+              "value": "metadata.example",
+              "target": "direct",
+              "index": 1
+            }
+          },
+          {
+            "id": "metadata-2",
+            "enabled": true,
+            "label": "",
+            "note": "public\u0000note",
+            "rule": {
+              "kind": "domain",
+              "value": "metadata.example",
+              "target": "direct",
+              "index": 2
+            }
+          },
+          {
+            "id": "metadata-3",
+            "enabled": true,
+            "label": "label\nline",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "metadata.example",
+              "target": "direct",
+              "index": 3
+            }
+          },
+          {
+            "id": "metadata-4",
+            "enabled": true,
+            "label": "",
+            "note": "public\rnote",
+            "rule": {
+              "kind": "domain",
+              "value": "metadata.example",
+              "target": "direct",
+              "index": 4
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": false,
+      "fingerprints": [],
+      "effective": {
+        "rules": [],
+        "provenance": [],
+        "diagnostics": [
+          {
+            "scope": "local-rule",
+            "index": 0,
+            "code": "invalid-metadata",
+            "message": "rule label or note exceeds supported limits"
+          },
+          {
+            "scope": "local-rule",
+            "index": 1,
+            "code": "invalid-metadata",
+            "message": "rule label or note exceeds supported limits"
+          },
+          {
+            "scope": "local-rule",
+            "index": 2,
+            "code": "invalid-metadata",
+            "message": "rule label or note exceeds supported limits"
+          },
+          {
+            "scope": "local-rule",
+            "index": 3,
+            "code": "invalid-metadata",
+            "message": "rule label or note exceeds supported limits"
+          },
+          {
+            "scope": "local-rule",
+            "index": 4,
+            "code": "invalid-metadata",
+            "message": "rule label or note exceeds supported limits"
+          }
+        ]
+      },
+      "validationError": "invalid local proxy policy"
+    },
+    {
+      "name": "invalid-matchers-domain-keyword-action-value-bound",
+      "subscription": [],
+      "policy": {
+        "rules": [
+          {
+            "id": "matcher-0",
+            "enabled": false,
+            "label": "matcher-0",
+            "note": "",
+            "rule": {
+              "kind": "process-path",
+              "value": "/public/fake-process",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "matcher-1",
+            "enabled": true,
+            "label": "matcher-1",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "https://invalid.example",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "matcher-2",
+            "enabled": true,
+            "label": "matcher-2",
+            "note": "",
+            "rule": {
+              "kind": "domain-suffix",
+              "value": "bad..example",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "matcher-3",
+            "enabled": true,
+            "label": "matcher-3",
+            "note": "",
+            "rule": {
+              "kind": "domain-keyword",
+              "value": "public keyword",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "matcher-4",
+            "enabled": true,
+            "label": "matcher-4",
+            "note": "",
+            "rule": {
+              "kind": "domain-keyword",
+              "value": "public\u0001keyword",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "matcher-5",
+            "enabled": true,
+            "label": "matcher-5",
+            "note": "",
+            "rule": {
+              "kind": "domain-keyword",
+              "value": "公开",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "matcher-6",
+            "enabled": true,
+            "label": "matcher-6",
+            "note": "",
+            "rule": {
+              "kind": "domain-keyword",
+              "value": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "matcher-7",
+            "enabled": true,
+            "label": "matcher-7",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "invalid-action.example",
+              "target": "unsupported",
+              "index": 0
+            }
+          },
+          {
+            "id": "matcher-8",
+            "enabled": true,
+            "label": "matcher-8",
+            "note": "",
+            "rule": {
+              "kind": "match",
+              "value": "not-empty",
+              "target": "block",
+              "index": 0
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": false,
+      "fingerprints": [],
+      "effective": {
+        "rules": [],
+        "provenance": [],
+        "diagnostics": [
+          {
+            "scope": "local-rule",
+            "index": 0,
+            "code": "unsupported-matcher",
+            "message": "rule matcher is not supported for forwarded clients"
+          },
+          {
+            "scope": "local-rule",
+            "index": 1,
+            "code": "invalid-rule",
+            "message": "rule matcher value or action is invalid"
+          },
+          {
+            "scope": "local-rule",
+            "index": 2,
+            "code": "invalid-rule",
+            "message": "rule matcher value or action is invalid"
+          },
+          {
+            "scope": "local-rule",
+            "index": 3,
+            "code": "invalid-rule",
+            "message": "rule keyword requires printable ASCII without spaces"
+          },
+          {
+            "scope": "local-rule",
+            "index": 4,
+            "code": "invalid-rule",
+            "message": "rule keyword requires printable ASCII without spaces"
+          },
+          {
+            "scope": "local-rule",
+            "index": 5,
+            "code": "invalid-rule",
+            "message": "rule keyword requires printable ASCII without spaces"
+          },
+          {
+            "scope": "local-rule",
+            "index": 6,
+            "code": "invalid-rule",
+            "message": "rule matcher value or action is invalid"
+          },
+          {
+            "scope": "local-rule",
+            "index": 7,
+            "code": "invalid-rule",
+            "message": "rule matcher value or action is invalid"
+          },
+          {
+            "scope": "local-rule",
+            "index": 8,
+            "code": "invalid-rule",
+            "message": "rule matcher value or action is invalid"
+          }
+        ]
+      },
+      "validationError": "invalid local proxy policy"
+    },
+    {
+      "name": "invalid-cidr-mapped-ipv6-no-resolve-controlled-set",
+      "subscription": [],
+      "policy": {
+        "rules": [
+          {
+            "id": "option-0",
+            "enabled": true,
+            "label": "option-0",
+            "note": "",
+            "rule": {
+              "kind": "ip-cidr",
+              "value": "192.0.2.0/33",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "option-1",
+            "enabled": true,
+            "label": "option-1",
+            "note": "",
+            "rule": {
+              "kind": "ip-cidr",
+              "value": "2001:db8::/129",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "option-2",
+            "enabled": true,
+            "label": "option-2",
+            "note": "",
+            "rule": {
+              "kind": "ip-cidr",
+              "value": "::ffff:192.0.2.1/128",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "option-3",
+            "enabled": true,
+            "label": "option-3",
+            "note": "",
+            "rule": {
+              "kind": "domain",
+              "value": "option.example",
+              "target": "direct",
+              "noResolve": true,
+              "index": 0
+            }
+          },
+          {
+            "id": "option-4",
+            "enabled": true,
+            "label": "option-4",
+            "note": "",
+            "rule": {
+              "kind": "match",
+              "target": "block",
+              "noResolve": true,
+              "index": 0
+            }
+          },
+          {
+            "id": "option-5",
+            "enabled": true,
+            "label": "option-5",
+            "note": "",
+            "rule": {
+              "kind": "rule-set",
+              "value": "cn-domain",
+              "target": "direct",
+              "noResolve": true,
+              "index": 0
+            }
+          },
+          {
+            "id": "option-6",
+            "enabled": true,
+            "label": "option-6",
+            "note": "",
+            "rule": {
+              "kind": "rule-set",
+              "value": "proxy-domain",
+              "target": "proxy",
+              "noResolve": true,
+              "index": 0
+            }
+          },
+          {
+            "id": "option-7",
+            "enabled": true,
+            "label": "option-7",
+            "note": "",
+            "rule": {
+              "kind": "rule-set",
+              "value": "unknown-public-set",
+              "target": "direct",
+              "index": 0
+            }
+          },
+          {
+            "id": "option-8",
+            "enabled": true,
+            "label": "option-8",
+            "note": "",
+            "rule": {
+              "kind": "rule-set",
+              "value": "CN-IP",
+              "target": "direct",
+              "index": 0
+            }
+          }
+        ],
+        "subscriptionEdits": []
+      },
+      "valid": false,
+      "fingerprints": [],
+      "effective": {
+        "rules": [],
+        "provenance": [],
+        "diagnostics": [
+          {
+            "scope": "local-rule",
+            "index": 0,
+            "code": "invalid-rule",
+            "message": "rule matcher value or action is invalid"
+          },
+          {
+            "scope": "local-rule",
+            "index": 1,
+            "code": "invalid-rule",
+            "message": "rule matcher value or action is invalid"
+          },
+          {
+            "scope": "local-rule",
+            "index": 2,
+            "code": "invalid-rule",
+            "message": "rule matcher value or action is invalid"
+          },
+          {
+            "scope": "local-rule",
+            "index": 3,
+            "code": "invalid-rule",
+            "message": "rule value or option exceeds supported limits"
+          },
+          {
+            "scope": "local-rule",
+            "index": 4,
+            "code": "invalid-rule",
+            "message": "rule value or option exceeds supported limits"
+          },
+          {
+            "scope": "local-rule",
+            "index": 5,
+            "code": "invalid-rule",
+            "message": "rule value or option exceeds supported limits"
+          },
+          {
+            "scope": "local-rule",
+            "index": 6,
+            "code": "invalid-rule",
+            "message": "rule value or option exceeds supported limits"
+          },
+          {
+            "scope": "local-rule",
+            "index": 7,
+            "code": "unsupported-rule-set",
+            "message": "rule set is not a controlled local set"
+          },
+          {
+            "scope": "local-rule",
+            "index": 8,
+            "code": "unsupported-rule-set",
+            "message": "rule set is not a controlled local set"
+          }
+        ]
+      },
+      "validationError": "invalid local proxy policy"
+    },
+    {
+      "name": "invalid-edit-both-absent-and-replacements",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "operation-0.example",
+          "target": "direct",
+          "index": 10
+        },
+        {
+          "kind": "domain",
+          "value": "operation-1.example",
+          "target": "direct",
+          "index": 11
+        },
+        {
+          "kind": "domain",
+          "value": "operation-2.example",
+          "target": "direct",
+          "index": 12
+        },
+        {
+          "kind": "domain",
+          "value": "operation-3.example",
+          "target": "direct",
+          "index": 13
+        }
+      ],
+      "policy": {
+        "rules": [],
+        "subscriptionEdits": [
+          {
+            "id": "both",
+            "sourceFingerprint": "9b96a8cb8c2d068c1a4297b9f306600b21060700192c382c08b3fe65c644fd31:1",
+            "disabled": true,
+            "replacement": {
+              "kind": "domain",
+              "value": "replacement.example",
+              "target": "block",
+              "index": 999
+            },
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "absent",
+            "sourceFingerprint": "abc01501d8c8ae1fd782e6d936ffb8c8c41e851932b3516f64800d4fedd0f89a:1",
+            "disabled": false,
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "bad-replacement",
+            "sourceFingerprint": "75a58115702acb03918b5dc77f33305950336a105920ec55cfa29c4671495124:1",
+            "disabled": false,
+            "replacement": {
+              "kind": "process-name",
+              "value": "public-fake-process",
+              "target": "block",
+              "index": 0
+            },
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "bad-cidr-replacement",
+            "sourceFingerprint": "3ad87468cc8e4a89da9fabedf3610402c1b0439733cdf2d6255ca717c31e4d2c:1",
+            "disabled": false,
+            "replacement": {
+              "kind": "ip-cidr",
+              "value": "192.0.2.1/99",
+              "target": "direct",
+              "index": 0
+            },
+            "label": "",
+            "note": ""
+          }
+        ]
+      },
+      "valid": false,
+      "fingerprints": [
+        "9b96a8cb8c2d068c1a4297b9f306600b21060700192c382c08b3fe65c644fd31:1",
+        "abc01501d8c8ae1fd782e6d936ffb8c8c41e851932b3516f64800d4fedd0f89a:1",
+        "75a58115702acb03918b5dc77f33305950336a105920ec55cfa29c4671495124:1",
+        "3ad87468cc8e4a89da9fabedf3610402c1b0439733cdf2d6255ca717c31e4d2c:1"
+      ],
+      "effective": {
+        "rules": [],
+        "provenance": [],
+        "diagnostics": [
+          {
+            "scope": "subscription-edit",
+            "index": 0,
+            "code": "invalid-edit",
+            "message": "subscription edit must disable or replace one rule"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 1,
+            "code": "invalid-edit",
+            "message": "subscription edit must disable or replace one rule"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 2,
+            "code": "unsupported-matcher",
+            "message": "rule matcher is not supported for forwarded clients"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 3,
+            "code": "invalid-rule",
+            "message": "rule matcher value or action is invalid"
+          }
+        ]
+      },
+      "validationError": "invalid local proxy policy"
+    },
+    {
+      "name": "invalid-fingerprints-noncanonical-bound-duplicates",
+      "subscription": [
+        {
+          "kind": "domain",
+          "value": "public.example",
+          "target": "direct",
+          "index": 7
+        }
+      ],
+      "policy": {
+        "rules": [],
+        "subscriptionEdits": [
+          {
+            "id": "reference-0",
+            "sourceFingerprint": "0",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "reference-1",
+            "sourceFingerprint": "5EFDEE627BEEF698D7A75AAFB4499FD4FCF250CA1771A13ADDC0C84593452F21:1",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "reference-2",
+            "sourceFingerprint": "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:0",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "reference-3",
+            "sourceFingerprint": "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:01",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "reference-4",
+            "sourceFingerprint": "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:8193",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "reference-5",
+            "sourceFingerprint": "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:+1",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "reference-6",
+            "sourceFingerprint": "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:-1",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "reference-7",
+            "sourceFingerprint": "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:1",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          },
+          {
+            "id": "reference-8",
+            "sourceFingerprint": "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:1",
+            "disabled": true,
+            "label": "",
+            "note": ""
+          }
+        ]
+      },
+      "valid": false,
+      "fingerprints": [
+        "5efdee627beef698d7a75aafb4499fd4fcf250ca1771a13addc0c84593452f21:1"
+      ],
+      "effective": {
+        "rules": [],
+        "provenance": [],
+        "diagnostics": [
+          {
+            "scope": "subscription-edit",
+            "index": 0,
+            "code": "invalid-reference",
+            "message": "subscription reference must be exact and unique"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 1,
+            "code": "invalid-reference",
+            "message": "subscription reference must be exact and unique"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 2,
+            "code": "invalid-reference",
+            "message": "subscription reference must be exact and unique"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 3,
+            "code": "invalid-reference",
+            "message": "subscription reference must be exact and unique"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 4,
+            "code": "invalid-reference",
+            "message": "subscription reference must be exact and unique"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 5,
+            "code": "invalid-reference",
+            "message": "subscription reference must be exact and unique"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 6,
+            "code": "invalid-reference",
+            "message": "subscription reference must be exact and unique"
+          },
+          {
+            "scope": "subscription-edit",
+            "index": 8,
+            "code": "invalid-reference",
+            "message": "subscription reference must be exact and unique"
+          }
+        ]
+      },
+      "validationError": "invalid local proxy policy"
+    }
+  ]
+}
