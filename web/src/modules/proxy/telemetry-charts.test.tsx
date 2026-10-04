@@ -151,6 +151,66 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("actual proxy telemetry analysis", () => {
+  it("limits active timeline to 15 readable rows and searches the full observed list", async () => {
+    const base = sample();
+    state.data = {
+      ...base,
+      activeConnections: 36,
+      connections: Array.from({ length: 36 }, (_, index) => ({
+        ...base.connections[0],
+        id: `paging-${index}`,
+        sourceIP: `192.0.2.${index + 1}`,
+        host: index === 35 ? "last-device.test" : `device-${index}.test`,
+      })),
+    };
+    const user = userEvent.setup();
+    render(<ConnectionAnalysis />);
+    const table = tableIn("活动连接时间线");
+    expect(within(table).getAllByRole("row", { hidden: true })).toHaveLength(
+      16,
+    );
+    expect(
+      (chartOption(/活动连接开始时间/).series as { data: unknown[] }[])[0].data,
+    ).toHaveLength(15);
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(
+      within(tableIn("活动连接时间线")).getByText("paging-15"),
+    ).toBeInTheDocument();
+    await user.type(
+      screen.getByRole("searchbox", { name: "搜索连接" }),
+      "last-device.test",
+    );
+    expect(
+      within(tableIn("活动连接时间线")).getByText("paging-35"),
+    ).toBeInTheDocument();
+    expect(
+      within(tableIn("活动连接时间线")).getAllByRole("row", { hidden: true }),
+    ).toHaveLength(2);
+    expect(
+      screen.queryByRole("button", { name: "下一页" }),
+    ).not.toBeInTheDocument();
+    expect(state.probe).not.toHaveBeenCalled();
+  });
+  it("filters target source rule and outbound together and retains source identity in routing", async () => {
+    const user = userEvent.setup();
+    render(<ConnectionAnalysis />);
+    await user.type(
+      screen.getByRole("searchbox", { name: "搜索连接" }),
+      "192.0.2.20 example.test proxy",
+    );
+    expect(
+      within(tableIn("活动连接时间线")).getByText("observed-a"),
+    ).toBeInTheDocument();
+    expect(
+      within(tableIn("活动连接时间线")).queryByText("observed-b"),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "活动连接分流" }));
+    const table = tableIn("活动连接分流");
+    expect(within(table).getByText("192.0.2.20")).toBeInTheDocument();
+    expect(within(table).queryByText("192.0.2.21")).not.toBeInTheDocument();
+    expect(state.probe).not.toHaveBeenCalled();
+  });
+
   it("shows observed active connections and measured ages without invented DNS or TLS phases", () => {
     render(<ConnectionAnalysis />);
     const table = tableIn("活动连接时间线");
@@ -184,15 +244,16 @@ describe("actual proxy telemetry analysis", () => {
     await user.click(screen.getByRole("tab", { name: "代理流量" }));
     const table = tableIn("代理流量");
     expect(within(table).getByText("2026-01-01T00:00:01Z")).toBeInTheDocument();
-    expect(within(table).getByText("4096")).toBeInTheDocument();
+    expect(within(table).getByText("4.1")).toBeInTheDocument();
     expect(within(table).getByText("计数器重置")).toBeInTheDocument();
     const option = chartOption(/代理上传和下载/);
     const series = option.series as {
       data: unknown[];
       connectNulls: boolean;
     }[];
-    expect(series[0].data).toEqual([1024, null, 512]);
-    expect(series[1].data).toEqual([2048, null, 4096]);
+    expect(series[0].data).toEqual([1.024, null, 0.512]);
+    expect(series[1].data).toEqual([2.048, null, 4.096]);
+    expect((option.yAxis as { name: string }).name).toBe("KB/s");
     expect(series[0].connectNulls).toBe(false);
     expect(state.probe).not.toHaveBeenCalled();
   });
@@ -202,12 +263,16 @@ describe("actual proxy telemetry analysis", () => {
     render(<ConnectionAnalysis />);
     await user.click(screen.getByRole("tab", { name: "活动连接分流" }));
     const table = tableIn("活动连接分流");
-    const observed = within(table).getByText("rule-observed").closest("tr")!;
+    const observed = within(table)
+      .getAllByText("rule-observed")[0]
+      .closest("tr")!;
+    expect(within(table).getAllByText("rule-observed")).toHaveLength(2);
+    expect(within(observed).getByText("192.0.2.20")).toBeInTheDocument();
     expect(
       within(observed).getByText("domain-suffix=example.test"),
     ).toBeInTheDocument();
     expect(within(observed).getByText("proxy")).toBeInTheDocument();
-    expect(within(observed).getByText("2")).toBeInTheDocument();
+    expect(within(observed).getByText("1")).toBeInTheDocument();
     expect(
       screen.queryByText(/累计命中|所选命中|GeoIP/),
     ).not.toBeInTheDocument();
@@ -275,10 +340,10 @@ describe("actual proxy telemetry analysis", () => {
     expect(screen.getAllByText(/上次采样/).length).toBeGreaterThan(0);
     expect(screen.getByText(/控制器读取中断/)).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "代理流量" }));
-    expect(within(tableIn("代理流量")).getByText("4096")).toBeInTheDocument();
+    expect(within(tableIn("代理流量")).getByText("4.1")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "活动连接分流" }));
     expect(
-      within(tableIn("活动连接分流")).getByText("rule-observed"),
+      within(tableIn("活动连接分流")).getAllByText("rule-observed")[0],
     ).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "探测延迟" }));
     expect(within(tableIn("探测延迟分布")).getByText("45")).toBeInTheDocument();
@@ -375,8 +440,8 @@ describe("compact proxy telemetry overview", () => {
       screen.getByRole("region", { name: "代理遥测" }),
     ).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("8.0 KiB")).toBeInTheDocument();
-    expect(screen.getByText("64.0 KiB")).toBeInTheDocument();
+    expect(screen.getByText("8.19 KB")).toBeInTheDocument();
+    expect(screen.getByText("65.54 KB")).toBeInTheDocument();
     expect(screen.getByText(/sing-box controller/)).toBeInTheDocument();
     expect(screen.getByText(/HTTPS 流量不提供请求阶段/)).toBeInTheDocument();
     expect(
@@ -397,8 +462,8 @@ describe("compact proxy telemetry overview", () => {
     };
     render(<ProxyTelemetryOverview />);
     expect(screen.getByText(/流量控制器未启用/)).toBeInTheDocument();
-    expect(screen.queryByText("8.0 KiB")).not.toBeInTheDocument();
-    expect(screen.queryByText("64.0 KiB")).not.toBeInTheDocument();
+    expect(screen.queryByText("8.19 KB")).not.toBeInTheDocument();
+    expect(screen.queryByText("65.54 KB")).not.toBeInTheDocument();
     expect(state.probe).not.toHaveBeenCalled();
   });
 
@@ -420,7 +485,7 @@ describe("compact proxy telemetry overview", () => {
     render(<ProxyTelemetryOverview />);
     expect(screen.getByText(/上次采样/)).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("8.0 KiB")).toBeInTheDocument();
+    expect(screen.getByText("8.19 KB")).toBeInTheDocument();
     expect(screen.getAllByText(/核心采样中断/).length).toBeGreaterThan(0);
     expect(state.probe).not.toHaveBeenCalled();
   });

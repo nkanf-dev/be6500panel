@@ -1,4 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import {
+  chooseByteScale,
+  byteNumber,
+  formatByteRate,
+  formatBytes,
+  formatByteAxisValue,
+} from "../../lib/byte-scale";
 import { useConnectionDeviceNames } from "../../app/use-connection-device-names";
 import type { EChartsOption } from "echarts";
 import { ChartFrame } from "../../components/visualizations/ChartFrame";
@@ -14,6 +21,7 @@ import type { ProxyMetrics } from "./telemetry-api";
 
 type Capability = keyof ProxyMetrics["capabilities"];
 interface TelemetryChartProps {
+  query?: string;
   metrics?: ProxyMetrics;
   loading?: boolean;
   failed?: boolean;
@@ -46,18 +54,62 @@ const percentile = (values: readonly number[], fraction: number) => {
   return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)];
 };
 
+export function connectionMatches(
+  item: ProxyMetrics["connections"][number],
+  query: string,
+  deviceName = "",
+): boolean {
+  const text = [
+    deviceName,
+    item.id,
+    item.sourceIP,
+    item.sourcePort,
+    item.destinationIP,
+    item.destinationPort,
+    item.host,
+    item.network,
+    item.ruleId,
+    item.rule,
+    item.outbound,
+  ]
+    .join(" ")
+    .toLocaleLowerCase();
+  return query
+    .trim()
+    .toLocaleLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((term) => text.includes(term));
+}
+const CONNECTION_PAGE_SIZE = 15;
 /** Start offsets and age come only from the active connection snapshot. */
 export function ConnectionTimeline(props: TelemetryChartProps) {
   const { metrics } = props;
   const deviceNames = useConnectionDeviceNames(metrics);
-  const connections = useMemo(
+  const [page, setPage] = useState(0);
+  const allConnections = useMemo(
     () =>
       observed(metrics, "connections")
-        ? [...metrics!.connections].sort(
-            (a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt),
-          )
+        ? [...metrics!.connections]
+            .filter((item) =>
+              connectionMatches(
+                item,
+                props.query ?? "",
+                deviceNames.get(item.id),
+              ),
+            )
+            .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
         : [],
-    [metrics],
+    [metrics, props.query, deviceNames],
+  );
+  const pageCount = Math.max(
+    1,
+    Math.ceil(allConnections.length / CONNECTION_PAGE_SIZE),
+  );
+  const currentPage = Math.min(page, pageCount - 1);
+  const connections = allConnections.slice(
+    currentPage * CONNECTION_PAGE_SIZE,
+    (currentPage + 1) * CONNECTION_PAGE_SIZE,
   );
   const start = Math.min(
     ...connections
@@ -100,7 +152,7 @@ export function ConnectionTimeline(props: TelemetryChartProps) {
             const item = Array.isArray(parameters) ? parameters[0] : parameters;
             const connection = connections[item.dataIndex];
             return connection
-              ? `${connection.id} · ${connection.network}${deviceNames.has(connection.id) ? ` · ${deviceNames.get(connection.id)}` : ""}\n客户端 ${connection.sourceIP || "未提供"} · 端口 ${connection.sourcePort || "未提供"}\n目标 ${connection.host || connection.destinationIP || "未提供"} · 端口 ${connection.destinationPort || "未提供"}\n开始 ${connection.startedAt || "未提供"}\n存续 ${connection.ageMs} ms · 出站 ${connection.outbound}\n上传 ${connection.uploadBytes} B · 下载 ${connection.downloadBytes} B`
+              ? `${connection.id} · ${connection.network}${deviceNames.has(connection.id) ? ` · ${deviceNames.get(connection.id)}` : ""}\n客户端 ${connection.sourceIP || "未提供"} · 端口 ${connection.sourcePort || "未提供"}\n目标 ${connection.host || connection.destinationIP || "未提供"} · 端口 ${connection.destinationPort || "未提供"}\n开始 ${connection.startedAt || "未提供"}\n存续 ${connection.ageMs} ms · 出站 ${connection.outbound}\n上传 ${formatBytes(connection.uploadBytes)} · 下载 ${formatBytes(connection.downloadBytes)}`
               : "";
           },
         },
@@ -136,8 +188,36 @@ export function ConnectionTimeline(props: TelemetryChartProps) {
       hasData={connections.length > 0}
       source={sourceLabel(props)}
       emptyLabel="无连接采样"
-      unavailable={emptyReason(props, "connections", "当前没有活动连接")}
-      summary={`${metrics && metrics.state !== "unavailable" ? metrics.activeConnections : "未知"} 个活动连接 · 列出 ${connections.length} 个${metrics?.truncated ? " · 连接列表已截断" : ""}`}
+      unavailable={emptyReason(
+        props,
+        "connections",
+        props.query ? "没有匹配的活动连接" : "当前没有活动连接",
+      )}
+      summary={`${metrics && metrics.state !== "unavailable" ? metrics.activeConnections : "未知"} 个活动连接 · 匹配 ${allConnections.length} 个 · 当前 ${connections.length} 个${metrics?.truncated ? " · 连接列表已截断" : ""}`}
+      controls={
+        allConnections.length > CONNECTION_PAGE_SIZE ? (
+          <nav aria-label="活动连接分页">
+            <button
+              type="button"
+              disabled={currentPage === 0}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              上一页
+            </button>
+            <span>
+              {" "}
+              第 {currentPage + 1} / {pageCount} 页{" "}
+            </span>
+            <button
+              type="button"
+              disabled={currentPage + 1 >= pageCount}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              下一页
+            </button>
+          </nav>
+        ) : undefined
+      }
       hint="横轴从最早可用开始时间计起 · 不推算 DNS、TCP 握手或 TLS 阶段"
       columns={[
         "连接 ID",
@@ -190,6 +270,15 @@ export function ProxyTrafficChart(props: TelemetryChartProps) {
     [metrics],
   );
   const latest = points.at(-1);
+  const scale = useMemo(
+    () =>
+      chooseByteScale(
+        points
+          .filter((point) => !point.reset)
+          .flatMap((point) => [point.uploadRate, point.downloadRate]),
+      ),
+    [points],
+  );
   const option = useMemo(
     () =>
       (p: ChartPalette): EChartsOption => ({
@@ -201,14 +290,37 @@ export function ProxyTrafficChart(props: TelemetryChartProps) {
           ...axisStyle(p),
           splitLine: { show: false },
         },
-        yAxis: { type: "value", name: "B/s", min: 0, ...axisStyle(p) },
+        yAxis: {
+          type: "value",
+          name: `${scale.unit}/s`,
+          min: 0,
+          ...axisStyle(p),
+          axisLabel: {
+            ...axisStyle(p).axisLabel,
+            formatter: formatByteAxisValue,
+          },
+        },
         dataZoom: zoomOption(p),
+        tooltip: {
+          ...baseOption(p).tooltip,
+          formatter: (parameters) => {
+            const items = Array.isArray(parameters) ? parameters : [parameters];
+            const rows = items.flatMap((item) =>
+              typeof item.value === "number"
+                ? [
+                    `${item.seriesName} ${formatByteAxisValue(item.value)} ${scale.unit}/s`,
+                  ]
+                : [],
+            );
+            return `${items[0]?.name ?? ""}\n${rows.join("\n")}`;
+          },
+        },
         series: [
           {
             type: "line",
             name: "上传",
             data: points.map((point) =>
-              point.reset ? null : point.uploadRate,
+              point.reset ? null : byteNumber(point.uploadRate, scale),
             ),
             connectNulls: false,
             showSymbol: true,
@@ -220,7 +332,7 @@ export function ProxyTrafficChart(props: TelemetryChartProps) {
             type: "line",
             name: "下载",
             data: points.map((point) =>
-              point.reset ? null : point.downloadRate,
+              point.reset ? null : byteNumber(point.downloadRate, scale),
             ),
             connectNulls: false,
             showSymbol: true,
@@ -231,7 +343,7 @@ export function ProxyTrafficChart(props: TelemetryChartProps) {
           },
         ],
       }),
-    [points],
+    [points, scale],
   );
   return (
     <ChartFrame
@@ -246,15 +358,24 @@ export function ProxyTrafficChart(props: TelemetryChartProps) {
         latest
           ? latest.reset
             ? "最新样本为计数器重置，等待下一次速率采样"
-            : `最新上传 ${latest.uploadRate} B/s · 下载 ${latest.downloadRate} B/s · ${points.length} 个采样点`
+            : `最新上传 ${formatByteRate(latest.uploadRate, scale)} · 下载 ${formatByteRate(latest.downloadRate, scale)} · ${points.length} 个采样点`
           : undefined
       }
       hint="核心总流量（含直连） · 最近 900 点内存 / 默认约 30 分钟，重启清空，非 WAN 持久历史 · 计数器重置处留空"
-      columns={["时间", "上传 / B/s", "下载 / B/s", "采样状态"]}
+      columns={[
+        "时间",
+        `上传 / ${scale.unit}/s`,
+        `下载 / ${scale.unit}/s`,
+        "采样状态",
+      ]}
       rows={points.map((point) => [
         point.time,
-        point.reset ? "—" : point.uploadRate,
-        point.reset ? "—" : point.downloadRate,
+        point.reset
+          ? "—"
+          : formatByteAxisValue(point.uploadRate / scale.divisor),
+        point.reset
+          ? "—"
+          : formatByteAxisValue(point.downloadRate / scale.divisor),
         point.reset ? "计数器重置" : "速率采样",
       ])}
     >
@@ -364,15 +485,27 @@ export function ProbeLatencyChart(props: TelemetryChartProps) {
 
 export function ActiveRoutingChart(props: TelemetryChartProps) {
   const { metrics } = props;
+  const deviceNames = useConnectionDeviceNames(metrics);
   const groups = useMemo(() => {
     if (!observed(metrics, "routing") || !observed(metrics, "connections"))
       return [];
     const counts = new Map<
       string,
-      { ruleId: string; rule: string; outbound: string; count: number }
+      {
+        ruleId: string;
+        rule: string;
+        outbound: string;
+        sourceIP: string;
+        deviceName: string;
+        count: number;
+      }
     >();
     for (const connection of metrics!.connections) {
+      const deviceName = deviceNames.get(connection.id) || "";
+      if (!connectionMatches(connection, props.query ?? "", deviceName))
+        continue;
       const key = JSON.stringify([
+        connection.sourceIP,
         connection.ruleId,
         connection.rule,
         connection.outbound,
@@ -381,6 +514,8 @@ export function ActiveRoutingChart(props: TelemetryChartProps) {
       if (group) group.count++;
       else
         counts.set(key, {
+          sourceIP: connection.sourceIP,
+          deviceName,
           ruleId: connection.ruleId,
           rule: connection.rule,
           outbound: connection.outbound,
@@ -388,7 +523,7 @@ export function ActiveRoutingChart(props: TelemetryChartProps) {
         });
     }
     return [...counts.values()].sort((a, b) => b.count - a.count);
-  }, [metrics]);
+  }, [metrics, props.query, deviceNames]);
   const option = useMemo(
     () =>
       (p: ChartPalette): EChartsOption => ({
@@ -407,7 +542,7 @@ export function ActiveRoutingChart(props: TelemetryChartProps) {
           inverse: true,
           data: groups.map(
             (group) =>
-              `${group.rule || group.ruleId || "未提供规则"} · ${group.outbound}`,
+              `${group.deviceName || group.sourceIP || "来源未知"} · ${group.rule || group.ruleId || "未提供规则"} · ${group.outbound}`,
           ),
           ...axisStyle(p),
           axisLabel: { color: p.text, width: 180, overflow: "truncate" },
@@ -421,7 +556,7 @@ export function ActiveRoutingChart(props: TelemetryChartProps) {
             const item = Array.isArray(parameters) ? parameters[0] : parameters;
             const group = groups[item.dataIndex];
             return group
-              ? `${group.ruleId || "未提供规则"} · ${group.rule || "未提供规则描述"}\n出站 ${group.outbound} · ${group.count} 个已观察活动连接`
+              ? `${group.deviceName || group.sourceIP || "来源未知"} · ${group.sourceIP || "IP 未提供"}\n${group.ruleId || "未提供规则"} · ${group.rule || "未提供规则描述"}\n出站 ${group.outbound} · ${group.count} 个已观察活动连接`
               : "";
           },
         },
@@ -461,8 +596,17 @@ export function ActiveRoutingChart(props: TelemetryChartProps) {
       )}
       summary={`${groups.length} 个规则 / 出站组合 · ${groups.reduce((total, group) => total + group.count, 0)} 个已观察活动连接${metrics?.truncated ? " · 连接列表已截断，仅统计列出的连接" : ""}`}
       hint="只统计本次快照中的活动连接，不代表历史请求数或累计规则命中"
-      columns={["规则 ID", "规则", "出站", "已观察活动连接数"]}
+      columns={[
+        "来源设备",
+        "来源 IP",
+        "规则 ID",
+        "规则",
+        "出站",
+        "已观察活动连接数",
+      ]}
       rows={groups.map((group) => [
+        group.deviceName || "未关联设备",
+        group.sourceIP || "来源未知",
         group.ruleId || "未提供",
         group.rule || "未提供",
         group.outbound,

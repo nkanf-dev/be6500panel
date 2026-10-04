@@ -71,7 +71,7 @@ describe("observed homepage widgets", () => {
     render(<SystemSummaryWidget />);
     expect(screen.getByText("0.25")).toBeInTheDocument();
     expect(screen.getByText("75.0")).toBeInTheDocument();
-    expect(screen.getByText("768 B / 1.0 KiB")).toBeInTheDocument();
+    expect(screen.getByText("768 B / 1.02 KB")).toBeInTheDocument();
     expect(screen.getByText("上次采样")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("sampling interrupted");
     expect(screen.queryByText("实时采样")).not.toBeInTheDocument();

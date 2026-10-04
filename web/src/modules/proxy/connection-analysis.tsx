@@ -29,6 +29,7 @@ export function ConnectionAnalysis() {
 function ActualConnectionAnalysis() {
   const telemetry = useProxyTelemetry();
   const [view, setView] = useState("connections");
+  const [query, setQuery] = useState("");
   const { data, error, loading, refresh, probe, probing } = telemetry;
   const failed = error !== undefined;
   const stale = data?.state === "stale" || (failed && !!data);
@@ -37,7 +38,7 @@ function ActualConnectionAnalysis() {
     data.capabilities.latency.available &&
     !loading &&
     !probing;
-  const chartProps = { metrics: data, loading, failed };
+  const chartProps = { metrics: data, loading, failed, query };
   return (
     <div className="page-stack">
       <div className="section-heading">
@@ -64,6 +65,18 @@ function ActualConnectionAnalysis() {
           请求阶段不可用：{data.capabilities.requestPhases.reason}
           。活动连接存续时长不等于请求耗时。
         </p>
+      )}
+      {(view === "connections" || view === "rules") && (
+        <label>
+          搜索连接
+          <input
+            type="search"
+            aria-label="搜索连接"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="设备、IP、网站、端口、规则或出口"
+          />
+        </label>
       )}
       <div className="segmented" role="tablist" aria-label="连接分析视图">
         {[

@@ -70,7 +70,7 @@ describe("service status observation view", () => {
     expect(screen.getByText("脚本存在")).not.toHaveClass("badge-success");
     expect(screen.getByText("/usr/sbin/dnsmasq")).toBeInTheDocument();
     expect(screen.getByText("0 时 2 分")).toBeInTheDocument();
-    expect(screen.getByText("2.0 MiB")).toBeInTheDocument();
+    expect(screen.getByText("2.1 MB")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "查看诊断与日志" }),
     ).toHaveAttribute("href", "#/system?tab=diagnostics");

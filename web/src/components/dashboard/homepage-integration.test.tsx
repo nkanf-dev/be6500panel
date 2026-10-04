@@ -170,8 +170,8 @@ describe("custom homepage with real widget integration", () => {
     expect(screen.getByRole("button", { name: "导出 CSV" })).toBeEnabled();
     const proxy = screen.getByRole("region", { name: "代理遥测" });
     expect(within(proxy).getByText("3")).toBeInTheDocument();
-    expect(within(proxy).getByText("8.0 KiB")).toBeInTheDocument();
-    expect(within(proxy).getByText("64.0 KiB")).toBeInTheDocument();
+    expect(within(proxy).getByText("8.19 KB")).toBeInTheDocument();
+    expect(within(proxy).getByText("65.54 KB")).toBeInTheDocument();
     expect(within(proxy).getByText("512 / 4096 B/s")).toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: "设备活跃热力图" }),
