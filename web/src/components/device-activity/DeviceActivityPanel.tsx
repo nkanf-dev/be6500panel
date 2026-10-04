@@ -10,7 +10,7 @@ import {
   deviceActivityRangeSeconds,
   type DeviceActivityRange,
 } from "../../lib/device-activity-contracts";
-import { bytes } from "../../lib/format";
+import { formatByteRate, formatBytes } from "../../lib/byte-scale";
 import { Badge, Button, ErrorState } from "../ui/primitives";
 import {
   ActivityHeatmap,
@@ -26,11 +26,6 @@ export interface DeviceActivityPanelProps {
   demo?: boolean;
   onSelectDevice?: (id: string) => void;
   getDeviceName?: (mac: string, hostname: string) => string;
-}
-function rate(value: number | undefined): string {
-  return value === undefined
-    ? "—"
-    : `${value.toLocaleString("en-US", { maximumFractionDigits: 3 })} B/s`;
 }
 const stateLabels = {
   waiting: "等待积累",
@@ -288,10 +283,10 @@ export function DeviceActivityPanel({
                 <tr>
                   <th scope="col">接口</th>
                   <th scope="col">设备数</th>
-                  <th scope="col">范围 RX / bytes</th>
-                  <th scope="col">范围 TX / bytes</th>
-                  <th scope="col">最新 RX / B/s</th>
-                  <th scope="col">最新 TX / B/s</th>
+                  <th scope="col">范围 RX 总量</th>
+                  <th scope="col">范围 TX 总量</th>
+                  <th scope="col">最新 RX 速率</th>
+                  <th scope="col">最新 TX 速率</th>
                 </tr>
               </thead>
               <tbody>
@@ -313,25 +308,25 @@ export function DeviceActivityPanel({
                           groupCovered ? `${group.rxBytes} bytes` : undefined
                         }
                       >
-                        {groupCovered ? bytes(group.rxBytes) : "—"}
+                        {groupCovered ? formatBytes(group.rxBytes) : "—"}
                       </td>
                       <td
                         title={
                           groupCovered ? `${group.txBytes} bytes` : undefined
                         }
                       >
-                        {groupCovered ? bytes(group.txBytes) : "—"}
+                        {groupCovered ? formatBytes(group.txBytes) : "—"}
                       </td>
                       <td>
-                        {rate(
-                          sourceRatesUnavailable
+                        {formatByteRate(
+                          !groupCovered || sourceRatesUnavailable
                             ? undefined
                             : group.rxBytesPerSecond,
                         )}
                       </td>
                       <td>
-                        {rate(
-                          sourceRatesUnavailable
+                        {formatByteRate(
+                          !groupCovered || sourceRatesUnavailable
                             ? undefined
                             : group.txBytesPerSecond,
                         )}
@@ -367,10 +362,10 @@ export function DeviceActivityPanel({
                   <th scope="col">设备 / MAC</th>
                   <th scope="col">地址 / 接口</th>
                   <th scope="col">关联与新鲜度</th>
-                  <th scope="col">范围 RX / bytes</th>
-                  <th scope="col">范围 TX / bytes</th>
-                  <th scope="col">最新 RX / B/s</th>
-                  <th scope="col">最新 TX / B/s</th>
+                  <th scope="col">范围 RX 总量</th>
+                  <th scope="col">范围 TX 总量</th>
+                  <th scope="col">最新 RX 速率</th>
+                  <th scope="col">最新 TX 速率</th>
                   <th scope="col">范围覆盖 / 秒</th>
                   <th scope="col">最后观察（UTC）</th>
                 </tr>
@@ -423,7 +418,7 @@ export function DeviceActivityPanel({
                         }
                       >
                         {device.coverageSeconds > 0
-                          ? bytes(device.rxBytes)
+                          ? formatBytes(device.rxBytes)
                           : "—"}
                       </td>
                       <td
@@ -434,11 +429,23 @@ export function DeviceActivityPanel({
                         }
                       >
                         {device.coverageSeconds > 0
-                          ? bytes(device.txBytes)
+                          ? formatBytes(device.txBytes)
                           : "—"}
                       </td>
-                      <td>{rate(old ? undefined : device.rxBytesPerSecond)}</td>
-                      <td>{rate(old ? undefined : device.txBytesPerSecond)}</td>
+                      <td>
+                        {formatByteRate(
+                          old || device.coverageSeconds <= 0
+                            ? undefined
+                            : device.rxBytesPerSecond,
+                        )}
+                      </td>
+                      <td>
+                        {formatByteRate(
+                          old || device.coverageSeconds <= 0
+                            ? undefined
+                            : device.txBytesPerSecond,
+                        )}
+                      </td>
                       <td>
                         {device.coverageSeconds} 秒 · {coverage.toFixed(1)}%
                       </td>

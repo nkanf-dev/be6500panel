@@ -59,11 +59,11 @@ describe("passive device activity panel", () => {
       ),
     ).toBeTruthy();
     const table = screen.getByRole("table", { name: /设备流量 ·/ });
-    expect(within(table).getByText("1.0 KiB")).toHaveAttribute(
+    expect(within(table).getByText("1.02 KB")).toHaveAttribute(
       "title",
       "1024 bytes",
     );
-    expect(within(table).getByText("2.0 KiB")).toHaveAttribute(
+    expect(within(table).getByText("2.05 KB")).toHaveAttribute(
       "title",
       "2048 bytes",
     );
@@ -74,6 +74,66 @@ describe("passive device activity panel", () => {
       screen.queryByRole("option", { name: /请求|Connections|活跃连接/ }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: /诊断|探测/ })).toBeNull();
+  });
+  it("formats large totals and latest rates adaptively with raw titles and unchanged counts/coverage", () => {
+    const fixture = activityFixture();
+    const device = {
+      ...fixture.devices[0],
+      rxBytes: 2e9,
+      txBytes: 1e12,
+      rxBytesPerSecond: 1.234567e9,
+      txBytesPerSecond: 2e6,
+    };
+    const group = {
+      ...fixture.groups[0],
+      rxBytes: 2e9,
+      txBytes: 1e12,
+      rxBytesPerSecond: 1000,
+      txBytesPerSecond: 2e9,
+    };
+    hook.mockReturnValue(
+      result({ ...fixture, devices: [device], groups: [group] }),
+    );
+    render(<DeviceActivityPanel />);
+    const devices = screen.getByRole("table", { name: /设备流量 ·/ });
+    expect(within(devices).getByText("2 GB")).toHaveAttribute(
+      "title",
+      "2000000000 bytes",
+    );
+    expect(within(devices).getByText("1 TB")).toHaveAttribute(
+      "title",
+      "1000000000000 bytes",
+    );
+    expect(within(devices).getByText("1.23 GB/s")).toBeTruthy();
+    expect(within(devices).getByText("2 MB/s")).toBeTruthy();
+    expect(within(devices).getByText("3600 秒 · 4.2%")).toBeTruthy();
+    const groups = screen.getByRole("table", { name: /系统接口分组/ });
+    expect(within(groups).getByText("1 KB/s")).toBeTruthy();
+    expect(within(groups).getByText("2 GB/s")).toBeTruthy();
+    expect(within(groups).getByText("1")).toBeTruthy();
+    expect(device.rxBytes).toBe(2e9);
+  });
+  it("leaves malformed/missing latest rates unavailable instead of reporting zero", () => {
+    const fixture = activityFixture();
+    const device = {
+      ...fixture.devices[0],
+      rxBytesPerSecond: NaN,
+      txBytesPerSecond: -1,
+    };
+    const group = {
+      ...fixture.groups[0],
+      rxBytesPerSecond: Infinity,
+      txBytesPerSecond: undefined,
+    };
+    hook.mockReturnValue(
+      result({ ...fixture, devices: [device], groups: [group] }),
+    );
+    render(<DeviceActivityPanel />);
+    const devices = screen.getByRole("table", { name: /设备流量 ·/ });
+    const groups = screen.getByRole("table", { name: /系统接口分组/ });
+    expect(within(devices).getAllByText("—")).toHaveLength(2);
+    expect(within(groups).getAllByText("—")).toHaveLength(2);
+    expect(within(devices).queryByText("0 B/s")).toBeNull();
   });
   it("changes real range and submits a bounded search with native Enter/form controls", () => {
     render(<DeviceActivityPanel />);
@@ -154,7 +214,7 @@ describe("passive device activity panel", () => {
     expect(screen.getByText("采样陈旧")).toBeTruthy();
     expect(screen.getByText(/源采样或部分设备记录陈旧/)).toBeTruthy();
     const table = screen.getByRole("table", { name: /设备流量 ·/ });
-    expect(within(table).getByText("1.0 KiB")).toBeTruthy();
+    expect(within(table).getByText("1.02 KB")).toBeTruthy();
     expect(within(table).queryByText("10 B/s")).toBeNull();
     expect(within(table).getAllByText("—")).toHaveLength(2);
   });
@@ -182,7 +242,7 @@ describe("passive device activity panel", () => {
       .closest("tr")!;
     expect(within(baselineRow).queryByText("0 B")).toBeNull();
     expect(within(baselineRow).getAllByText("—")).toHaveLength(4);
-    expect(within(table).getByText("1.0 KiB")).toBeTruthy();
+    expect(within(table).getByText("1.02 KB")).toBeTruthy();
   });
   it("suppresses latest rates while source unavailable even if historical totals remain", () => {
     hook.mockReturnValue(
@@ -191,7 +251,7 @@ describe("passive device activity panel", () => {
     render(<DeviceActivityPanel />);
     expect(screen.queryAllByText("10 B/s")).toHaveLength(0);
     expect(screen.queryAllByText("20 B/s")).toHaveLength(0);
-    expect(screen.getAllByText("1.0 KiB").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1.02 KB").length).toBeGreaterThan(0);
   });
   it("does not report baseline counters as measured zero flow or rate", () => {
     const fixture = activityFixture();

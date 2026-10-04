@@ -4,7 +4,7 @@ import { TrafficTrend } from "../visualizations";
 import { ChartSelect } from "../visualizations/ChartFrame";
 import { Button, ErrorState } from "../ui/primitives";
 import { errorMessage } from "../../lib/api";
-import { bytes } from "../../lib/format";
+import { formatBytes } from "../../lib/byte-scale";
 import {
   TRAFFIC_HISTORY_RANGES,
   trafficHistoryRangeLabels,
@@ -115,7 +115,7 @@ export function TrafficHistoryPanel({
                   <dt>范围 RX 总量</dt>
                   <dd title={`${data.summary.rxBytes} bytes`}>
                     {data.summary.coverageSeconds > 0
-                      ? bytes(data.summary.rxBytes)
+                      ? formatBytes(data.summary.rxBytes)
                       : "—"}
                   </dd>
                 </div>
@@ -123,7 +123,7 @@ export function TrafficHistoryPanel({
                   <dt>范围 TX 总量</dt>
                   <dd title={`${data.summary.txBytes} bytes`}>
                     {data.summary.coverageSeconds > 0
-                      ? bytes(data.summary.txBytes)
+                      ? formatBytes(data.summary.txBytes)
                       : "—"}
                   </dd>
                 </div>

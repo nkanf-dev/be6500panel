@@ -41,6 +41,12 @@ const options = () =>
   option(palette) as {
     xAxis: { data: string[] };
     yAxis: { data: string[] };
+    visualMap: {
+      min: number;
+      max: number;
+      text: string[];
+      formatter: (value: number) => string;
+    };
     series: { name: string; data: number[][] }[];
     tooltip: { formatter: (parameter: unknown) => string };
   };
@@ -60,14 +66,14 @@ describe("truthful device byte heatmap", () => {
       "2026-10-03T02:00:00.000Z",
     ]);
     expect(chart.series[0]).toMatchObject({
-      name: "RX + TX / bytes",
+      name: "RX + TX / KB",
       data: [
-        [0, 0, 3072],
+        [0, 0, 3.072],
         [2, 0, 0],
       ],
     });
-    expect(chart.tooltip.formatter({ value: [0, 0, 3072] })).toContain(
-      "3072 bytes",
+    expect(chart.tooltip.formatter({ value: [0, 0, 3.072] })).toContain(
+      "3.07 KB",
     );
     expect(chart.tooltip.formatter({ value: [2, 0, 0] })).toContain("部分采样");
     expect(screen.queryByText("演示数据")).toBeNull();
@@ -76,8 +82,94 @@ describe("truthful device byte heatmap", () => {
     const table = screen.getByRole("table");
     expect(within(table).getByText("未采样")).toBeTruthy();
     expect(within(table).getByText("部分采样")).toBeTruthy();
-    expect(within(table).getAllByText("0")).toHaveLength(3);
+    expect(within(table).getAllByText("0 B")).toHaveLength(2);
+    expect(within(table).getByText("0")).toBeTruthy();
     expect(within(table).getAllByText("—")).toHaveLength(2);
+  });
+  it("shares a decimal scale across heat cells and color labels without changing raw byte counters", () => {
+    const base = activityFixture().devices[0];
+    const samples = Object.freeze([
+      Object.freeze({
+        time: "2026-10-03T00:00:00Z",
+        rxBytes: 2e9,
+        txBytes: 0,
+        coverageSeconds: 30,
+      }),
+      Object.freeze({
+        time: "2026-10-03T01:00:00Z",
+        rxBytes: 1,
+        txBytes: 0,
+        coverageSeconds: 30,
+      }),
+      Object.freeze({
+        time: "2026-10-03T02:00:00Z",
+        rxBytes: 0,
+        txBytes: 0,
+        coverageSeconds: 30,
+      }),
+      Object.freeze({
+        time: "2026-10-03T03:00:00Z",
+        rxBytes: null,
+        txBytes: 10,
+        coverageSeconds: 30,
+      }),
+    ]);
+    render(<ActivityHeatmap devices={[{ ...base, samples }]} />);
+    const chart = options();
+    expect(chart.series[0].data).toEqual([
+      [0, 0, 2],
+      [1, 0, 1e-9],
+      [2, 0, 0],
+    ]);
+    expect(chart.visualMap.text).toEqual(["2 GB", "0 GB"]);
+    expect(chart.visualMap.max).toBe(2);
+    expect(chart.visualMap.formatter(1.234567)).toBe("1.23 GB");
+    expect(chart.tooltip.formatter({ value: [1, 0, 1e-9] })).toContain(
+      "<0.01 GB",
+    );
+    expect(samples[0].rxBytes).toBe(2e9);
+    expect(screen.getByText(/已测量 2 GB/)).toBeTruthy();
+  });
+  it("uses B for a measured fractional byte cell and rejects invalid values instead of plotting zero", () => {
+    const base = activityFixture().devices[0];
+    render(
+      <ActivityHeatmap
+        devices={[
+          {
+            ...base,
+            samples: [
+              {
+                time: "2026-10-03T00:00:00Z",
+                rxBytes: 0.25,
+                txBytes: 0,
+                coverageSeconds: 30,
+              },
+              {
+                time: "2026-10-03T01:00:00Z",
+                rxBytes: NaN,
+                txBytes: 1,
+                coverageSeconds: 30,
+              },
+              {
+                time: "2026-10-03T02:00:00Z",
+                rxBytes: -1,
+                txBytes: 1,
+                coverageSeconds: 30,
+              },
+              {
+                time: "2026-10-03T03:00:00Z",
+                rxBytes: Infinity,
+                txBytes: 1,
+                coverageSeconds: 30,
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+    expect(options().series[0].data).toEqual([[0, 0, 0.25]]);
+    expect(options().visualMap.text).toEqual(["0.25 B", "0 B"]);
+    expect(options().visualMap.max).toBe(0.25);
   });
   it("uses vendor RX and TX without calling them download or upload", () => {
     render(<ActivityHeatmap devices={activityFixture().devices} />);
@@ -85,14 +177,14 @@ describe("truthful device byte heatmap", () => {
       target: { value: "rx" },
     });
     expect(options().series[0].data).toEqual([
-      [0, 0, 1024],
+      [0, 0, 1.024],
       [2, 0, 0],
     ]);
     fireEvent.change(screen.getByLabelText("字节方向"), {
       target: { value: "tx" },
     });
     expect(options().series[0].data).toEqual([
-      [0, 0, 2048],
+      [0, 0, 2.048],
       [2, 0, 0],
     ]);
     expect(screen.queryByText(/请求|下载|上传/)).toBeNull();
@@ -215,7 +307,7 @@ describe("truthful device byte heatmap", () => {
   it("labels its own neutral demo byte shape and readable table, never requests", () => {
     render(<ActivityHeatmap demo />);
     expect(screen.getByText("演示数据")).toBeTruthy();
-    expect(options().series[0].name).toBe("RX + TX / bytes");
+    expect(options().series[0].name).toBe("RX + TX / KB");
     expect(screen.queryByText(/请求/)).toBeNull();
     fireEvent.change(screen.getByLabelText("终端"), {
       target: { value: "sample-2" },

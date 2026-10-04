@@ -98,8 +98,8 @@ describe("durable history panel", () => {
   it("shows exact counter totals, recording start, retention, persistence, coverage and resolution", async () => {
     load.mockResolvedValue(historyFixture());
     renderPanel();
-    await screen.findByText("42.9 MiB");
-    expect(screen.getByText("21.5 MiB")).toBeInTheDocument();
+    await screen.findByText("45 MB");
+    expect(screen.getByText("22.5 MB")).toBeInTheDocument();
     expect(screen.getByText("1 分钟 · 3.3%")).toBeInTheDocument();
     expect(screen.getByText("30 秒")).toBeInTheDocument();
     expect(screen.getByText("400 天")).toBeInTheDocument();
@@ -115,6 +115,36 @@ describe("durable history panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "导出 CSV" }));
     expect(downloadTrafficHistory).toHaveBeenCalledWith(historyFixture());
   });
+  it("keeps adaptive total units distinct from chart rates and sends unchanged raw values to export", async () => {
+    const history = historyFixture();
+    const summary = { rxBytes: 2e9, txBytes: 1e12, coverageSeconds: 60 };
+    const raw = { ...history, summary };
+    load.mockResolvedValue(raw);
+    renderPanel();
+    const total = await screen.findByText("2 GB");
+    expect(total).toHaveAttribute("title", "2000000000 bytes");
+    expect(screen.getByText("1 TB")).toHaveAttribute(
+      "title",
+      "1000000000000 bytes",
+    );
+    expect(screen.getByText("1 分钟 · 3.3%")).toBeTruthy();
+    expect(screen.getByText("最新 RX 0.5 MB/s · TX 0.25 MB/s")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "导出 CSV" }));
+    expect(downloadTrafficHistory).toHaveBeenCalledWith(raw);
+    expect(summary.rxBytes).toBe(2e9);
+  });
+  it("does not turn malformed measured totals into zero", async () => {
+    const history = historyFixture();
+    load.mockResolvedValue({
+      ...history,
+      summary: { rxBytes: NaN, txBytes: -1, coverageSeconds: 60 },
+    });
+    renderPanel();
+    await screen.findByText("1 分钟 · 3.3%");
+    const metadata = screen.getByText("范围 RX 总量").closest("dl")!;
+    expect(within(metadata).getAllByText("—")).toHaveLength(2);
+    expect(within(metadata).queryByText("0 B")).toBeNull();
+  });
   it("clears stale totals/table/export when selecting a different range", async () => {
     let resolve!: (value: ReturnType<typeof historyFixture>) => void;
     load.mockResolvedValueOnce(historyFixture()).mockImplementationOnce(
@@ -124,11 +154,11 @@ describe("durable history panel", () => {
         }),
     );
     renderPanel();
-    await screen.findByText("42.9 MiB");
+    await screen.findByText("45 MB");
     fireEvent.change(screen.getByLabelText("时间范围"), {
       target: { value: "1y" },
     });
-    expect(screen.queryByText("42.9 MiB")).not.toBeInTheDocument();
+    expect(screen.queryByText("45 MB")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("table", { hidden: true }),
     ).not.toBeInTheDocument();
@@ -211,7 +241,7 @@ describe("durable history panel", () => {
     await screen.findByRole("alert");
     expect(screen.getByRole("status")).toHaveTextContent("流量历史读取失败");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await screen.findByText("42.9 MiB");
+    await screen.findByText("45 MB");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("keeps fixed demo samples explicit and never queries or exports them as real history", () => {

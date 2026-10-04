@@ -8,7 +8,12 @@ import {
   type DeviceActivityDevice,
   type DeviceActivityPoint,
 } from "../../lib/device-activity-contracts";
-import { bytes } from "../../lib/format";
+import {
+  byteNumber,
+  chooseByteScale,
+  formatByteAxisValue,
+  formatBytes,
+} from "../../lib/byte-scale";
 
 export type DeviceByteMetric = "total" | "rx" | "tx";
 export interface ActivityHeatmapProps extends VisualizationProps {
@@ -48,12 +53,14 @@ export function measuredDeviceBytes(
   point: DeviceActivityPoint,
   metric: DeviceByteMetric,
 ): number | null {
-  if (point.coverageSeconds <= 0) return null;
-  if (metric === "rx") return point.rxBytes;
-  if (metric === "tx") return point.txBytes;
-  return point.rxBytes !== null && point.txBytes !== null
-    ? point.rxBytes + point.txBytes
-    : null;
+  if (!Number.isFinite(point.coverageSeconds) || point.coverageSeconds <= 0)
+    return null;
+  const rawScale = { unit: "B" as const, divisor: 1 };
+  const rx = byteNumber(point.rxBytes, rawScale);
+  const tx = byteNumber(point.txBytes, rawScale);
+  if (metric === "rx") return rx;
+  if (metric === "tx") return tx;
+  return rx !== null && tx !== null ? byteNumber(rx + tx, rawScale) : null;
 }
 const metricLabels: Record<DeviceByteMetric, string> = {
   total: "RX + TX",
@@ -101,6 +108,13 @@ export function ActivityHeatmap({
     [samples],
   );
   const measured = samples.filter((item) => item.value !== null);
+  const byteScale = useMemo(
+    () =>
+      chooseByteScale(
+        samples.flatMap((item) => (item.value === null ? [] : [item.value])),
+      ),
+    [samples],
+  );
   const hasData = available.length > 0;
   const partial = (point: DeviceActivityPoint) =>
     !!resolutionSeconds && point.coverageSeconds < resolutionSeconds;
@@ -110,9 +124,19 @@ export function ActivityHeatmap({
         const cells = samples.flatMap((item) =>
           item.value === null
             ? []
-            : [[times.indexOf(item.time), item.row, item.value]],
+            : [
+                [
+                  times.indexOf(item.time),
+                  item.row,
+                  byteNumber(item.value, byteScale)!,
+                ],
+              ],
         );
-        const maximum = Math.max(1, ...cells.map((item) => item[2]));
+        const measuredMaximum = cells.reduce(
+          (maximum, item) => Math.max(maximum, item[2]),
+          0,
+        );
+        const maximum = measuredMaximum || 1;
         return {
           ...baseOption(p),
           legend: { show: false },
@@ -160,7 +184,14 @@ export function ActivityHeatmap({
             itemWidth: 10,
             itemHeight: 100,
             calculable: false,
-            text: [bytes(maximum), "0 B"],
+            text: [
+              formatBytes(measuredMaximum * byteScale.divisor, byteScale),
+              formatBytes(0, byteScale),
+            ],
+            formatter: (value) =>
+              typeof value === "number"
+                ? `${formatByteAxisValue(value)} ${byteScale.unit}`
+                : "—",
             textStyle: { color: p.text, fontSize: 10 },
             inRange: { color: [p.heatLow, p.heatHigh] },
           },
@@ -175,14 +206,14 @@ export function ActivityHeatmap({
                   sample.row === values[1] && sample.time === times[values[0]],
               );
               return match
-                ? `${match.device.name || match.device.id} · ${match.device.id}\n${match.time} (UTC)\n${metricLabels[metric]} ${values[2]} bytes\n覆盖 ${match.point.coverageSeconds} 秒${resolutionSeconds && match.point.coverageSeconds < resolutionSeconds ? " · 部分采样" : ""}${match.device.stale ? "\n设备记录陈旧" : ""}`
+                ? `${match.device.name || match.device.id} · ${match.device.id}\n${match.time} (UTC)\n${metricLabels[metric]} ${formatBytes(match.value, byteScale)}\n覆盖 ${match.point.coverageSeconds} 秒${resolutionSeconds && match.point.coverageSeconds < resolutionSeconds ? " · 部分采样" : ""}${match.device.stale ? "\n设备记录陈旧" : ""}`
                 : "";
             },
           },
           series: [
             {
               type: "heatmap",
-              name: `${metricLabels[metric]} / bytes`,
+              name: `${metricLabels[metric]} / ${byteScale.unit}`,
               data: cells,
               itemStyle: { borderWidth: 1, borderColor: p.surface },
               emphasis: {
@@ -192,19 +223,19 @@ export function ActivityHeatmap({
           ],
         };
       },
-    [samples, times, devices, metric, resolutionSeconds],
+    [samples, times, devices, metric, resolutionSeconds, byteScale],
   );
   const source = "数据源：系统流量统计 (trafficd)";
   return (
     <ChartFrame
       title="设备活跃热力图"
-      subtitle="展示局域网各设备在不同时段的流量分布与活跃状态 · 流量 (Bytes) · UTC"
+      subtitle={`展示局域网各设备在不同时段的流量分布与活跃状态 · 流量 (${byteScale.unit}) · UTC`}
       demo={isDemo}
       hasData={hasData}
       source={source}
       emptyLabel={source}
       unavailable={unavailable}
-      summary={`${devices.length} 个${isDemo ? "样本" : ""}设备 · ${measured.length ? `${metricLabels[metric]} 已测量 ${measured.reduce((sum, item) => sum + (item.value ?? 0), 0)} bytes` : `${metricLabels[metric]} 尚无已测量字节（不是零流量）`}${available.length > devices.length && selected === "all" ? ` · 图表仅显示前 ${DEVICE_ACTIVITY_CHART_ROWS} 个，使用设备筛选查看其他行` : ""}`}
+      summary={`${devices.length} 个${isDemo ? "样本" : ""}设备 · ${measured.length ? `${metricLabels[metric]} 已测量 ${formatBytes(measured.reduce((sum, item) => sum + (item.value ?? 0), 0))}` : `${metricLabels[metric]} 尚无已测量字节（不是零流量）`}${available.length > devices.length && selected === "all" ? ` · 图表仅显示前 ${DEVICE_ACTIVITY_CHART_ROWS} 个，使用设备筛选查看其他行` : ""}`}
       controls={
         <>
           <ChartSelect label="终端" value={selected} onChange={setDevice}>
@@ -231,8 +262,8 @@ export function ActivityHeatmap({
         "终端",
         "身份",
         "时间（UTC 桶起点）",
-        "RX / bytes",
-        "TX / bytes",
+        "RX 总量",
+        "TX 总量",
         "覆盖 / 秒",
         "采样状态",
       ]}
@@ -240,8 +271,8 @@ export function ActivityHeatmap({
         item.name || item.id,
         item.id,
         time,
-        point.coverageSeconds > 0 ? (point.rxBytes ?? "—") : "—",
-        point.coverageSeconds > 0 ? (point.txBytes ?? "—") : "—",
+        formatBytes(measuredDeviceBytes(point, "rx")),
+        formatBytes(measuredDeviceBytes(point, "tx")),
         point.coverageSeconds,
         `${value === null ? "未采样" : partial(point) ? "部分采样" : "已采样"}${item.stale ? " · 设备陈旧" : ""}`,
       ])}

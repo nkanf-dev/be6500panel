@@ -41,7 +41,10 @@ interface OptionView {
     data: (number | null | [number, number | null])[];
     connectNulls?: boolean;
   }[];
-  yAxis: { name: string }[];
+  yAxis: {
+    name: string;
+    axisLabel?: { formatter: (value: number) => string };
+  }[];
   xAxis: {
     type: string;
     data: string[];
@@ -76,7 +79,7 @@ function renderTraffic(
 }
 
 describe("TrafficTrend actual interface samples", () => {
-  it("renders real bytes/s in MB/s without demo samples or latency", () => {
+  it("renders real bytes/s on one adaptive MB/s axis without demo samples or latency", () => {
     renderTraffic(points);
     expect(
       screen.getByText("接口采样", { selector: ".viz-source" }),
@@ -85,7 +88,7 @@ describe("TrafficTrend actual interface samples", () => {
     expect(screen.queryByText("演示数据")).toBeNull();
     expect(screen.queryByText("来源：固定样本")).toBeNull();
     expect(screen.queryByLabelText("指标")).toBeNull();
-    expect(screen.getByText("最新 RX 2.000 MB/s · TX 0.750 MB/s")).toBeTruthy();
+    expect(screen.getByText("最新 RX 2 MB/s · TX 0.75 MB/s")).toBeTruthy();
     const option = currentOption();
     expect(option.series.map((series) => series.name)).toEqual(["RX", "TX"]);
     expect(option.series[0].data).toEqual([1.25, 2]);
@@ -100,7 +103,124 @@ describe("TrafficTrend actual interface samples", () => {
         .getAllByRole("columnheader", { hidden: true })
         .map((cell) => cell.textContent),
     ).toEqual(["时间", "RX / MB/s", "TX / MB/s"]);
-    expect(within(table).getByText("1.250")).toBeTruthy();
+    expect(within(table).getByText("1.25 MB/s")).toBeTruthy();
+  });
+  it.each([
+    [0, "B/s", 0],
+    [0.25, "B/s", 0.25],
+    [999, "B/s", 999],
+    [1000, "KB/s", 1],
+    [1023, "KB/s", 1.023],
+    [1e6, "MB/s", 1],
+    [1e9, "GB/s", 1],
+    [1e12, "TB/s", 1],
+  ])(
+    "chooses a consistent axis from actual %s B/s measurements",
+    (raw, unit, plotted) => {
+      const sample = Object.freeze({
+        time: "14:00:00",
+        rx: raw as number,
+        tx: 0,
+      });
+      renderTraffic([sample]);
+      expect(currentOption().yAxis[0].name).toBe(unit);
+      expect(currentOption().series[0].data).toEqual([plotted]);
+      expect(currentOption().series[1].data).toEqual([0]);
+      expect(sample.rx).toBe(raw);
+      expect(currentOption().yAxis[0].axisLabel?.formatter(1.234567)).toBe(
+        "1.23",
+      );
+    },
+  );
+  it("scales both directions together without rounding small positive rates or mutating raw samples", () => {
+    const samples = Object.freeze([
+      Object.freeze({ time: "14:00:00", rx: 2e9, tx: 0.25 }),
+      Object.freeze({ time: "14:00:05", rx: 1, tx: 2000 }),
+    ]);
+    renderTraffic(samples);
+    expect(currentOption().yAxis[0].name).toBe("GB/s");
+    expect(currentOption().series[0].data).toEqual([2, 1e-9]);
+    expect(currentOption().series[1].data).toEqual([2.5e-10, 0.000002]);
+    expect(screen.getByText("最新 RX <0.01 GB/s · TX <0.01 GB/s")).toBeTruthy();
+    expect(samples[0].tx).toBe(0.25);
+  });
+  it("keeps missing/invalid rates, peaks and totals unavailable instead of zero", () => {
+    renderTraffic([
+      {
+        time: "14:00:00",
+        rx: 1000,
+        tx: 0,
+        rxPeak: 2000,
+        txPeak: 0,
+        rxBytes: 9000,
+        txBytes: 0,
+        coverageSeconds: 30,
+      },
+      {
+        time: "14:00:05",
+        rx: null,
+        tx: NaN,
+        rxPeak: null,
+        txPeak: -1,
+        rxBytes: null,
+        txBytes: undefined,
+        coverageSeconds: 30,
+      },
+      { time: "14:00:10", rx: -1, tx: Infinity, coverageSeconds: 30 },
+    ]);
+    expect(currentOption().yAxis[0].name).toBe("KB/s");
+    expect(currentOption().series[0].data).toEqual([1, null, null]);
+    expect(currentOption().series[1].data).toEqual([0, null, null]);
+    expect(screen.getByText("最新 RX — · TX —")).toBeTruthy();
+    const table = screen.getByRole("table", { hidden: true });
+    const rows = within(table).getAllByRole("row", { hidden: true });
+    expect(within(rows[2]).getAllByText("—")).toHaveLength(6);
+    expect(within(rows[1]).getByText("9 KB")).toBeTruthy();
+    expect(within(rows[1]).getByText("2 KB/s")).toBeTruthy();
+    expect(
+      currentOption().tooltip.formatter([
+        { name: "14:00:05", seriesName: "RX", value: null },
+        { name: "14:00:05", seriesName: "TX", value: NaN },
+      ]),
+    ).not.toContain("0 KB/s");
+  });
+  it("chooses units from plotted complete buckets, not excluded peaks or uncovered counters", () => {
+    render(
+      <ThemeProvider>
+        <TrafficTrend
+          samples={[
+            {
+              time: "14:00:00",
+              rx: 2000,
+              tx: 1000,
+              rxPeak: 2e9,
+              rxBytes: 1e12,
+              coverageSeconds: 30,
+            },
+            { time: "14:00:05", rx: 5e9, tx: 4e9, coverageSeconds: 0 },
+            { time: "14:00:10", rx: 3e9, tx: 3e9, coverageSeconds: 15 },
+          ]}
+          resolutionSeconds={30}
+        />
+      </ThemeProvider>,
+    );
+    expect(currentOption().yAxis[0].name).toBe("KB/s");
+    expect(currentOption().series[0].data).toEqual([2, null, null]);
+    const table = screen.getByRole("table", { hidden: true });
+    expect(within(table).getByText("1 TB")).toBeTruthy();
+    expect(within(table).getByText("2 GB/s")).toBeTruthy();
+  });
+  it("updates scale on new source data without losing precision or remounting the chart", () => {
+    const view = renderTraffic([{ time: "14:00:00", rx: 1000, tx: 0 }]);
+    const chart = screen.getByRole("img");
+    view.rerender(
+      <ThemeProvider>
+        <TrafficTrend samples={[{ time: "14:00:00", rx: 1e9, tx: 1 }]} />
+      </ThemeProvider>,
+    );
+    expect(screen.getByRole("img")).toBe(chart);
+    expect(currentOption().yAxis[0].name).toBe("GB/s");
+    expect(currentOption().series[1].data).toEqual([1e-9]);
   });
   it("actual samples take priority even if demo is true", () => {
     renderTraffic(points, true, "WAN · eth0.1");
@@ -123,7 +243,8 @@ describe("TrafficTrend actual interface samples", () => {
     const option = currentOption();
     expect(option.series[0].data).toHaveLength(1500);
     expect(option.series[0].data[0]).toBe(0);
-    expect(option.series[0].data.at(-1)).toBe(1499);
+    expect(option.series[0].data.at(-1)).toBe(1.499);
+    expect(option.yAxis[0].name).toBe("GB/s");
     expect(option.series[1].data.every((value) => value === 0)).toBe(true);
     expect(large).toHaveLength(1500);
     expect(option.dataZoom.map((zoom) => zoom.type)).toEqual([
@@ -232,13 +353,13 @@ describe("TrafficTrend actual interface samples", () => {
     expect(within(table).getByText("2026-10-02T18:00:00.000Z")).toBeTruthy();
     expect(
       within(table).getByRole("columnheader", {
-        name: "RX 总量 / bytes",
+        name: "RX 总量",
         hidden: true,
       }),
     ).toBeTruthy();
-    expect(within(table).getAllByText("30000000")).toHaveLength(2);
+    expect(within(table).getAllByText("30 MB")).toHaveLength(2);
     expect(
-      within(table).getByText("15000000", { selector: "td:nth-child(6)" }),
+      within(table).getByText("15 MB", { selector: "td:nth-child(6)" }),
     ).toBeTruthy();
     expect(within(table).getByText("15", { selector: "td" })).toBeTruthy();
     expect(
@@ -249,7 +370,7 @@ describe("TrafficTrend actual interface samples", () => {
           value: [Date.parse(sample.time), 1],
         },
       ]),
-    ).toBe("2026-10-02T18:00:00.000Z\nRX  1.000 MB/s");
+    ).toBe("2026-10-02T18:00:00.000Z\nRX  1 MB/s");
   });
   it("does not connect complete buckets across omitted intervals or turn a latest uncovered bucket into zero traffic", () => {
     const history = historyFixture();
@@ -280,7 +401,7 @@ describe("TrafficTrend actual interface samples", () => {
         { name: "14:00:05", seriesName: "TX", value: 0.75 },
         { name: "14:00:05", seriesName: "延迟", value: null },
       ]),
-    ).toBe("14:00:05\nRX  2.000 MB/s\nTX  0.750 MB/s");
+    ).toBe("14:00:05\nRX  2 MB/s\nTX  0.75 MB/s");
     expect(
       currentOption().tooltip.formatter([
         { name: "14:00:05", seriesName: "延迟", value: 12 },

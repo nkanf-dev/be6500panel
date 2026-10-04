@@ -8,9 +8,41 @@ import {
   zoomOption,
   type ChartPalette,
 } from "../../components/visualizations/chart-theme";
-import { bytes } from "../../lib/format";
+import {
+  byteNumber,
+  chooseByteScale,
+  formatByteAxisValue,
+  formatByteRate,
+  formatBytes,
+} from "../../lib/byte-scale";
 import { useDeviceLabels } from "./device-labels";
-import type { WorkspaceDevice } from "./device-model";
+import type { DeviceActivitySample, WorkspaceDevice } from "./device-model";
+
+const rawScale = { unit: "B" as const, divisor: 1 };
+function measuredRate(
+  sample: DeviceActivitySample,
+  direction: "RX" | "TX",
+): number | null {
+  if (!Number.isFinite(sample.coverageSeconds) || sample.coverageSeconds <= 0)
+    return null;
+  const bytes = byteNumber(
+    direction === "RX" ? sample.rxBytes : sample.txBytes,
+    rawScale,
+  );
+  return bytes === null
+    ? null
+    : byteNumber(bytes / sample.coverageSeconds, rawScale);
+}
+function combinedRate(sample: DeviceActivitySample): number | null {
+  const rx = measuredRate(sample, "RX");
+  const tx = measuredRate(sample, "TX");
+  return rx === null || tx === null
+    ? null
+    : byteNumber(
+        (sample.rxBytes! + sample.txBytes!) / sample.coverageSeconds,
+        rawScale,
+      );
+}
 
 function DeviceChartDisclosure({
   title,
@@ -79,21 +111,82 @@ export function DeviceHistoryCharts({
       ].sort(),
     [values],
   );
-  const observed = values.some((device) =>
-    device.samples.some(
+  const rateScale = useMemo(
+    () =>
+      chooseByteScale(
+        values.flatMap(({ samples }) =>
+          samples.flatMap((sample) =>
+            [measuredRate(sample, "RX"), measuredRate(sample, "TX")].filter(
+              (rate): rate is number => rate !== null,
+            ),
+          ),
+        ),
+      ),
+    [values],
+  );
+  const heatScale = useMemo(
+    () =>
+      chooseByteScale(
+        values.flatMap(({ samples }) =>
+          samples.flatMap((sample) => {
+            const rate = combinedRate(sample);
+            return rate === null ? [] : [rate];
+          }),
+        ),
+      ),
+    [values],
+  );
+  const observed = values.some(({ samples }) =>
+    samples.some(
       (sample) =>
-        sample.rxBytes !== null &&
-        sample.txBytes !== null &&
-        sample.coverageSeconds > 0,
+        measuredRate(sample, "RX") !== null ||
+        measuredRate(sample, "TX") !== null,
     ),
+  );
+  const heatObserved = values.some(({ samples }) =>
+    samples.some((sample) => combinedRate(sample) !== null),
   );
   const option = useMemo(
     () =>
       (palette: ChartPalette): EChartsOption => ({
         ...baseOption(palette),
         xAxis: { type: "time", ...axisStyle(palette) },
-        yAxis: { type: "value", name: "B/s", ...axisStyle(palette) },
+        yAxis: {
+          type: "value",
+          name: `${rateScale.unit}/s`,
+          min: 0,
+          ...axisStyle(palette),
+          axisLabel: {
+            ...axisStyle(palette).axisLabel,
+            formatter: formatByteAxisValue,
+          },
+        },
         dataZoom: zoomOption(palette),
+        tooltip: {
+          ...baseOption(palette).tooltip,
+          formatter: (parameters) => {
+            const items = Array.isArray(parameters) ? parameters : [parameters];
+            const first = items[0]?.value;
+            const time = Array.isArray(first)
+              ? new Date(
+                  typeof first[0] === "number" ? first[0] : String(first[0]),
+                ).toLocaleString("zh-CN")
+              : "";
+            const lines = items.flatMap((item) => {
+              const value = Array.isArray(item.value)
+                ? item.value[1]
+                : item.value;
+              return typeof value === "number" &&
+                Number.isFinite(value) &&
+                value >= 0
+                ? [
+                    `${item.seriesName}  ${formatByteRate(value * rateScale.divisor, rateScale)}`,
+                  ]
+                : [];
+            });
+            return `${time}\n${lines.join("\n")}`;
+          },
+        },
         series: values.flatMap(({ device, name, samples }) =>
           ["RX", "TX"].map((direction) => ({
             name: `${name} · ${direction}`,
@@ -102,37 +195,38 @@ export function DeviceHistoryCharts({
             connectNulls: false,
             data: samples.map((sample) => [
               sample.time,
-              sample.coverageSeconds > 0
-                ? (direction === "RX" ? sample.rxBytes : sample.txBytes) ===
-                  null
-                  ? null
-                  : (direction === "RX" ? sample.rxBytes! : sample.txBytes!) /
-                    sample.coverageSeconds
-                : null,
+              byteNumber(
+                measuredRate(sample, direction as "RX" | "TX"),
+                rateScale,
+              ),
             ]),
             // IDs retain identity even when display names are identical.
             id: `${device.mac}-${direction}`,
           })),
         ),
       }),
-    [values],
+    [values, rateScale],
   );
   const heatOption = useMemo(
     () =>
       (palette: ChartPalette): EChartsOption => {
         const points = values.flatMap(({ samples }, row) =>
-          samples
-            .filter(
-              (sample) =>
-                sample.rxBytes !== null &&
-                sample.txBytes !== null &&
-                sample.coverageSeconds > 0,
-            )
-            .map((sample) => [
-              times.indexOf(sample.time),
-              row,
-              (sample.rxBytes! + sample.txBytes!) / sample.coverageSeconds,
-            ]),
+          samples.flatMap((sample) => {
+            const rate = combinedRate(sample);
+            return rate === null
+              ? []
+              : [
+                  [
+                    times.indexOf(sample.time),
+                    row,
+                    byteNumber(rate, heatScale)!,
+                  ],
+                ];
+          }),
+        );
+        const maximum = points.reduce(
+          (max, point) => Math.max(max, point[2]),
+          0,
         );
         return {
           ...baseOption(palette),
@@ -165,27 +259,50 @@ export function DeviceHistoryCharts({
           },
           visualMap: {
             min: 0,
-            max: Math.max(1, ...points.map((point) => point[2])),
+            max: maximum || 1,
             orient: "horizontal",
             left: "center",
             bottom: 4,
             calculable: true,
-            text: ["高 B/s", "低"],
+            text: [
+              formatByteRate(maximum * heatScale.divisor, heatScale),
+              formatByteRate(0, heatScale),
+            ],
+            formatter: (value) =>
+              typeof value === "number"
+                ? `${formatByteAxisValue(value)} ${heatScale.unit}/s`
+                : "—",
             textStyle: { color: palette.text },
             inRange: { color: [palette.heatLow, palette.heatHigh] },
           },
-          tooltip: { ...baseOption(palette).tooltip, trigger: "item" },
+          tooltip: {
+            ...baseOption(palette).tooltip,
+            trigger: "item",
+            formatter: (parameter) => {
+              const item = Array.isArray(parameter) ? parameter[0] : parameter;
+              const point = item.value;
+              if (!Array.isArray(point)) return "";
+              const device = values[Number(point[1])];
+              const time = times[Number(point[0])];
+              const sample = device?.samples.find(
+                (sample) => sample.time === time,
+              );
+              return sample
+                ? `${device.name} · ${device.device.mac}\n${new Date(time).toLocaleString("zh-CN")}\nRX + TX ${formatByteRate(combinedRate(sample), heatScale)}\n覆盖 ${sample.coverageSeconds} 秒`
+                : "";
+            },
+          },
           series: [
             {
               type: "heatmap",
-              name: "RX + TX B/s",
+              name: `RX + TX ${heatScale.unit}/s`,
               data: points,
               itemStyle: { borderWidth: 1, borderColor: palette.surface },
             },
           ],
         };
       },
-    [values, times],
+    [values, times, heatScale],
   );
   const rows = useMemo(
     () =>
@@ -194,18 +311,14 @@ export function DeviceHistoryCharts({
           name,
           device.mac,
           new Date(sample.time).toLocaleString("zh-CN"),
-          sample.rxBytes === null ? "缺测" : sample.rxBytes,
-          sample.txBytes === null ? "缺测" : sample.txBytes,
+          sample.coverageSeconds > 0 ? formatBytes(sample.rxBytes) : "—",
+          sample.coverageSeconds > 0 ? formatBytes(sample.txBytes) : "—",
           sample.coverageSeconds,
-          sample.coverageSeconds > 0 && sample.rxBytes !== null
-            ? Number((sample.rxBytes / sample.coverageSeconds).toFixed(2))
-            : "—",
-          sample.coverageSeconds > 0 && sample.txBytes !== null
-            ? Number((sample.txBytes / sample.coverageSeconds).toFixed(2))
-            : "—",
+          formatByteRate(measuredRate(sample, "RX"), rateScale),
+          formatByteRate(measuredRate(sample, "TX"), rateScale),
         ]),
       ),
-    [values],
+    [values, rateScale],
   );
   return (
     <div className="device-chart-stack">
@@ -224,11 +337,11 @@ export function DeviceHistoryCharts({
             "设备",
             "MAC",
             "时间",
-            "RX 字节",
-            "TX 字节",
+            "RX 总量",
+            "TX 总量",
             "有效秒数",
-            "RX B/s",
-            "TX B/s",
+            `RX / ${rateScale.unit}/s`,
+            `TX / ${rateScale.unit}/s`,
           ]}
           rows={rows}
           tablePageSize={100}
@@ -245,9 +358,9 @@ export function DeviceHistoryCharts({
       <DeviceChartDisclosure title="设备活动热力图">
         <ChartFrame
           title="设备活动热力图"
-          subtitle="设备 × 时间 · RX + TX 实测速率 B/s"
+          subtitle={`设备 × 时间 · RX + TX 实测速率 ${heatScale.unit}/s`}
           demo={false}
-          hasData={observed}
+          hasData={heatObserved}
           source={source || "trafficd"}
           unavailable="等待所选设备的有效流量采样。"
           summary="深色表示较高的实测流量速率；未采样的格子留空。"
@@ -255,11 +368,11 @@ export function DeviceHistoryCharts({
             "设备",
             "MAC",
             "时间",
-            "RX 字节",
-            "TX 字节",
+            "RX 总量",
+            "TX 总量",
             "有效秒数",
-            "RX B/s",
-            "TX B/s",
+            `RX / ${rateScale.unit}/s`,
+            `TX / ${rateScale.unit}/s`,
           ]}
           rows={rows}
           tablePageSize={100}
@@ -293,13 +406,14 @@ export function DeviceHistoryCharts({
                 </th>
                 <td>
                   {device.activity && device.activity.coverageSeconds > 0
-                    ? `${bytes(device.activity.rxBytes)} / ${bytes(device.activity.txBytes)}`
+                    ? `${formatBytes(device.activity.rxBytes)} / ${formatBytes(device.activity.txBytes)}`
                     : "未取得该范围有效计数"}
                 </td>
                 <td>
-                  {device.activity?.rxBytesPerSecond !== undefined &&
-                  device.activity.txBytesPerSecond !== undefined
-                    ? `${bytes(device.activity.rxBytesPerSecond)}/s / ${bytes(device.activity.txBytesPerSecond)}/s`
+                  {device.activity &&
+                  device.activity.coverageSeconds > 0 &&
+                  !device.activity.stale
+                    ? `${formatByteRate(device.activity.rxBytesPerSecond)} / ${formatByteRate(device.activity.txBytesPerSecond)}`
                     : "等待有效速率"}
                 </td>
                 <td>

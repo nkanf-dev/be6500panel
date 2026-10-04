@@ -15,17 +15,24 @@ import {
   type TrafficHistoryRange,
 } from "../../lib/traffic-history-contracts";
 import { trafficTimestamp } from "../../lib/traffic-history-format";
+import {
+  byteNumber,
+  chooseByteScale,
+  formatByteAxisValue,
+  formatByteRate,
+  formatBytes,
+} from "../../lib/byte-scale";
 
 export interface TrafficSample {
   time: string;
   /** Interface counter rates expressed as bytes per second. */
-  rx: number;
-  tx: number;
+  rx: number | null;
+  tx: number | null;
   latency?: number;
-  rxPeak?: number;
-  txPeak?: number;
-  rxBytes?: number;
-  txBytes?: number;
+  rxPeak?: number | null;
+  txPeak?: number | null;
+  rxBytes?: number | null;
+  txBytes?: number | null;
   coverageSeconds?: number;
 }
 export interface TrafficTrendProps extends VisualizationProps {
@@ -39,8 +46,6 @@ export interface TrafficTrendProps extends VisualizationProps {
   rangeEnd?: number;
   unavailable?: string;
 }
-const toMB = (rate: number) => rate / 1_000_000;
-const formatRate = (rate: number) => toMB(rate).toFixed(3);
 const measuredLatency = (latency: number | undefined): latency is number =>
   typeof latency === "number" && Number.isFinite(latency) && latency >= 0;
 const demoSamples: readonly TrafficSample[] = trafficSamples.map((point) => ({
@@ -49,7 +54,8 @@ const demoSamples: readonly TrafficSample[] = trafficSamples.map((point) => ({
   tx: point.tx * 125_000,
 }));
 const covered = (point: TrafficSample) =>
-  point.coverageSeconds === undefined || point.coverageSeconds > 0;
+  point.coverageSeconds === undefined ||
+  (Number.isFinite(point.coverageSeconds) && point.coverageSeconds > 0);
 const complete = (point: TrafficSample, resolution?: number) =>
   covered(point) &&
   !(
@@ -119,6 +125,19 @@ export function TrafficTrend({
     () => chartPoints(samples, resolutionSeconds),
     [samples, resolutionSeconds],
   );
+  const rateScale = useMemo(
+    () =>
+      chooseByteScale(
+        samples.flatMap((point) =>
+          complete(point, resolutionSeconds)
+            ? [point.rx, point.tx].filter(
+                (value): value is number => typeof value === "number",
+              )
+            : [],
+        ),
+      ),
+    [samples, resolutionSeconds],
+  );
   const option = useMemo(
     () =>
       (p: ChartPalette): EChartsOption => {
@@ -126,7 +145,7 @@ export function TrafficTrend({
           displayPoints.map(({ time, point }) => {
             const value =
               point && complete(point, resolutionSeconds)
-                ? toMB(point[key])
+                ? byteNumber(point[key], rateScale)
                 : null;
             return temporal ? [Date.parse(time), value] : value;
           });
@@ -170,7 +189,16 @@ export function TrafficTrend({
                 splitLine: { show: false },
               },
           yAxis: [
-            { type: "value", name: "MB/s", min: 0, ...axisStyle(p) },
+            {
+              type: "value",
+              name: `${rateScale.unit}/s`,
+              min: 0,
+              ...axisStyle(p),
+              axisLabel: {
+                ...axisStyle(p).axisLabel,
+                formatter: formatByteAxisValue,
+              },
+            },
             ...(hasLatency
               ? [
                   {
@@ -254,9 +282,11 @@ export function TrafficTrend({
                 const value = Array.isArray(item.value)
                   ? item.value[1]
                   : item.value;
-                return typeof value === "number"
+                return typeof value === "number" &&
+                  Number.isFinite(value) &&
+                  value >= 0
                   ? [
-                      `${item.seriesName}  ${item.seriesName === "延迟" ? value : value.toFixed(3)} ${item.seriesName === "延迟" ? "ms" : "MB/s"}`,
+                      `${item.seriesName}  ${item.seriesName === "延迟" ? `${value} ms` : formatByteRate(value * rateScale.divisor, rateScale)}`,
                     ]
                   : [];
               });
@@ -267,6 +297,7 @@ export function TrafficTrend({
       },
     [
       displayPoints,
+      rateScale,
       temporal,
       hasLatency,
       selectedMetric,
@@ -280,7 +311,7 @@ export function TrafficTrend({
   const latest = samples.at(-1);
   const summary = latest
     ? covered(latest)
-      ? `${complete(latest, resolutionSeconds) ? "最新" : "最新桶覆盖不足 · 已测量"} RX ${formatRate(latest.rx)} MB/s · TX ${formatRate(latest.tx)} MB/s${measuredLatency(latest.latency) ? ` · 延迟 ${latest.latency} ms` : ""}`
+      ? `${complete(latest, resolutionSeconds) ? "最新" : "最新桶覆盖不足 · 已测量"} RX ${formatByteRate(latest.rx, rateScale)} · TX ${formatByteRate(latest.tx, rateScale)}${measuredLatency(latest.latency) ? ` · 延迟 ${latest.latency} ms` : ""}`
       : "最新时间桶未采样"
     : undefined;
   return (
@@ -322,34 +353,31 @@ export function TrafficTrend({
       hint={`拖动底部范围缩放 · 图例切换指标${temporal ? " · UTC" : ""}`}
       columns={[
         temporal ? "时间（UTC 桶起点）" : "时间",
-        "RX / MB/s",
-        "TX / MB/s",
+        `RX / ${rateScale.unit}/s`,
+        `TX / ${rateScale.unit}/s`,
         ...(history
-          ? [
-              "RX 峰值 / MB/s",
-              "TX 峰值 / MB/s",
-              "RX 总量 / bytes",
-              "TX 总量 / bytes",
-              "覆盖 / 秒",
-            ]
+          ? ["RX 峰值", "TX 峰值", "RX 总量", "TX 总量", "覆盖 / 秒"]
           : []),
         ...(hasLatency ? ["延迟 / ms"] : []),
       ]}
       rows={samples.map((point) => [
         temporal ? trafficTimestamp(point.time) : point.time,
         ...(covered(point)
-          ? [formatRate(point.rx), formatRate(point.tx)]
+          ? [
+              formatByteRate(point.rx, rateScale),
+              formatByteRate(point.tx, rateScale),
+            ]
           : ["—", "—"]),
         ...(history
           ? [
               covered(point) && point.rxPeak !== undefined
-                ? formatRate(point.rxPeak)
+                ? formatByteRate(point.rxPeak)
                 : "—",
               covered(point) && point.txPeak !== undefined
-                ? formatRate(point.txPeak)
+                ? formatByteRate(point.txPeak)
                 : "—",
-              covered(point) ? (point.rxBytes ?? "—") : "—",
-              covered(point) ? (point.txBytes ?? "—") : "—",
+              covered(point) ? formatBytes(point.rxBytes) : "—",
+              covered(point) ? formatBytes(point.txBytes) : "—",
               point.coverageSeconds ?? "—",
             ]
           : []),
