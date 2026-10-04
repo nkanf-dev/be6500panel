@@ -87,3 +87,63 @@ func TestCaptureGETDoesNotBlockDELETEWhileBuilderWaits(t *testing.T) {
 		t.Fatal("GET/DELETE did not keep persistent off", err)
 	}
 }
+
+func TestCaptureGETReturnsBusyDuringHeldMutation(t *testing.T) {
+	srv, ts := testServer(t, "")
+	defer ts.Close()
+	defer srv.Close()
+	controller, err := capture.New(t.TempDir(), func(context.Context, []string) ([]byte, error) {
+		t.Fatal("unresolved mutation must not run kernel commands")
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.capture = controller
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	controller.SetBuilder(func(ctx context.Context, d capture.Desired) (proxy.RulesPlanInput, []capture.Client, error) {
+		close(entered)
+		select {
+		case <-release:
+			return proxy.RulesPlanInput{}, nil, errors.New("capture_device_unresolved")
+		case <-ctx.Done():
+			return proxy.RulesPlanInput{}, nil, ctx.Err()
+		}
+	})
+	mutationDone := make(chan error, 1)
+	go func() {
+		_, err := controller.Select(context.Background(), capture.Desired{Devices: []capture.DeviceSelection{{MAC: "02:be:65:00:00:fa"}}, IPv6: proxy.IPv6Direct})
+		mutationDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("mutation did not reach held builder")
+	}
+	getDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		reply := httptest.NewRecorder()
+		srv.ServeHTTP(reply, httptest.NewRequest(http.MethodGet, "/api/proxy/capture", nil))
+		getDone <- reply
+	}()
+	select {
+	case reply := <-getDone:
+		var state capture.Status
+		if reply.Code != 200 || json.Unmarshal(reply.Body.Bytes(), &state) != nil || state.Active || !state.CleanupPending || state.Error != "capture_observation_busy" {
+			t.Fatal("busy GET invented proof", reply.Code, reply.Body.String())
+		}
+	case <-time.After(400 * time.Millisecond):
+		unblock()
+		t.Fatal("GET waited in blocking Desired before TryLock")
+	}
+	unblock()
+	select {
+	case <-mutationDone:
+	case <-time.After(time.Second):
+		t.Fatal("fixture mutation did not finish")
+	}
+}

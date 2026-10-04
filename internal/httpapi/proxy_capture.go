@@ -21,14 +21,9 @@ func (s *Server) proxyCapture(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		observeCtx, cancelObserve := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancelObserve()
-		var status capture.Status
-		var err error
-		desired := s.capture.Desired()
-		if desired.Enabled || len(desired.Devices) > 0 {
-			status, err = s.capture.ReconcileDesired(observeCtx)
-		} else {
-			status, err = s.capture.Reconcile(observeCtx)
-		}
+		// ReconcileDesired snapshots through TryLock and covers both enabled and
+		// empty/off intent. Do not block on Desired() before its finite read path.
+		status, err := s.capture.ReconcileDesired(observeCtx)
 		if err != nil {
 			code := status.Error
 			if !strings.HasPrefix(code, "capture_") || len(code) > 80 {
