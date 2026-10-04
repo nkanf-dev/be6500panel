@@ -19,6 +19,11 @@ use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::Instant;
 
 pub const MAX_METADATA_BYTES: usize = 16 << 10;
 pub const MAX_CONFIG_BYTES: usize = 512 << 10;
@@ -63,6 +68,8 @@ pub enum StoreError {
     InsufficientSpace,
     Measurement,
     Durability,
+    OperationDeadline,
+    Cancelled,
 }
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -85,6 +92,8 @@ impl fmt::Display for StoreError {
             }
             Self::Measurement => "persistent storage free space unavailable",
             Self::Durability => "runtime state committed without confirmed directory durability",
+            Self::OperationDeadline => "runtime storage operation deadline exceeded",
+            Self::Cancelled => "runtime storage operation cancelled",
         })
     }
 }
@@ -218,6 +227,7 @@ pub struct RuntimeStore {
     services: [ServiceStore; 2],
     _lock: File,
     owner: [u8; 16],
+    operation: Option<(Instant, Arc<AtomicBool>)>,
     #[cfg(test)]
     fault: Option<Fault>,
     #[cfg(test)]
@@ -325,6 +335,7 @@ impl RuntimeStore {
             services: [sing_box, frpc],
             _lock: lock,
             owner,
+            operation: None,
             #[cfg(test)]
             fault: None,
             #[cfg(test)]
@@ -334,6 +345,12 @@ impl RuntimeStore {
         store.checked(ServiceId::Frpc)?;
         Ok(store)
     }
+    pub(crate) fn set_operation_budget(&mut self, budget: Option<(Instant, Arc<AtomicBool>)>) {
+        self.operation = budget;
+    }
+    fn check_operation(&self) -> Result<(), StoreError> {
+        check_store_budget(self.operation.as_ref())
+    }
     pub fn service_state(&self, service: ServiceId) -> &DiskState {
         &self.services[service.index()].state
     }
@@ -341,6 +358,7 @@ impl RuntimeStore {
         self.service_state(service).clone()
     }
     fn checked(&self, service: ServiceId) -> Result<&ServiceStore, StoreError> {
+        self.check_operation()?;
         self.data.checked()?;
         self.run.checked()?;
         let slot = &self.services[service.index()];
@@ -358,8 +376,10 @@ impl RuntimeStore {
         validate_record(service, &slot.state, record)?;
         let name = c_name(&record.file)?;
         let mut file = required_file(&slot.dir.file, &name, MAX_STORED_CONFIG_BYTES)?;
-        let bytes = read_bounded(&mut file, MAX_STORED_CONFIG_BYTES)?;
-        if hash(&bytes) != record.sha256 {
+        let bytes =
+            read_bounded_until(&mut file, MAX_STORED_CONFIG_BYTES, self.operation.as_ref())?;
+        self.check_operation()?;
+        if hash_until(&bytes, self.operation.as_ref())? != record.sha256 {
             return Err(StoreError::InvalidState);
         }
         self.checked(service)?;
@@ -568,7 +588,8 @@ impl RuntimeStore {
             &c_name(&current.file)?,
             MAX_STORED_CONFIG_BYTES,
         )?;
-        let (digest, length) = stream_digest(&mut file, MAX_STORED_CONFIG_BYTES)?;
+        let (digest, length) =
+            stream_digest_until(&mut file, MAX_STORED_CONFIG_BYTES, self.operation.as_ref())?;
         if digest != current.sha256 || !matches_ready(proof, service, current, length) {
             return Err(StoreError::Readiness);
         }
@@ -632,11 +653,19 @@ impl RuntimeStore {
         service: ServiceId,
         next: DiskState,
     ) -> Result<CommitOutcome, StoreError> {
+        self.check_operation()?;
         let bytes = serialize_state(&next)?;
         let slot = self.checked(service)?;
         self.admit(&slot.dir.file, &[bytes.len()])?;
         self.sync_directory(&slot.dir.file, SyncPoint::Before)?;
+        self.check_operation()?;
         self.persist(&slot.dir, &bytes)?;
+        #[cfg(test)]
+        if self.fault == Some(Fault::BudgetAfterManifest)
+            && let Some((_, flag)) = &self.operation
+        {
+            flag.store(true, Ordering::Release);
+        }
         self.services[service.index()].state = next;
         let durability_error = self
             .sync_directory(
@@ -651,6 +680,7 @@ impl RuntimeStore {
         })
     }
     fn persist(&self, directory: &Directory, bytes: &[u8]) -> Result<(), StoreError> {
+        self.check_operation()?;
         let (mut file, name) = temporary(&directory.file, ".atomic-", "")?;
         let temporary_identity = match file.metadata() {
             Ok(metadata) => identity(&metadata),
@@ -670,13 +700,24 @@ impl RuntimeStore {
         };
         let result = (|| {
             self.write_bytes(&mut file, bytes)?;
+            self.check_operation()?;
             self.sync_file(&file)?;
+            self.check_operation()?;
             close_file(file)?;
             directory.checked()?;
             self.data.checked()?;
             if let Some(manifest) = optional_file(&directory.file, MANIFEST, MAX_METADATA_BYTES)? {
                 drop(manifest);
             }
+            #[cfg(test)]
+            if self.fault == Some(Fault::BudgetBeforeManifest)
+                && let Some((_, flag)) = &self.operation
+            {
+                flag.store(true, Ordering::Release);
+            }
+            self.check_operation()?;
+            // After this authoritative rename, save_state still assigns the
+            // committed state and attempts directory durability even on expiry.
             self.rename(&directory.file, &name, MANIFEST, RenamePoint::Manifest)
         })();
         if result.is_err() {
@@ -688,6 +729,7 @@ impl RuntimeStore {
     #[allow(clippy::unused_enumerate_index)] // Index is used only by the later-write test fault.
     fn write_bytes(&self, file: &mut File, bytes: &[u8]) -> Result<(), StoreError> {
         for (_index, chunk) in bytes.chunks(CHUNK).enumerate() {
+            self.check_operation()?;
             #[cfg(test)]
             match self.fault {
                 Some(Fault::Write) => return Err(StoreError::Storage),
@@ -699,6 +741,7 @@ impl RuntimeStore {
                 _ => (),
             }
             file.write_all(chunk).map_err(storage)?;
+            self.check_operation()?;
         }
         Ok(())
     }
@@ -749,6 +792,7 @@ impl RuntimeStore {
         }
     }
     fn admit(&self, directory: &File, lengths: &[usize]) -> Result<(), StoreError> {
+        self.check_operation()?;
         #[cfg(test)]
         match self.fault {
             Some(Fault::Measurement) => return Err(StoreError::Measurement),
@@ -798,6 +842,18 @@ fn matches_ready(
 }
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+fn hash_until(
+    bytes: &[u8],
+    budget: Option<&(Instant, Arc<AtomicBool>)>,
+) -> Result<String, StoreError> {
+    let mut sha = Sha256::new();
+    for part in bytes.chunks(CHUNK) {
+        check_store_budget(budget)?;
+        sha.update(part);
+        check_store_budget(budget)?;
+    }
+    Ok(format!("{:x}", sha.finalize()))
 }
 fn storage(error: io::Error) -> StoreError {
     if error.raw_os_error() == Some(libc::ENOSPC) {
@@ -901,42 +957,93 @@ fn optional_file(dir: &File, name: &CStr, limit: usize) -> Result<Option<File>, 
 fn required_file(dir: &File, name: &CStr, limit: usize) -> Result<File, StoreError> {
     optional_file(dir, name, limit)?.ok_or(StoreError::InvalidState)
 }
+fn check_store_budget(budget: Option<&(Instant, Arc<AtomicBool>)>) -> Result<(), StoreError> {
+    if let Some((deadline, cancel)) = budget {
+        if cancel.load(Ordering::Acquire) {
+            return Err(StoreError::Cancelled);
+        }
+        if Instant::now() >= *deadline {
+            return Err(StoreError::OperationDeadline);
+        }
+    }
+    Ok(())
+}
 fn read_bounded(file: &mut File, limit: usize) -> Result<Vec<u8>, StoreError> {
+    read_bounded_until(file, limit, None)
+}
+fn read_bounded_until(
+    file: &mut File,
+    limit: usize,
+    budget: Option<&(Instant, Arc<AtomicBool>)>,
+) -> Result<Vec<u8>, StoreError> {
+    read_bounded_with(file, limit, || check_store_budget(budget))
+}
+fn read_bounded_with(
+    file: &mut File,
+    limit: usize,
+    mut check: impl FnMut() -> Result<(), StoreError>,
+) -> Result<Vec<u8>, StoreError> {
+    check()?;
     let length = usize::try_from(file.metadata().map_err(storage)?.len())
         .map_err(|_| StoreError::InvalidState)?;
+    check()?;
     if length > limit {
         return Err(StoreError::InvalidState);
     }
-    // Allocate exactly the inspected length, not a doubling read_to_end buffer.
-    // An extra scalar read detects growth without another full legacy buffer.
-    let mut bytes = vec![0; length];
-    file.read_exact(&mut bytes).map_err(storage)?;
+    let mut bytes = vec![0u8; length];
+    let mut offset = 0;
+    while offset < length {
+        check()?;
+        let end = (offset + CHUNK).min(length);
+        let read = file.read(&mut bytes[offset..end]);
+        check()?;
+        match read {
+            Ok(0) => return Err(StoreError::InvalidState),
+            Ok(n) => offset += n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(storage(error)),
+        }
+    }
     let mut extra = [0];
     loop {
-        match file.read(&mut extra) {
+        check()?;
+        let read = file.read(&mut extra);
+        check()?;
+        match read {
             Ok(0) => return Ok(bytes),
             Ok(_) => return Err(StoreError::InvalidState),
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error) => return Err(storage(error)),
         }
     }
 }
 fn stream_digest(file: &mut File, limit: usize) -> Result<(String, usize), StoreError> {
+    stream_digest_until(file, limit, None)
+}
+fn stream_digest_until(
+    file: &mut File,
+    limit: usize,
+    budget: Option<&(Instant, Arc<AtomicBool>)>,
+) -> Result<(String, usize), StoreError> {
     let mut sha = Sha256::new();
     let mut length = 0usize;
-    let mut bytes = [0; CHUNK];
+    let mut bytes = [0u8; CHUNK];
     loop {
-        let n = match file.read(&mut bytes) {
+        check_store_budget(budget)?;
+        let read = file.read(&mut bytes);
+        check_store_budget(budget)?;
+        let n = match read {
             Ok(0) => break,
             Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(storage(e)),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(storage(error)),
         };
         length = length
             .checked_add(n)
             .filter(|n| *n <= limit)
             .ok_or(StoreError::InvalidState)?;
         sha.update(&bytes[..n]);
+        check_store_budget(budget)?;
     }
     Ok((format!("{:x}", sha.finalize()), length))
 }
@@ -1157,6 +1264,8 @@ enum Fault {
     ManifestRename,
     Measurement,
     Space,
+    BudgetBeforeManifest,
+    BudgetAfterManifest,
 }
 
 #[cfg(test)]
@@ -1446,5 +1555,94 @@ mod tests {
         );
         assert_eq!(fixture.manifest(), old);
         fixture.no_temps();
+    }
+    #[test]
+    fn expired_or_cancelled_operation_leaves_artifact_manifest_unchanged() {
+        let fixture = Fixture::new();
+        let mut store = fixture.open();
+        accept(&mut store, b"{}");
+        let prior = store.snapshot(ServiceId::SingBox);
+        let raw = fixture.manifest();
+        let metadata = Artifact {
+            url: "https://example.invalid/core".into(),
+            sha256: "ab".repeat(32),
+            compression: "none".into(),
+            version: "budget".into(),
+        };
+        store.set_operation_budget(Some((Instant::now(), Arc::new(AtomicBool::new(false)))));
+        assert_eq!(
+            store
+                .set_artifact_intent(ServiceId::SingBox, 1, Some(metadata.clone()))
+                .unwrap_err(),
+            StoreError::OperationDeadline
+        );
+        assert_eq!(fixture.manifest(), raw);
+        assert_eq!(store.snapshot(ServiceId::SingBox), prior);
+        store.set_operation_budget(Some((
+            Instant::now() + std::time::Duration::from_secs(1),
+            Arc::new(AtomicBool::new(true)),
+        )));
+        assert_eq!(
+            store
+                .set_artifact_intent(ServiceId::SingBox, 1, Some(metadata))
+                .unwrap_err(),
+            StoreError::Cancelled
+        );
+        store.set_operation_budget(None);
+        fixture.no_temps();
+    }
+    #[test]
+    fn config_chunk_expiry_is_detected_after_read_before_acceptance() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("bounded-config");
+        fs::write(&path, vec![7u8; CHUNK * 2]).unwrap();
+        let mut file = File::open(path).unwrap();
+        let mut checks = 0;
+        let failure = read_bounded_with(&mut file, MAX_STORED_CONFIG_BYTES, || {
+            checks += 1;
+            if checks == 4 {
+                Err(StoreError::OperationDeadline)
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert_eq!(failure, StoreError::OperationDeadline);
+        assert_eq!(checks, 4);
+    }
+    #[test]
+    fn acquisition_cancel_pre_manifest_refuses_but_postrename_keeps_committed_authority() {
+        for fault in [Fault::BudgetBeforeManifest, Fault::BudgetAfterManifest] {
+            let fixture = Fixture::new();
+            let mut store = fixture.open();
+            accept(&mut store, b"{}");
+            let previous = store.snapshot(ServiceId::SingBox);
+            let manifest = fixture.manifest();
+            let artifact = Artifact {
+                url: "https://example.invalid/core".into(),
+                sha256: "ab".repeat(32),
+                compression: "none".into(),
+                version: "deadline-boundary".into(),
+            };
+            store.set_operation_budget(Some((
+                Instant::now() + std::time::Duration::from_secs(2),
+                Arc::new(AtomicBool::new(false)),
+            )));
+            store.fault = Some(fault);
+            let outcome = store.set_artifact_intent(ServiceId::SingBox, 1, Some(artifact.clone()));
+            if fault == Fault::BudgetBeforeManifest {
+                assert_eq!(outcome.unwrap_err(), StoreError::Cancelled);
+                assert_eq!(store.snapshot(ServiceId::SingBox), previous);
+                assert_eq!(fixture.manifest(), manifest);
+            } else {
+                let committed = outcome.unwrap();
+                assert_eq!(committed.state.artifact, Some(artifact));
+                assert_eq!(committed.state.current, previous.current);
+                assert_eq!(committed.durability_error, None);
+                assert_eq!(store.snapshot(ServiceId::SingBox), committed.state);
+            }
+            store.set_operation_budget(None);
+            fixture.no_temps();
+        }
     }
 }

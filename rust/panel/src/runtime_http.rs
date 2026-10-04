@@ -1,6 +1,8 @@
 //! Authenticated fixed-service runtime HTTP projection. The existing service
 //! borrows an actual exclusive Manager; no constructor/startup activation,
 //! arbitrary argv/path/PID, artifact fetch or extra thread is introduced.
+use crate::artifact_source::{SourceError, SourcePolicy};
+use crate::artifact_stage::StageError;
 use crate::runtime_intent::{DesiredServices, IntentError, RuntimeIntent};
 use crate::{
     http::{self, Method},
@@ -9,8 +11,12 @@ use crate::{
     runtime_store::StoreError,
 };
 use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
-use std::path::Path;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 const MAX_RESPONSE: usize = 8 << 20;
 const JSON_TYPE: &str = "application/json; charset=utf-8";
@@ -27,6 +33,54 @@ pub enum RecoveryResult {
     Deferred,
     Exhausted,
 }
+struct ArtifactRoot {
+    path: PathBuf,
+    file: File,
+    identity: (u64, u64),
+}
+impl ArtifactRoot {
+    fn open(path: &Path) -> Result<Self, SourceError> {
+        if !path.is_absolute()
+            || path.components().any(|part| {
+                matches!(
+                    part,
+                    std::path::Component::ParentDir | std::path::Component::CurDir
+                )
+            })
+        {
+            return Err(SourceError::Input);
+        }
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(path)
+            .map_err(|_| SourceError::Input)?;
+        let metadata = file.metadata().map_err(|_| SourceError::Input)?;
+        if !metadata.is_dir()
+            || metadata.mode() & 0o7777 != 0o700
+            || metadata.uid() != unsafe { libc::geteuid() }
+        {
+            return Err(SourceError::Input);
+        }
+        Ok(Self {
+            path: path.into(),
+            file,
+            identity: (metadata.dev(), metadata.ino()),
+        })
+    }
+    fn checked(&self) -> Result<(), SourceError> {
+        let current = Self::open(&self.path)?;
+        let retained = self.file.metadata().map_err(|_| SourceError::Input)?;
+        if current.identity != self.identity || (retained.dev(), retained.ino()) != self.identity {
+            return Err(SourceError::Input);
+        }
+        Ok(())
+    }
+}
+struct Acquisition {
+    source: SourcePolicy,
+    roots: [ArtifactRoot; 2],
+}
 pub struct RuntimeHttp {
     manager: Manager,
     intent: Option<RuntimeIntent>,
@@ -36,6 +90,7 @@ pub struct RuntimeHttp {
     closing: bool,
     recovery_enabled: bool,
     intent_uncertain: bool,
+    acquisition: Option<Acquisition>,
 }
 fn index(service: ServiceId) -> usize {
     match service {
@@ -61,6 +116,110 @@ impl RuntimeHttp {
             closing: false,
             recovery_enabled: false,
             intent_uncertain: false,
+            acquisition: None,
+        }
+    }
+    /// Trusted startup wiring only. Borrows this owner, performs no fetch/start
+    /// and cannot be configured by an HTTP path/CA/bootstrap request.
+    pub fn load_artifact_source(
+        &mut self,
+        source: SourcePolicy,
+        sing_box_root: &Path,
+        frpc_root: &Path,
+    ) -> Result<(), SourceError> {
+        if self.closing || self.acquisition.is_some() {
+            return Err(SourceError::Input);
+        }
+        let roots = [
+            ArtifactRoot::open(sing_box_root)?,
+            ArtifactRoot::open(frpc_root)?,
+        ];
+        for service in SERVICES {
+            if self
+                .manager
+                .artifact_root(service)
+                .is_some_and(|root| root != roots[index(service)].path)
+            {
+                return Err(SourceError::Input);
+            }
+        }
+        self.acquisition = Some(Acquisition { source, roots });
+        Ok(())
+    }
+    fn acquire(&mut self, writer: &mut impl Write, input: Acquire) -> io::Result<()> {
+        let operation_deadline = Instant::now() + Duration::from_secs(90);
+        let Some(acquisition) = self.acquisition.as_ref() else {
+            return error(
+                writer,
+                503,
+                "Service Unavailable",
+                "artifact_acquisition_unavailable",
+                "Artifact acquisition is not configured.",
+                false,
+            );
+        };
+        let artifact = input.artifact.into_artifact();
+        if acquisition.source.validate_artifact(&artifact).is_err() {
+            return source_failure(writer, self, input.service, SourceError::Input);
+        }
+        let root = &acquisition.roots[index(input.service)];
+        if let Err(error) = root.checked() {
+            return source_failure(writer, self, input.service, error);
+        }
+        let status = match self.manager.status(input.service) {
+            Ok(status) => status,
+            Err(error) => return failure(writer, self, error, false),
+        };
+        let expected = input.generation.unwrap_or(status.generation);
+        let admitted =
+            match self
+                .manager
+                .admit_artifact_acquisition(input.service, expected, &root.path)
+            {
+                Ok(status) => status,
+                Err(error) => return failure(writer, self, error, false),
+            };
+        // Configured finite checker/withdrawal/readiness/rollback budgets are
+        // reserved before network; too-large combinations refuse acquisition.
+        let fetch_budget = match self.manager.acquisition_fetch_budget() {
+            Ok(duration) => duration,
+            Err(failed) => {
+                return failure(
+                    writer,
+                    self,
+                    ManagerError {
+                        service: Some(input.service),
+                        failure: failed,
+                        recovery_failure: None,
+                        generation: expected,
+                        owned_pid: admitted.pid,
+                    },
+                    false,
+                );
+            }
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let budget = crate::readiness_tun::Budget {
+            deadline: operation_deadline.min(Instant::now() + fetch_budget),
+            cancel: &cancel,
+        };
+        let stage = match acquisition.source.fetch(&root.path, &artifact, &budget) {
+            Ok(stage) => stage,
+            Err(error) => return source_failure(writer, self, input.service, error),
+        };
+        if let Err(error) = root.checked() {
+            return source_failure(writer, self, input.service, error);
+        }
+        let result = self.manager.acquire_verified_stage(
+            input.service,
+            expected,
+            stage,
+            operation_deadline,
+            cancel,
+        );
+        match result {
+            Ok(status) => write_json(writer, 200, "OK", &self.wire(status), false),
+            Err(error) => failure(writer, self, error, false),
         }
     }
     /// Load only. Even saved true intent executes no child/check/hook until
@@ -230,6 +389,10 @@ impl RuntimeHttp {
         if !self.closing && (self.intent.is_some() || self.recovery_enabled) {
             wire.desired = self.desired[slot];
         }
+        wire.version = self
+            .manager
+            .artifact_version(wire.service)
+            .map(str::to_owned);
         wire.restarts = self.restarts[slot];
         wire.recovery_attempts = self.retry[slot].attempts;
         wire.recovery_exhausted = self.retry[slot].exhausted;
@@ -430,14 +593,21 @@ impl RuntimeHttp {
                 }
             }
             "/api/runtime/acquire" => {
-                return error(
-                    writer,
-                    503,
-                    "Service Unavailable",
-                    "artifact_acquisition_unavailable",
-                    "Artifact acquisition is not implemented.",
-                    false,
-                );
+                if self.acquisition.is_none() {
+                    return error(
+                        writer,
+                        503,
+                        "Service Unavailable",
+                        "artifact_acquisition_unavailable",
+                        "Artifact acquisition is not configured.",
+                        false,
+                    );
+                }
+                let input: Acquire = match decode(body) {
+                    Ok(input) => input,
+                    Err(()) => return invalid_json(writer),
+                };
+                return self.acquire(writer, input);
             }
             _ => {
                 return error(
@@ -478,6 +648,51 @@ pub(crate) fn unavailable(writer: &mut impl Write, head: bool) -> io::Result<()>
         "Runtime management is unavailable.",
         head,
     )
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Acquire {
+    service: ServiceId,
+    #[serde(deserialize_with = "artifact_object")]
+    artifact: ArtifactInput,
+    #[serde(default, deserialize_with = "optional_generation")]
+    generation: Option<u64>,
+}
+fn artifact_object<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<ArtifactInput, D::Error> {
+    struct Object;
+    impl<'de> serde::de::Visitor<'de> for Object {
+        type Value = ArtifactInput;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("artifact object with required unique fields")
+        }
+        fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Self::Value, M::Error> {
+            ArtifactInput::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+        }
+    }
+    deserializer.deserialize_map(Object)
+}
+fn optional_generation<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    u64::deserialize(d).map(Some)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArtifactInput {
+    url: String,
+    sha256: String,
+    compression: String,
+    version: String,
+}
+impl ArtifactInput {
+    fn into_artifact(self) -> crate::runtime_store::Artifact {
+        crate::runtime_store::Artifact {
+            url: self.url,
+            sha256: self.sha256,
+            compression: self.compression,
+            version: self.version,
+        }
+    }
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -528,6 +743,8 @@ pub(crate) struct WireStatus {
     configured: bool,
     artifact_available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pid: Option<u32>,
     rss_bytes: u64,
     rss_available: bool,
@@ -552,6 +769,7 @@ impl From<Status> for WireStatus {
             generation: status.generation,
             configured: status.configured,
             artifact_available: status.artifact_available,
+            version: None,
             pid: status.pid,
             rss_bytes: 0,
             rss_available: false,
@@ -599,15 +817,26 @@ fn failure(
 ) -> io::Result<()> {
     let (status, code) = match failed.failure {
         Failure::Generation => (409, "generation_conflict"),
+        Failure::InvalidInput => (400, "invalid_input"),
         Failure::NotConfigured => (409, "not_configured"),
         Failure::ArtifactUnavailable => (409, "artifact_unavailable"),
+        Failure::CheckPending | Failure::Process(ProcessError::Busy) => (409, "operation_busy"),
+        Failure::ArtifactStage(StageError::EncodedLimit) => (422, "artifact_compressed_limit"),
+        Failure::ArtifactStage(StageError::DecodedLimit) => (422, "artifact_uncompressed_limit"),
+        Failure::ArtifactStage(StageError::Measurement)
+        | Failure::ArtifactStage(StageError::InsufficientSpace) => (409, "storage_insufficient"),
         Failure::Store(StoreError::InsufficientSpace) | Failure::Store(StoreError::Measurement) => {
             (409, "storage_insufficient")
         }
         Failure::Process(ProcessError::CheckFailed) => (422, "config_check_failed"),
-        Failure::Process(ProcessError::CheckDeadline)
+        Failure::OperationDeadline
+        | Failure::Store(StoreError::OperationDeadline)
+        | Failure::Process(ProcessError::OperationDeadline)
+        | Failure::Process(ProcessError::CheckDeadline)
         | Failure::Process(ProcessError::StopDeadline) => (504, "operation_timeout"),
-        Failure::Process(ProcessError::Cancelled) => (409, "operation_cancelled"),
+        Failure::Cancelled
+        | Failure::Store(StoreError::Cancelled)
+        | Failure::Process(ProcessError::Cancelled) => (409, "operation_cancelled"),
         Failure::Hook(crate::runtime_manager::HookStage::Readiness, _) | Failure::NotReady => {
             (503, "readiness_failed")
         }
@@ -630,6 +859,45 @@ fn failure(
             status: observed,
         },
         head,
+    )
+}
+fn source_failure(
+    writer: &mut impl Write,
+    runtime: &mut RuntimeHttp,
+    service: ServiceId,
+    failed: SourceError,
+) -> io::Result<()> {
+    let (status, code) = match failed {
+        SourceError::Input => (400, "invalid_input"),
+        SourceError::Deadline | SourceError::Stage(StageError::Deadline) => {
+            (504, "operation_timeout")
+        }
+        SourceError::Cancelled | SourceError::Stage(StageError::Cancelled) => {
+            (409, "operation_cancelled")
+        }
+        SourceError::Stage(StageError::EncodedLimit) => (422, "artifact_compressed_limit"),
+        SourceError::Stage(StageError::DecodedLimit) => (422, "artifact_uncompressed_limit"),
+        SourceError::Stage(StageError::InsufficientSpace)
+        | SourceError::Stage(StageError::Measurement) => (409, "storage_insufficient"),
+        _ => (422, "artifact_acquire_failed"),
+    };
+    let observed = runtime
+        .manager
+        .status(service)
+        .ok()
+        .map(|status| runtime.wire(status));
+    write_json(
+        writer,
+        status,
+        reason(status),
+        &ErrorResponse {
+            error: ApiError {
+                code,
+                message: "Artifact acquisition did not complete; current runtime state is returned.",
+            },
+            status: observed,
+        },
+        false,
     )
 }
 fn intent_failure(

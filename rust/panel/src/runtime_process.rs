@@ -137,22 +137,26 @@ struct OperationBudget {
 }
 impl OperationBudget {
     fn check_cancelled(&self) -> Result<(), ProcessError> {
-        if self.cancel.as_ref().is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        if self
+            .cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+        {
             return Err(ProcessError::Cancelled);
         }
         Ok(())
     }
     fn check(&self) -> Result<(), ProcessError> {
         self.check_cancelled()?;
-        if self.deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        if self
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
             return Err(ProcessError::OperationDeadline);
         }
         Ok(())
     }
-    fn io<T>(
-        &self,
-        action: impl FnOnce() -> Result<T, ProcessError>,
-    ) -> Result<T, ProcessError> {
+    fn io<T>(&self, action: impl FnOnce() -> Result<T, ProcessError>) -> Result<T, ProcessError> {
         self.check()?;
         let result = action();
         self.check()?;
@@ -285,10 +289,11 @@ impl PinnedRoots {
             (&self.paths.run, &self.run),
         ] {
             let current = private_directory_until(path, budget)?;
-            let current_metadata = budget.io(|| current.metadata().map_err(|_| ProcessError::UntrustedPath))?;
-            let pinned_metadata = budget.io(|| pinned.metadata().map_err(|_| ProcessError::UntrustedPath))?;
-            if identity(&current_metadata) != identity(&pinned_metadata)
-            {
+            let current_metadata =
+                budget.io(|| current.metadata().map_err(|_| ProcessError::UntrustedPath))?;
+            let pinned_metadata =
+                budget.io(|| pinned.metadata().map_err(|_| ProcessError::UntrustedPath))?;
+            if identity(&current_metadata) != identity(&pinned_metadata) {
                 return Err(ProcessError::UntrustedPath);
             }
         }
@@ -477,9 +482,13 @@ fn hash_reader(
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             result => result.map_err(|_| ProcessError::Integrity)?,
         };
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         total = total.checked_add(n as u64).ok_or(ProcessError::Integrity)?;
-        if total > max { return Err(ProcessError::Integrity); }
+        if total > max {
+            return Err(ProcessError::Integrity);
+        }
         hash.update(&bytes[..n]);
     }
     check()?;
@@ -548,9 +557,19 @@ impl ProcessOwner {
         deadline: Instant,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<Status, ProcessError> {
-        self.start_budgeted(spec, OperationBudget { deadline: Some(deadline), cancel })
+        self.start_budgeted(
+            spec,
+            OperationBudget {
+                deadline: Some(deadline),
+                cancel,
+            },
+        )
     }
-    fn start_budgeted(&mut self, spec: LaunchSpec, budget: OperationBudget) -> Result<Status, ProcessError> {
+    fn start_budgeted(
+        &mut self,
+        spec: LaunchSpec,
+        budget: OperationBudget,
+    ) -> Result<Status, ProcessError> {
         budget.check()?;
         self.request(Action::Start(spec, budget))
     }
@@ -587,7 +606,13 @@ impl ProcessOwner {
         spec: LaunchSpec,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<(), ProcessError> {
-        self.verify_budgeted(spec, OperationBudget { deadline: None, cancel })
+        self.verify_budgeted(
+            spec,
+            OperationBudget {
+                deadline: None,
+                cancel,
+            },
+        )
     }
     /// Hashing before launch, finite check and post-check integrity all share
     /// the same absolute deadline. Expiry never skips child finish/reaping.
@@ -597,9 +622,19 @@ impl ProcessOwner {
         deadline: Instant,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<(), ProcessError> {
-        self.verify_budgeted(spec, OperationBudget { deadline: Some(deadline), cancel })
+        self.verify_budgeted(
+            spec,
+            OperationBudget {
+                deadline: Some(deadline),
+                cancel,
+            },
+        )
     }
-    fn verify_budgeted(&mut self, spec: LaunchSpec, budget: OperationBudget) -> Result<(), ProcessError> {
+    fn verify_budgeted(
+        &mut self,
+        spec: LaunchSpec,
+        budget: OperationBudget,
+    ) -> Result<(), ProcessError> {
         budget.check()?;
         self.request(Action::Verify(spec, budget)).map(|_| ())
     }
@@ -701,9 +736,9 @@ impl Supervisor {
                         && self.check.is_none();
                     let result = match request.action {
                         Action::Status => observed.map(|_| self.status()),
-                        Action::Start(spec, budget) => {
-                            self.launch(spec, LaunchMode::Run, &budget).map(|_| self.status())
-                        }
+                        Action::Start(spec, budget) => self
+                            .launch(spec, LaunchMode::Run, &budget)
+                            .map(|_| self.status()),
                         Action::Stop => self.stop().map(|_| self.status()),
                         Action::Verify(spec, budget) => {
                             self.verify(spec, &budget).map(|_| self.status())
@@ -822,7 +857,10 @@ impl Supervisor {
         let result = command.spawn();
         let child = match result {
             Ok(child) => child,
-            Err(_) => { budget.check()?; return Err(ProcessError::Launch); }
+            Err(_) => {
+                budget.check()?;
+                return Err(ProcessError::Launch);
+            }
         };
         match mode {
             LaunchMode::Run => {
@@ -835,7 +873,8 @@ impl Supervisor {
         // Pipe setup is part of ownership safety: cleanup must not encounter
         // blocking pipes even if the budget expired during spawn. Keep the exact
         // child before either error; Verify finishes it, Run needs withdrawal.
-        let result = self.owned_mut(mode)
+        let result = self
+            .owned_mut(mode)
             .ok_or(ProcessError::Launch)?
             .nonblocking();
         budget.check()?;
@@ -898,39 +937,51 @@ impl Supervisor {
             child.wait_tick(deadline)?;
         }
     }
-    fn verify(
-        &mut self,
-        spec: LaunchSpec,
-        budget: &OperationBudget,
-    ) -> Result<(), ProcessError> {
+    fn verify(&mut self, spec: LaunchSpec, budget: &OperationBudget) -> Result<(), ProcessError> {
         budget.check()?;
         let had_check = self.check.is_some();
         if let Err(error) = self.launch(spec.clone(), LaunchMode::Check, budget) {
             // Launch may have created a Check before a post-spawn failure.
             // Independent finish budgets remain valid after operation expiry.
-            if !had_check { self.finish(LaunchMode::Check)?; }
+            if !had_check {
+                self.finish(LaunchMode::Check)?;
+            }
             return Err(error);
         }
         let local_deadline = Instant::now() + self.limits.check_timeout;
-        let deadline = budget.deadline.map_or(local_deadline, |outer| outer.min(local_deadline));
+        let deadline = budget
+            .deadline
+            .map_or(local_deadline, |outer| outer.min(local_deadline));
         let check_execution = || {
             budget.check_cancelled()?;
             if Instant::now() >= deadline {
-                return Err(if budget.deadline.is_some_and(|outer| outer <= local_deadline) {
-                    ProcessError::OperationDeadline
-                } else {
-                    ProcessError::CheckDeadline
-                });
+                return Err(
+                    if budget.deadline.is_some_and(|outer| outer <= local_deadline) {
+                        ProcessError::OperationDeadline
+                    } else {
+                        ProcessError::CheckDeadline
+                    },
+                );
             }
             Ok(())
         };
         let outcome = loop {
-            if let Err(error) = check_execution() { break Err(error); }
+            if let Err(error) = check_execution() {
+                break Err(error);
+            }
             let pumped = self.pump();
-            if let Err(error) = check_execution() { break Err(error); }
-            if let Err(error) = pumped { break Err(error); }
+            if let Err(error) = check_execution() {
+                break Err(error);
+            }
+            if let Err(error) = pumped {
+                break Err(error);
+            }
             if let Some(exit) = self.check.as_ref().and_then(|c| c.exit) {
-                break if exit.code == Some(0) { Ok(()) } else { Err(ProcessError::CheckFailed) };
+                break if exit.code == Some(0) {
+                    Ok(())
+                } else {
+                    Err(ProcessError::CheckFailed)
+                };
             }
             if let Some(child) = &mut self.check
                 && let Err(error) = child.wait_tick(deadline)
@@ -942,7 +993,8 @@ impl Supervisor {
         outcome?;
         // Cleanup may itself finish after expiry; never attest success then.
         budget.check()?;
-        self.roots.validate(self.service, LaunchMode::Check, &spec, budget)
+        self.roots
+            .validate(self.service, LaunchMode::Check, &spec, budget)
     }
 }
 struct OwnedChild {
@@ -1116,13 +1168,19 @@ mod tests {
     #[test]
     fn hash_callback_expiry_and_cancel_are_checked_before_and_after_reads() {
         use std::cell::Cell;
-        struct Advances<'a> { elapsed: &'a Cell<bool>, reads: &'a Cell<usize>, fail: bool }
+        struct Advances<'a> {
+            elapsed: &'a Cell<bool>,
+            reads: &'a Cell<usize>,
+            fail: bool,
+        }
         impl Read for Advances<'_> {
             fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
                 assert!(bytes.len() <= 8192);
                 self.reads.set(self.reads.get() + 1);
                 self.elapsed.set(true);
-                if self.fail { return Err(io::Error::other("private source error")); }
+                if self.fail {
+                    return Err(io::Error::other("private source error"));
+                }
                 bytes[0] = 7;
                 Ok(1)
             }
@@ -1130,23 +1188,41 @@ mod tests {
         for fail in [false, true] {
             let elapsed = Cell::new(false);
             let reads = Cell::new(0);
-            let mut reader = Advances { elapsed: &elapsed, reads: &reads, fail };
+            let mut reader = Advances {
+                elapsed: &elapsed,
+                reads: &reads,
+                fail,
+            };
             let result = hash_reader(&mut reader, 8192, || {
-                if elapsed.get() { Err(ProcessError::OperationDeadline) } else { Ok(()) }
+                if elapsed.get() {
+                    Err(ProcessError::OperationDeadline)
+                } else {
+                    Ok(())
+                }
             });
             assert_eq!(result, Err(ProcessError::OperationDeadline));
             assert_eq!(reads.get(), 1);
         }
         let elapsed = Cell::new(false);
         let reads = Cell::new(0);
-        let mut reader = Advances { elapsed: &elapsed, reads: &reads, fail: false };
-        assert_eq!(hash_reader(&mut reader, 8192, || Err(ProcessError::Cancelled)), Err(ProcessError::Cancelled));
+        let mut reader = Advances {
+            elapsed: &elapsed,
+            reads: &reads,
+            fail: false,
+        };
+        assert_eq!(
+            hash_reader(&mut reader, 8192, || Err(ProcessError::Cancelled)),
+            Err(ProcessError::Cancelled)
+        );
         assert_eq!(reads.get(), 0);
     }
 
     #[test]
     fn cancelling_hash_reader_after_io_stops_before_another_read() {
-        struct Cancels { flag: Arc<AtomicBool>, reads: usize }
+        struct Cancels {
+            flag: Arc<AtomicBool>,
+            reads: usize,
+        }
         impl Read for Cancels {
             fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
                 self.reads += 1;
@@ -1161,22 +1237,39 @@ mod tests {
             cancel: Some(flag.clone()),
         };
         let mut reader = Cancels { flag, reads: 0 };
-        assert_eq!(hash_reader(&mut reader, 8192, || budget.check()), Err(ProcessError::Cancelled));
+        assert_eq!(
+            hash_reader(&mut reader, 8192, || budget.check()),
+            Err(ProcessError::Cancelled)
+        );
         assert_eq!(reader.reads, 1);
     }
 
     #[test]
     fn hash_boundaries_and_real_budget_errors_stay_fixed() {
         let raw = [7u8; 8192];
-        assert_eq!(hash_reader(&mut raw.as_slice(), 8192, || Ok(())),
-            Ok((Sha256::digest(raw).into(), 8192)));
-        assert_eq!(hash_reader(&mut raw.as_slice(), 8191, || Ok(())), Err(ProcessError::Integrity));
-        let budget = OperationBudget { deadline: Some(Instant::now()), cancel: None };
+        assert_eq!(
+            hash_reader(&mut raw.as_slice(), 8192, || Ok(())),
+            Ok((Sha256::digest(raw).into(), 8192))
+        );
+        assert_eq!(
+            hash_reader(&mut raw.as_slice(), 8191, || Ok(())),
+            Err(ProcessError::Integrity)
+        );
+        let budget = OperationBudget {
+            deadline: Some(Instant::now()),
+            cancel: None,
+        };
         assert_eq!(budget.check(), Err(ProcessError::OperationDeadline));
         let cancel = Arc::new(AtomicBool::new(true));
-        let budget = OperationBudget { deadline: Some(Instant::now()), cancel: Some(cancel) };
+        let budget = OperationBudget {
+            deadline: Some(Instant::now()),
+            cancel: Some(cancel),
+        };
         assert_eq!(budget.check(), Err(ProcessError::Cancelled));
-        assert_eq!(ProcessError::OperationDeadline.to_string(), "managed process operation deadline exceeded");
+        assert_eq!(
+            ProcessError::OperationDeadline.to_string(),
+            "managed process operation deadline exceeded"
+        );
     }
 
     #[test]

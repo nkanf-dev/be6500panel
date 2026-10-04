@@ -113,6 +113,11 @@ impl SourcePolicy {
         policy.allow_loopback_http = true;
         Ok(policy)
     }
+    pub(crate) fn validate_artifact(&self, artifact: &Artifact) -> Result<(), SourceError> {
+        crate::artifact_stage::metadata(artifact).map_err(|_| SourceError::Input)?;
+        Url::parse(&artifact.url, self.allow_loopback_http).map_err(|_| SourceError::Input)?;
+        Ok(())
+    }
     pub fn fetch(
         &self,
         root: &Path,

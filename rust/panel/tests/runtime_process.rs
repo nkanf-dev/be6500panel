@@ -757,7 +757,6 @@ fn candidate_verification_keeps_existing_run_owned_and_untouched() {
     }
 }
 
-
 #[test]
 fn expired_and_cancelled_absolute_start_and_verify_create_no_child() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -768,7 +767,9 @@ fn expired_and_cancelled_absolute_start_and_verify_create_no_child() {
         let result = if verify {
             owner.verify_until(spec.clone(), Instant::now(), None)
         } else {
-            owner.start_until(spec.clone(), Instant::now(), None).map(|_| ())
+            owner
+                .start_until(spec.clone(), Instant::now(), None)
+                .map(|_| ())
         };
         assert_eq!(result, Err(ProcessError::OperationDeadline));
         assert!(owner.status().unwrap().pid.is_none());
@@ -778,7 +779,9 @@ fn expired_and_cancelled_absolute_start_and_verify_create_no_child() {
         let result = if verify {
             owner.verify_until(spec.clone(), deadline, Some(cancel))
         } else {
-            owner.start_until(spec.clone(), deadline, Some(cancel)).map(|_| ())
+            owner
+                .start_until(spec.clone(), deadline, Some(cancel))
+                .map(|_| ())
         };
         assert_eq!(result, Err(ProcessError::Cancelled));
         assert!(owner.status().unwrap().pid.is_none());
@@ -792,11 +795,19 @@ fn expired_candidate_verification_keeps_the_old_owned_run_unchanged() {
     let fixture = Fixture::new(ServiceId::SingBox);
     let mut owner = fixture.owner();
     let spec = fixture.spec("running");
-    let started = owner.start_until(spec.clone(), Instant::now() + Duration::from_secs(3), None).unwrap();
+    let started = owner
+        .start_until(spec.clone(), Instant::now() + Duration::from_secs(3), None)
+        .unwrap();
     wait_started(&mut owner, &fixture);
     let argv = fs::read(fixture.run.join("argv")).unwrap();
-    assert_eq!(owner.start_until(spec.clone(), Instant::now(), None), Err(ProcessError::OperationDeadline));
-    assert_eq!(owner.verify_until(spec, Instant::now(), None), Err(ProcessError::OperationDeadline));
+    assert_eq!(
+        owner.start_until(spec.clone(), Instant::now(), None),
+        Err(ProcessError::OperationDeadline)
+    );
+    assert_eq!(
+        owner.verify_until(spec, Instant::now(), None),
+        Err(ProcessError::OperationDeadline)
+    );
     let current = owner.status().unwrap();
     assert_eq!(current.pid, started.pid);
     assert_eq!(current.phase, Phase::Running);
@@ -815,7 +826,10 @@ fn outer_check_expiry_still_finishes_child_under_independent_cleanup_budget() {
         Err(ProcessError::OperationDeadline)
     );
     let checker = pid_file(&fixture.run.join("check.pid"));
-    assert!(!exists(checker), "expired checker must be reaped before returning");
+    assert!(
+        !exists(checker),
+        "expired checker must be reaped before returning"
+    );
     assert!(owner.status().unwrap().pid.is_none());
     owner.abort_check().unwrap();
     assert!(owner.status().unwrap().pid.is_none());
@@ -839,10 +853,25 @@ fn absolute_verified_success_uses_existing_owner_and_fixed_status() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let fixture = Fixture::new(ServiceId::SingBox);
     let mut owner = fixture.owner();
-    owner.verify_until(fixture.spec("good"), Instant::now() + Duration::from_secs(3), None).unwrap();
+    owner
+        .verify_until(
+            fixture.spec("good"),
+            Instant::now() + Duration::from_secs(3),
+            None,
+        )
+        .unwrap();
     assert!(owner.status().unwrap().pid.is_none());
-    let started = owner.start_until(fixture.spec("running"), Instant::now() + Duration::from_secs(3), None).unwrap();
+    let started = owner
+        .start_until(
+            fixture.spec("running"),
+            Instant::now() + Duration::from_secs(3),
+            None,
+        )
+        .unwrap();
     wait_started(&mut owner, &fixture);
     assert_eq!(owner.status().unwrap().pid, started.pid);
-    assert_eq!(started.mode, Some(be6500_panel::runtime_process::LaunchMode::Run));
+    assert_eq!(
+        started.mode,
+        Some(be6500_panel::runtime_process::LaunchMode::Run)
+    );
 }

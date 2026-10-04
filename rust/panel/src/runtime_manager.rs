@@ -166,6 +166,8 @@ pub enum Failure {
     Generation,
     CheckPending,
     Exited,
+    OperationDeadline,
+    Cancelled,
     Store(StoreError),
     Process(ProcessError),
     Hook(HookStage, HookError),
@@ -182,6 +184,8 @@ impl Failure {
             Self::Generation => "generation_conflict",
             Self::CheckPending => "check_pending",
             Self::Exited => "owned_run_exited",
+            Self::OperationDeadline => "operation_timeout",
+            Self::Cancelled => "operation_cancelled",
             Self::Store(StoreError::Durability) => "durability_uncertain",
             Self::Store(_) => "storage_failed",
             Self::Process(ProcessError::CheckFailed) => "check_failed",
@@ -364,6 +368,7 @@ struct PendingArtifact {
     stage: RetainedStage,
     generation: u64,
     checked: bool,
+    has_config: bool,
     previous_metadata: Option<store::Artifact>,
     metadata_committed: bool,
     initial_owner: bool,
@@ -408,6 +413,9 @@ pub struct Manager {
     limits: Limits,
     closed: bool,
     closing: bool,
+    operation: Option<(Instant, Arc<AtomicBool>)>,
+    #[cfg(test)]
+    artifact_cancel_step: Option<bool>,
 }
 impl fmt::Debug for Manager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -459,6 +467,9 @@ impl Manager {
             limits,
             closed: false,
             closing: false,
+            operation: None,
+            #[cfg(test)]
+            artifact_cancel_step: None,
         })
     }
     fn service(
@@ -567,7 +578,109 @@ impl Manager {
                 .map(|run| run.identity.pid),
         }
     }
+    fn operation_check(&self) -> Result<(), Failure> {
+        if let Some((deadline, cancel)) = &self.operation {
+            if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(Failure::Cancelled);
+            }
+            if Instant::now() >= *deadline {
+                return Err(Failure::OperationDeadline);
+            }
+        }
+        Ok(())
+    }
+    fn set_operation(&mut self, budget: Option<(Instant, Arc<AtomicBool>)>) {
+        self.store.set_operation_budget(budget.clone());
+        self.operation = budget;
+    }
+    fn independent_recovery<T>(&mut self, action: impl FnOnce(&mut Self) -> T) -> T {
+        let operation = self.operation.take();
+        self.store.set_operation_budget(None);
+        let result = action(self);
+        self.set_operation(operation);
+        result
+    }
+    pub(crate) fn acquire_verified_stage(
+        &mut self,
+        service: ServiceId,
+        expected: u64,
+        stage: Stage,
+        deadline: Instant,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<Status, ManagerError> {
+        if self.operation.is_some() {
+            return Err(self.error(service, Failure::CheckPending, None));
+        }
+        self.set_operation(Some((deadline, cancel.clone())));
+        let result = (|| {
+            self.operation_check()
+                .map_err(|failure| self.error(service, failure, None))?;
+            let status = self.status(service)?;
+            if !status.artifact_available {
+                self.initialize_staged_artifact(service, expected, stage, Some(cancel))
+            } else {
+                self.check_staged_artifact(service, expected, stage, Some(cancel))?;
+                if let Err(failure) = self.operation_check() {
+                    let recovery = self
+                        .abort_staged_artifact(service)
+                        .err()
+                        .map(|error| error.failure);
+                    return Err(self.error(service, failure, recovery));
+                }
+                self.activate_staged_artifact(service, expected)
+            }
+        })();
+        let result = match result {
+            Ok(status) => match self.operation_check() {
+                Ok(()) => Ok(status),
+                Err(failure) => Err(self.error(service, failure, None)),
+            },
+            Err(error) => Err(error),
+        };
+        let result = if result.as_ref().is_err_and(|error| {
+            matches!(
+                error.failure,
+                Failure::OperationDeadline
+                    | Failure::Cancelled
+                    | Failure::Store(StoreError::OperationDeadline)
+                    | Failure::Store(StoreError::Cancelled)
+                    | Failure::Process(ProcessError::OperationDeadline)
+                    | Failure::Process(ProcessError::Cancelled)
+            )
+        }) && self.services[service.index()].pending_artifact.is_some()
+        {
+            match self.abort_staged_artifact(service) {
+                Ok(()) => result,
+                Err(cleanup) => result.map_err(|mut error| {
+                    error.recovery_failure = Some(cleanup.failure);
+                    error
+                }),
+            }
+        } else {
+            result
+        };
+        self.set_operation(None);
+        result
+    }
+    fn verify_process(
+        &mut self,
+        service: ServiceId,
+        spec: LaunchSpec,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<(), ProcessError> {
+        let operation = self.operation.clone();
+        let owner = self.services[service.index()]
+            .owner
+            .as_mut()
+            .ok_or(ProcessError::Closed)?;
+        if let Some((deadline, flag)) = operation {
+            owner.verify_until(spec, deadline, Some(flag))
+        } else {
+            owner.verify(spec, cancel)
+        }
+    }
     fn ensure(&self, service: ServiceId) -> Result<(), Failure> {
+        self.operation_check()?;
         if self.closed || self.closing {
             return Err(Failure::Closed);
         }
@@ -600,6 +713,90 @@ impl Manager {
                     .map_err(|error| self.error(service, Failure::Store(error), None))
             })
             .transpose()
+    }
+    pub(crate) fn artifact_root(&self, service: ServiceId) -> Option<&Path> {
+        self.services[service.index()]
+            .binding
+            .as_ref()
+            .map(|binding| binding.root.as_path())
+    }
+    pub(crate) fn artifact_version(&self, service: ServiceId) -> Option<&str> {
+        let slot = &self.services[service.index()];
+        if slot.binding.is_none()
+            || slot.pending_artifact.is_some()
+            || slot.artifact_recovery.is_some()
+            || slot.artifact_durability_uncertain
+        {
+            return None;
+        }
+        self.store
+            .service_state(service.into())
+            .artifact
+            .as_ref()
+            .map(|metadata| metadata.version.as_str())
+    }
+    pub(crate) fn acquisition_fetch_budget(&self) -> Result<Duration, Failure> {
+        // Reserve configured child/hook wait limits for checker/abort, three
+        // withdrawals and new+old readiness. Hash/syscall time is separately
+        // guarded by the absolute operation cutoff, not this arithmetic.
+        // Safety recovery keeps independent limits after expiry.
+        let process = self.limits.process;
+        let stop = process
+            .term_grace
+            .checked_add(process.kill_grace)
+            .ok_or(Failure::InvalidInput)?;
+        let checker = process
+            .check_timeout
+            .checked_add(stop.checked_mul(2).ok_or(Failure::InvalidInput)?)
+            .ok_or(Failure::InvalidInput)?;
+        let withdrawals = self
+            .limits
+            .resource_timeout
+            .checked_add(stop)
+            .and_then(|n| n.checked_mul(3))
+            .ok_or(Failure::InvalidInput)?;
+        let readiness = self
+            .limits
+            .readiness_timeout
+            .checked_mul(2)
+            .and_then(|n| n.checked_add(self.limits.resource_timeout))
+            .and_then(|n| n.checked_mul(2))
+            .ok_or(Failure::InvalidInput)?;
+        let reserved = checker
+            .checked_add(withdrawals)
+            .and_then(|n| n.checked_add(readiness))
+            .and_then(|n| n.checked_add(Duration::from_secs(1)))
+            .ok_or(Failure::InvalidInput)?;
+        let remaining = Duration::from_secs(90)
+            .checked_sub(reserved)
+            .ok_or(Failure::InvalidInput)?;
+        if remaining < Duration::from_secs(1) {
+            return Err(Failure::InvalidInput);
+        }
+        Ok(remaining.min(Duration::from_secs(45)))
+    }
+    pub(crate) fn admit_artifact_acquisition(
+        &mut self,
+        service: ServiceId,
+        expected: u64,
+        root: &Path,
+    ) -> Result<Status, ManagerError> {
+        self.generation(service, expected)
+            .map_err(|failure| self.error(service, failure, None))?;
+        let status = self.status(service)?;
+        if status.durability_uncertain
+            || status.needs_recovery
+            || status.pid.is_some() && !status.active
+        {
+            return Err(self.error(service, Failure::NotReady, None));
+        }
+        if self
+            .artifact_root(service)
+            .is_some_and(|fixed| fixed != root)
+        {
+            return Err(self.error(service, Failure::InvalidInput, None));
+        }
+        Ok(status)
     }
     /// The borrowed identity is only this manager's current owned handle.
     /// `status` observes exit; this accessor does not assert liveness/readiness.
@@ -781,10 +978,18 @@ impl Manager {
             stage: retained,
             generation: expected_generation,
             checked: false,
+            has_config: record.is_some(),
             previous_metadata,
             metadata_committed: false,
             initial_owner: true,
         });
+        if let Err(failure) = self.operation_check() {
+            let recovery = self
+                .abort_staged_artifact(service)
+                .err()
+                .map(|error| error.failure);
+            return Err(self.error(service, failure, recovery));
+        }
         let owner = Self::create_process_owner(
             service,
             &binding.root,
@@ -812,11 +1017,7 @@ impl Manager {
                 Sha256::digest(bytes).into(),
                 bytes.len() as u64,
             );
-            let result = self.services[service.index()]
-                .owner
-                .as_mut()
-                .ok_or(ProcessError::Closed)
-                .and_then(|owner| owner.verify(spec, cancel.clone()));
+            let result = self.verify_process(service, spec, cancel.clone());
             if let Err(error) = result {
                 let recovery = self
                     .abort_staged_artifact(service)
@@ -826,6 +1027,7 @@ impl Manager {
             }
         }
         let verification = (|| {
+            self.operation_check()?;
             if cancel
                 .as_ref()
                 .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))
@@ -935,26 +1137,23 @@ impl Manager {
         if admitted.root != binding.root || admitted.path.parent() != Some(binding.root.as_path()) {
             return Err(self.error(service, Failure::InvalidInput, None));
         }
-        let record = self
-            .store
-            .service_state(service.into())
-            .current
+        let record = self.store.service_state(service.into()).current.clone();
+        let bytes = record
             .as_ref()
-            .ok_or_else(|| self.error(service, Failure::NotConfigured, None))?
-            .clone();
-        let bytes = self
-            .store
-            .read_config(service.into(), &record)
+            .map(|record| self.store.read_config(service.into(), record))
+            .transpose()
             .map_err(|error| self.error(service, Failure::Store(error), None))?;
-        let spec = LaunchSpec::new(
-            admitted.path,
-            admitted.extracted_sha256,
-            self.services[service.index()]
-                .config_root
-                .join(&record.file),
-            Sha256::digest(&bytes).into(),
-            bytes.len() as u64,
-        );
+        let spec = record.as_ref().zip(bytes.as_ref()).map(|(record, bytes)| {
+            LaunchSpec::new(
+                admitted.path,
+                admitted.extracted_sha256,
+                self.services[service.index()]
+                    .config_root
+                    .join(&record.file),
+                Sha256::digest(bytes).into(),
+                bytes.len() as u64,
+            )
+        });
         let retained = stage
             .into_retained()
             .map_err(|error| self.error(service, Failure::ArtifactStage(error), None))?;
@@ -962,15 +1161,21 @@ impl Manager {
             stage: retained,
             generation: expected_generation,
             checked: false,
+            has_config: record.is_some(),
             previous_metadata: None,
             metadata_committed: false,
             initial_owner: false,
         });
-        let checked = self.services[service.index()]
-            .owner
-            .as_mut()
-            .ok_or(ProcessError::Closed)
-            .and_then(|owner| owner.verify(spec, cancel));
+        let checked = if cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))
+        {
+            Err(ProcessError::Cancelled)
+        } else if let Some(spec) = spec {
+            self.verify_process(service, spec, cancel)
+        } else {
+            Ok(())
+        };
         if let Err(error) = checked {
             let recovery = self
                 .abort_staged_artifact(service)
@@ -981,6 +1186,7 @@ impl Manager {
         // Native checker success is not enough if accepted config or exact
         // staged inode changed during check. Never create a readiness proof.
         let verified = (|| {
+            self.operation_check()?;
             if self.store.service_state(service.into()).generation != expected_generation {
                 return Err(Failure::Generation);
             }
@@ -989,11 +1195,12 @@ impl Manager {
                 .as_ref()
                 .ok_or(Failure::CheckPending)?;
             pending.stage.admitted().map_err(Failure::ArtifactStage)?;
-            if self
-                .store
-                .read_config(service.into(), &record)
-                .map_err(Failure::Store)?
-                != bytes
+            if let (Some(record), Some(bytes)) = (&record, &bytes)
+                && self
+                    .store
+                    .read_config(service.into(), record)
+                    .map_err(Failure::Store)?
+                    != *bytes
             {
                 return Err(Failure::Store(StoreError::Verification));
             }
@@ -1019,6 +1226,7 @@ impl Manager {
             .as_ref()
             .is_some_and(|pending| {
                 pending.checked
+                    && pending.has_config
                     && pending.generation == self.store.service_state(service.into()).generation
                     && pending.stage.admitted().is_ok()
             })
@@ -1028,9 +1236,11 @@ impl Manager {
         service: ServiceId,
         binding: ArtifactBinding,
     ) -> Result<(), Failure> {
+        self.operation_check()?;
         let file = fs::symlink_metadata(&binding.path).map_err(|_| Failure::ArtifactUnavailable)?;
         let directory =
             fs::symlink_metadata(&binding.root).map_err(|_| Failure::ArtifactUnavailable)?;
+        self.operation_check()?;
         let slot = &mut self.services[service.index()];
         slot.artifact_file = Some(crate::readiness_tun::FileIdentity::from_metadata(&file));
         slot.artifact_directory = Some(crate::readiness_tun::FileIdentity::from_metadata(
@@ -1082,6 +1292,13 @@ impl Manager {
         service: ServiceId,
         proven: bool,
     ) -> Option<Failure> {
+        self.independent_recovery(|manager| manager.restart_proven_artifact_inner(service, proven))
+    }
+    fn restart_proven_artifact_inner(
+        &mut self,
+        service: ServiceId,
+        proven: bool,
+    ) -> Option<Failure> {
         if !proven {
             return None;
         }
@@ -1108,6 +1325,7 @@ impl Manager {
         service: ServiceId,
         expected: u64,
     ) -> Result<(), (Failure, Option<Failure>)> {
+        self.operation_check().map_err(|failure| (failure, None))?;
         if self.closed || self.closing {
             return Err((Failure::Closed, None));
         }
@@ -1131,7 +1349,10 @@ impl Manager {
             .pending_artifact
             .as_ref()
             .ok_or((Failure::CheckPending, None))?;
-        if !pending.checked || pending.generation != expected {
+        if !pending.checked
+            || pending.generation != expected
+            || pending.has_config != self.store.service_state(service.into()).current.is_some()
+        {
             return Err((Failure::CheckPending, None));
         }
         let admitted = pending
@@ -1152,17 +1373,13 @@ impl Manager {
         let new_metadata = admitted.artifact.clone();
         let old_metadata = self.store.service_state(service.into()).artifact.clone();
         let should_run = slot.desired;
-        let accepted_record = self
-            .store
-            .service_state(service.into())
-            .current
-            .as_ref()
-            .ok_or((Failure::NotConfigured, None))?;
-        let accepted = self
-            .store
-            .read_config(service.into(), accepted_record)
-            .map_err(|error| (Failure::Store(error), None))?;
-        drop(accepted);
+        if let Some(record) = self.store.service_state(service.into()).current.as_ref() {
+            let accepted = self
+                .store
+                .read_config(service.into(), record)
+                .map_err(|error| (Failure::Store(error), None))?;
+            drop(accepted);
+        }
         let proven = self
             .freeze(service)
             .map_err(|failure| (failure, None))?
@@ -1174,8 +1391,23 @@ impl Manager {
         self.store
             .admit_artifact_intent(service.into(), expected, Some(new_metadata.clone()))
             .map_err(|error| (Failure::Store(error), None))?;
+        #[cfg(test)]
+        if self.artifact_cancel_step == Some(false) {
+            self.artifact_cancel_step = None;
+            if let Some((_, flag)) = &self.operation {
+                flag.store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
+        self.operation_check().map_err(|failure| (failure, None))?;
         self.withdraw_stop(service)
             .map_err(|failure| (failure, None))?;
+        #[cfg(test)]
+        if self.artifact_cancel_step == Some(true) {
+            self.artifact_cancel_step = None;
+            if let Some((_, flag)) = &self.operation {
+                flag.store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
         let readmission = self.services[service.index()]
             .pending_artifact
             .as_ref()
@@ -1187,17 +1419,17 @@ impl Manager {
                     .map(|_| ())
                     .map_err(Failure::ArtifactStage)
             });
+        if let Err(failure) = self.operation_check() {
+            let recovery = self.restart_proven_artifact_after_failure(service, proven);
+            return Err((failure, recovery));
+        }
         if let Err(failure) = readmission {
             let recovery = self.restart_proven_artifact_after_failure(service, proven);
             return Err((failure, recovery));
         }
-        let accepted_record = self
-            .store
-            .service_state(service.into())
-            .current
-            .as_ref()
-            .ok_or((Failure::NotConfigured, None))?;
-        if let Err(error) = self.store.read_config(service.into(), accepted_record) {
+        if let Some(record) = self.store.service_state(service.into()).current.as_ref()
+            && let Err(error) = self.store.read_config(service.into(), record)
+        {
             let recovery = self.restart_proven_artifact_after_failure(service, proven);
             return Err((Failure::Store(error), recovery));
         }
@@ -1269,6 +1501,12 @@ impl Manager {
     /// Explicit same-owner recovery after failed artifact activation. A failed
     /// withdrawal keeps the exact new child/binding and both verified artifacts.
     pub fn recover_staged_artifact(&mut self, service: ServiceId) -> Result<Status, ManagerError> {
+        self.independent_recovery(|manager| manager.recover_staged_artifact_inner(service))
+    }
+    fn recover_staged_artifact_inner(
+        &mut self,
+        service: ServiceId,
+    ) -> Result<Status, ManagerError> {
         if self.closed || self.closing {
             return Err(self.error(service, Failure::Closed, None));
         }
@@ -1352,6 +1590,9 @@ impl Manager {
         self.abort_check(service)
     }
     pub fn abort_check(&mut self, service: ServiceId) -> Result<(), ManagerError> {
+        self.independent_recovery(|manager| manager.abort_check_inner(service))
+    }
+    fn abort_check_inner(&mut self, service: ServiceId) -> Result<(), ManagerError> {
         if self.closed {
             return Err(self.error(service, Failure::Closed, None));
         }
@@ -1405,6 +1646,9 @@ impl Manager {
         stage: HookStage,
         record: &ConfigRecord,
     ) -> Result<(), Failure> {
+        if stage != HookStage::Cleanup {
+            self.operation_check()?;
+        }
         let config = config_identity(record);
         let duration = match stage {
             HookStage::PreStart | HookStage::Readiness => self.limits.readiness_timeout,
@@ -1447,9 +1691,21 @@ impl Manager {
                 .owner
                 .as_ref()
                 .map(|_| &observe as &dyn Fn() -> Result<process::Status, ProcessError>),
-            deadline: Instant::now() + duration,
+            deadline: if stage == HookStage::Cleanup {
+                Instant::now() + duration
+            } else {
+                self.operation
+                    .as_ref()
+                    .map_or(Instant::now() + duration, |(deadline, _)| {
+                        (*deadline).min(Instant::now() + duration)
+                    })
+            },
         };
-        self.hooks.call(stage, &context)
+        self.hooks.call(stage, &context)?;
+        if stage != HookStage::Cleanup {
+            self.operation_check()?;
+        }
+        Ok(())
     }
     fn live_record(&self, service: ServiceId) -> Result<ConfigRecord, Failure> {
         let slot = &self.services[service.index()];
@@ -1510,11 +1766,17 @@ impl Manager {
             .config_root
             .join(&record.file);
         let spec = self.spec(service, &path, bytes)?;
-        let launch = self.services[service.index()]
+        self.operation_check()?;
+        let operation = self.operation.clone();
+        let owner = self.services[service.index()]
             .owner
             .as_mut()
-            .ok_or(Failure::ArtifactUnavailable)?
-            .start(spec);
+            .ok_or(Failure::ArtifactUnavailable)?;
+        let launch = if let Some((deadline, cancel)) = operation {
+            owner.start_until(spec, deadline, Some(cancel))
+        } else {
+            owner.start(spec)
+        };
         // A launch/pipe observation error can still retain a child. Capture its
         // owned identity so failed-launch cleanup cannot lose the handle.
         let observed = match launch {
@@ -1614,6 +1876,7 @@ impl Manager {
         Ok(())
     }
     fn start_accepted(&mut self, service: ServiceId) -> Result<(), Failure> {
+        self.operation_check()?;
         let record = self
             .store
             .service_state(service.into())
@@ -2421,6 +2684,153 @@ IFS= read -r value < "$TMPDIR/wait"
                 .unwrap()
                 .artifact_available
         );
+        manager.close().unwrap();
+    }
+    #[test]
+    fn acquire_reserves_configured_recovery_budgets_without_extending_limits() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.unbound();
+        assert_eq!(
+            manager.acquisition_fetch_budget().unwrap(),
+            Duration::from_secs(45)
+        );
+        manager.limits = Limits::default();
+        assert_eq!(
+            manager.acquisition_fetch_budget().unwrap(),
+            Duration::from_secs(43)
+        );
+        manager.limits.readiness_timeout = Duration::from_secs(30);
+        manager.limits.resource_timeout = Duration::from_secs(30);
+        assert_eq!(
+            manager.acquisition_fetch_budget(),
+            Err(Failure::InvalidInput)
+        );
+        manager.close().unwrap();
+    }
+    #[test]
+    fn expired_stage_acquisition_has_zero_withdrawal_or_metadata_and_preserves_old_run() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.manager();
+        let service = ServiceId::SingBox;
+        manager.configure(service, 0, b"good\n", None).unwrap();
+        let old = manager.start(service).unwrap();
+        let manifest = fs::read(fixture.root.join("services/sing-box/state.json")).unwrap();
+        let stage = fixture.stage();
+        let path = stage.admitted().unwrap().path.to_path_buf();
+        let error = manager
+            .acquire_verified_stage(
+                service,
+                1,
+                stage,
+                Instant::now(),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap_err();
+        assert_eq!(error.failure, Failure::OperationDeadline);
+        assert_eq!(manager.status(service).unwrap().pid, old.pid);
+        assert_eq!(fixture.cleanup.get(), 0);
+        assert_eq!(
+            fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+            manifest
+        );
+        assert!(!path.exists());
+        assert!(manager.operation.is_none());
+        manager.close().unwrap();
+    }
+    #[test]
+    fn cancelled_stage_acquisition_cannot_initialize_missing_owner_or_commit_metadata() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.unbound();
+        let service = ServiceId::SingBox;
+        let stage = fixture.stage();
+        let path = stage.admitted().unwrap().path.to_path_buf();
+        let error = manager
+            .acquire_verified_stage(
+                service,
+                0,
+                stage,
+                Instant::now() + Duration::from_secs(1),
+                Arc::new(AtomicBool::new(true)),
+            )
+            .unwrap_err();
+        assert_eq!(error.failure, Failure::Cancelled);
+        assert!(manager.services[service.index()].owner.is_none());
+        assert!(manager.store.snapshot(service.into()).artifact.is_none());
+        assert!(!path.exists());
+        assert!(manager.operation.is_none());
+        manager.close().unwrap();
+    }
+    #[test]
+    fn cancellation_after_verified_stage_before_withdrawal_keeps_old_run_and_manifest() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.manager();
+        let service = ServiceId::SingBox;
+        manager.configure(service, 0, b"good\n", None).unwrap();
+        let old = manager.start(service).unwrap();
+        let manifest = fs::read(fixture.root.join("services/sing-box/state.json")).unwrap();
+        let stage = fixture.stage();
+        let path = stage.admitted().unwrap().path.to_path_buf();
+        manager.artifact_cancel_step = Some(false);
+        let error = manager
+            .acquire_verified_stage(
+                service,
+                1,
+                stage,
+                Instant::now() + Duration::from_secs(3),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap_err();
+        assert_eq!(error.failure, Failure::Cancelled);
+        assert_eq!(error.recovery_failure, None);
+        let actual = manager.status(service).unwrap();
+        assert_eq!(actual.pid, old.pid);
+        assert!(actual.active);
+        assert_eq!(fixture.cleanup.get(), 0);
+        assert_eq!(
+            fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+            manifest
+        );
+        assert!(!path.exists());
+        assert!(manager.operation.is_none());
+        manager.close().unwrap();
+    }
+    #[test]
+    fn cancellation_after_withdrawal_restores_old_proven_run_with_independent_budget() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.manager();
+        let service = ServiceId::SingBox;
+        manager.configure(service, 0, b"good\n", None).unwrap();
+        let old = manager.start(service).unwrap();
+        let manifest = fs::read(fixture.root.join("services/sing-box/state.json")).unwrap();
+        let stage = fixture.stage();
+        let path = stage.admitted().unwrap().path.to_path_buf();
+        manager.artifact_cancel_step = Some(true);
+        let error = manager
+            .acquire_verified_stage(
+                service,
+                1,
+                stage,
+                Instant::now() + Duration::from_secs(3),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap_err();
+        assert_eq!(error.failure, Failure::Cancelled);
+        assert_eq!(error.recovery_failure, None);
+        let actual = manager.status(service).unwrap();
+        assert_ne!(actual.pid, old.pid);
+        assert!(actual.active && actual.restored);
+        assert_eq!(fixture.cleanup.get(), 1);
+        assert_eq!(
+            fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+            manifest
+        );
+        assert!(!path.exists());
+        assert!(manager.operation.is_none());
         manager.close().unwrap();
     }
 }

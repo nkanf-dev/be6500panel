@@ -83,6 +83,12 @@ impl Fixture {
         self.runtime_mode(true)
     }
     fn runtime_mode(&self, saved: bool) -> Guard {
+        self.runtime_bound_mode(saved, true)
+    }
+    fn unbound_runtime(&self) -> Guard {
+        self.runtime_bound_mode(false, false)
+    }
+    fn runtime_bound_mode(&self, saved: bool, bound: bool) -> Guard {
         let binding = ArtifactBinding::trusted_local(
             ServiceId::SingBox,
             self.root.join("artifacts"),
@@ -121,7 +127,7 @@ impl Fixture {
                 self.root.join("services"),
                 self.root.join("run"),
                 ArtifactBindings {
-                    sing_box: Some(binding),
+                    sing_box: bound.then_some(binding),
                     frpc: None,
                 },
                 hooks,
@@ -1385,4 +1391,456 @@ impl Drop for CancelOnDrop {
     fn drop(&mut self) {
         self.0.store(true, Ordering::Release);
     }
+}
+
+fn artifact_download_fixture(raw: Vec<u8>) -> (String, thread::JoinHandle<Vec<u8>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let peer = thread::spawn(move || {
+        let mut stream = listener.accept().unwrap().0;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut bytes = [0u8; 1024];
+        loop {
+            let n = stream.read(&mut bytes).unwrap();
+            assert!(n > 0);
+            request.extend_from_slice(&bytes[..n]);
+            if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+            assert!(request.len() <= 16384);
+        }
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            raw.len()
+        );
+        stream.write_all(header.as_bytes()).unwrap();
+        stream.write_all(&raw).unwrap();
+        request
+    });
+    (format!("http://{address}/fake-core"), peer)
+}
+fn acquire_payload(url: &str, raw: &[u8], version: &str) -> Value {
+    json!({"service":"sing-box","artifact":{"url":url,"sha256":format!("{:x}",Sha256::digest(raw)),"compression":"none","version":version}})
+}
+#[test]
+fn authenticated_acquire_preserves_actual_owner_on_download_check_and_cleanup_failures() {
+    use be6500_panel::artifact_source::SourcePolicy;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.saved_runtime();
+    owner
+        .runtime
+        .load_artifact_source(
+            SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+            &fixture.root.join("artifacts"),
+            &fixture.root.join("artifacts"),
+        )
+        .unwrap();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+        &cookie,
+        200,
+    );
+    let initial = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    let pid = initial["pid"].as_u64().unwrap();
+    let manifest = fs::read(fixture.root.join("services/sing-box/state.json")).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}/fake-core", listener.local_addr().unwrap());
+    let payload = acquire_payload(&url, HELPER.as_bytes(), "refused");
+    body(
+        &exchange(
+            &service,
+            Some(&mut owner.runtime),
+            request(
+                "POST",
+                "/api/runtime/acquire",
+                Some(&payload),
+                "",
+                "http://localhost",
+            ),
+        ),
+        401,
+    );
+    body(
+        &exchange(
+            &service,
+            Some(&mut owner.runtime),
+            request(
+                "POST",
+                "/api/runtime/acquire",
+                Some(&payload),
+                &cookie,
+                "http://foreign.test",
+            ),
+        ),
+        403,
+    );
+    for invalid in [
+        json!({"service":"sing-box","artifact":{"url":url}}),
+        json!({"service":"sing-box","artifact":null}),
+        json!({"service":"sing-box","artifact":{"url":url,"sha256":"x","compression":"none","version":"bad"}}),
+        json!({"service":"sing-box","artifact":{"url":url,"sha256":"ab".repeat(32),"compression":"zip","version":"bad"}}),
+        json!({"service":"sing-box","artifact":{"url":"file:///private/path","sha256":"ab".repeat(32),"compression":"none","version":"bad"}}),
+    ] {
+        let rejected = call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/acquire",
+            Some(&invalid),
+            &cookie,
+            400,
+        );
+        assert!(rejected.get("error").is_some());
+    }
+    let mut stale = payload.clone();
+    stale["generation"] = 0.into();
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/acquire",
+            Some(&stale),
+            &cookie,
+            409
+        )["error"]["code"],
+        "generation_conflict"
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(
+        fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+        manifest
+    );
+    let (url, peer) = artifact_download_fixture(HELPER.as_bytes().to_vec());
+    let mut bad_digest = acquire_payload(&url, HELPER.as_bytes(), "wrong-digest");
+    bad_digest["artifact"]["sha256"] = "00".repeat(32).into();
+    let failed = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/acquire",
+        Some(&bad_digest),
+        &cookie,
+        422,
+    );
+    assert_eq!(failed["error"]["code"], "artifact_acquire_failed");
+    assert_eq!(failed["status"]["pid"], pid);
+    peer.join().unwrap();
+    let bad_core = b"#!/bin/sh\nexit 7\n";
+    let (url, peer) = artifact_download_fixture(bad_core.to_vec());
+    let rejected = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/acquire",
+        Some(&acquire_payload(&url, bad_core, "bad-checker")),
+        &cookie,
+        422,
+    );
+    assert_eq!(rejected["error"]["code"], "config_check_failed");
+    assert_eq!(rejected["status"]["pid"], pid);
+    peer.join().unwrap();
+    fixture.reject.set(true);
+    let (url, peer) = artifact_download_fixture(HELPER.as_bytes().to_vec());
+    let failed = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/acquire",
+        Some(&acquire_payload(&url, HELPER.as_bytes(), "cleanup-failed")),
+        &cookie,
+        503,
+    );
+    assert_eq!(failed["error"]["code"], "cleanup_failed");
+    assert_eq!(failed["status"]["pid"], pid);
+    peer.join().unwrap();
+    assert_eq!(
+        fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+        manifest
+    );
+    fixture.reject.set(false);
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    let (url, peer) = artifact_download_fixture(HELPER.as_bytes().to_vec());
+    let acquired = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/acquire",
+        Some(&acquire_payload(&url, HELPER.as_bytes(), "qualified")),
+        &cookie,
+        200,
+    );
+    peer.join().unwrap();
+    assert_eq!(acquired["generation"], 1);
+    assert_eq!(acquired["state"], "running");
+    assert_eq!(acquired["version"], "qualified");
+    assert_eq!(acquired["ready"], true);
+    assert_eq!(acquired["needsRecovery"], false);
+    assert_eq!(acquired["desired"], true);
+    assert_eq!(
+        fs::read_dir(fixture.root.join("artifacts"))
+            .unwrap()
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn acquire_initial_and_no_config_replacement_stay_off_and_source_setup_retains_owner() {
+    use be6500_panel::artifact_source::SourcePolicy;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.unbound_runtime();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let empty = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(empty["services"][0]["artifactAvailable"], false);
+    let unavailable = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/acquire",
+        Some(&acquire_payload(
+            "https://example.invalid/core",
+            HELPER.as_bytes(),
+            "not-fetched",
+        )),
+        &cookie,
+        503,
+    );
+    assert_eq!(
+        unavailable["error"]["code"],
+        "artifact_acquisition_unavailable"
+    );
+    assert!(
+        owner
+            .runtime
+            .load_artifact_source(
+                SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+                &fixture.root.join("missing-root"),
+                &fixture.root.join("artifacts")
+            )
+            .is_err()
+    );
+    owner
+        .runtime
+        .load_artifact_source(
+            SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+            &fixture.root.join("artifacts"),
+            &fixture.root.join("artifacts"),
+        )
+        .unwrap();
+    let (url, peer) = artifact_download_fixture(HELPER.as_bytes().to_vec());
+    let acquired = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/acquire",
+        Some(&acquire_payload(&url, HELPER.as_bytes(), "initial")),
+        &cookie,
+        200,
+    );
+    peer.join().unwrap();
+    assert_eq!(acquired["state"], "notconfigured");
+    assert_eq!(acquired["generation"], 0);
+    assert_eq!(acquired["version"], "initial");
+    assert_eq!(acquired["artifactAvailable"], true);
+    assert_eq!(acquired["desired"], false);
+    assert_eq!(acquired["ready"], false);
+    assert!(acquired.get("pid").is_none());
+    assert!(!fixture.root.join("run/sing-box/started").exists());
+    let (url, peer) = artifact_download_fixture(HELPER.as_bytes().to_vec());
+    let changed = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/acquire",
+        Some(&acquire_payload(&url, HELPER.as_bytes(), "replacement-off")),
+        &cookie,
+        200,
+    );
+    peer.join().unwrap();
+    assert_eq!(changed["generation"], 0);
+    assert_eq!(changed["state"], "notconfigured");
+    assert_eq!(changed["version"], "replacement-off");
+    assert_eq!(
+        fs::read_dir(fixture.root.join("artifacts"))
+            .unwrap()
+            .count(),
+        2
+    );
+    assert!(!fixture.root.join("run/sing-box/started").exists());
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+        &cookie,
+        200,
+    );
+    assert!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/start",
+            Some(&json!({"service":"sing-box"})),
+            &cookie,
+            200
+        )["pid"]
+            .as_u64()
+            .is_some()
+    );
+    assert!(
+        owner
+            .runtime
+            .load_artifact_source(
+                SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+                &fixture.root.join("artifacts"),
+                &fixture.root.join("artifacts")
+            )
+            .is_err()
+    );
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime",
+            None,
+            &cookie,
+            200
+        )["services"][0]["state"],
+        "running"
+    );
+}
+#[test]
+fn pinned_artifact_directory_replacement_and_bad_dtos_refuse_before_download() {
+    use be6500_panel::artifact_source::SourcePolicy;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.unbound_runtime();
+    owner
+        .runtime
+        .load_artifact_source(
+            SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+            &fixture.root.join("artifacts"),
+            &fixture.root.join("artifacts"),
+        )
+        .unwrap();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}/core", listener.local_addr().unwrap());
+    let good = acquire_payload(&url, HELPER.as_bytes(), "refused");
+    for values in [
+        json!([url, "ab".repeat(32), "none", "array"]),
+        json!([url, "ab".repeat(32), "none"]),
+        json!([url, "ab".repeat(32), "none", "array", true]),
+    ] {
+        let invalid = json!({"service":"sing-box","artifact":values});
+        assert_eq!(
+            call(
+                &service,
+                &mut owner.runtime,
+                "/api/runtime/acquire",
+                Some(&invalid),
+                &cookie,
+                400
+            )["error"]["code"],
+            "invalid_json"
+        );
+    }
+    for change in 0..6 {
+        let mut bad = good.clone();
+        match change {
+            0 => bad["generation"] = Value::Null,
+            1 => bad["artifact"]["extra"] = true.into(),
+            2 => {
+                bad["artifact"].as_object_mut().unwrap().remove("version");
+            }
+            3 => bad["artifact"]["sha256"] = Value::Null,
+            4 => bad["service"] = "foreign".into(),
+            _ => bad["extra"] = true.into(),
+        };
+        assert_eq!(
+            call(
+                &service,
+                &mut owner.runtime,
+                "/api/runtime/acquire",
+                Some(&bad),
+                &cookie,
+                400
+            )["error"]["code"],
+            "invalid_json"
+        );
+    }
+    let digest = format!("{:x}", Sha256::digest(HELPER.as_bytes()));
+    let duplicate_body = format!(
+        r#"{{"service":"sing-box","artifact":{{"url":"{url}","sha256":"{digest}","compression":"none","version":"one","version":"two"}}}}"#
+    );
+    let head = format!(
+        "POST /api/runtime/acquire HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie}\r\nOrigin: http://localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        duplicate_body.len()
+    );
+    let mut request = head.into_bytes();
+    request.extend_from_slice(duplicate_body.as_bytes());
+    assert_eq!(
+        body(&exchange(&service, Some(&mut owner.runtime), request), 400)["error"]["code"],
+        "invalid_json"
+    );
+    let retained = fixture.root.join("artifacts-retained");
+    fs::rename(fixture.root.join("artifacts"), &retained).unwrap();
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(fixture.root.join("artifacts"))
+        .unwrap();
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/acquire",
+            Some(&good),
+            &cookie,
+            400
+        )["error"]["code"],
+        "invalid_input"
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert!(!fixture.root.join("services/sing-box/state.json").exists());
 }
