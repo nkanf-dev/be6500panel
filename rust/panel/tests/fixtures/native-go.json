@@ -1,0 +1,2350 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "default-native-tun",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"node.example\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"223.5.5.5/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"outbound\": \"proxy\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "9d43c975bc1c67a0ca46f0bd2cf599160d1e90a793ccdd4b3132c6aa3eeac879",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "config",
+          "index": -1,
+          "code": "cn-rules-incomplete",
+          "message": "domestic split needs staged cn-domain and cn-ip SRS; missing classifications use the default proxy policy"
+        }
+      ],
+      "endpointHosts": [
+        "dns.alidns.com",
+        "node.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "custom-tun-ports-separate-binds",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": [],
+        "overrides": [],
+        "ruleSets": [],
+        "endpoints": [],
+        "bootstrapDomains": [],
+        "managementIPs": [],
+        "datapath": "routed-tun",
+        "routedTUN": {
+          "interfaceName": "b6p-fixture_1",
+          "address": "10.99.0.1/30"
+        },
+        "ipv6": "direct",
+        "failure": "direct",
+        "ports": {
+          "mixed": 7893,
+          "tProxy": 7893,
+          "dns": 1153
+        },
+        "listenAddress": "0.0.0.0",
+        "mixedListenAddress": "127.0.0.2",
+        "tProxyListenAddress": "public-ignored-tproxy-address",
+        "dnsListenAddress": "::",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": {
+          "server": "",
+          "port": 5353,
+          "domains": null,
+          "hostnames": null
+        },
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": []
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 5353,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.2\",\n      \"listen_port\": 7893,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"10.99.0.1/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-fixture_1\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"::\",\n      \"listen_port\": 1153,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"node.example\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"223.5.5.5/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"outbound\": \"proxy\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "d160ada548daf25dfb1c70e6de1504ad18325f7f86d817c670885f7b2ee9e7bc",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "config",
+          "index": -1,
+          "code": "cn-rules-incomplete",
+          "message": "domestic split needs staged cn-domain and cn-ip SRS; missing classifications use the default proxy policy"
+        }
+      ],
+      "endpointHosts": [
+        "dns.alidns.com",
+        "node.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "custom-dns-router-authority-aliases-ptr",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "192.0.2.2",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": [
+          {
+            "kind": "domain-suffix",
+            "value": "office.home",
+            "target": "block",
+            "noResolve": false,
+            "index": 4
+          },
+          {
+            "kind": "domain",
+            "value": "miwifi.com",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 9
+          }
+        ],
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": [
+          "192.168.31.1"
+        ],
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "192.0.2.53",
+          "port": 8853,
+          "serverName": "direct-resolver.example"
+        },
+        "proxyDNS": {
+          "server": "2001:db8::53",
+          "port": 9853,
+          "serverName": "proxy-resolver.example"
+        },
+        "localDNS": {
+          "server": "192.168.31.1",
+          "port": 0,
+          "domains": [
+            "Office.Home.",
+            "office.home"
+          ],
+          "hostnames": [
+            "Router.Office.Home.",
+            "router.office.home",
+            "LEASE-ONE."
+          ]
+        },
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"direct-resolver.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\",\n          \"office.home\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"lease-one\",\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"router.office.home\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"action\": \"reject\",\n        \"domain_suffix\": [\n          \"office.home\"\n        ]\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"192.0.2.53\",\n        \"server_port\": 8853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"direct-resolver.example\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"2001:db8::53\",\n        \"server_port\": 9853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"proxy-resolver.example\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"192.168.31.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"192.0.2.2\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"192.0.2.2/32\",\n          \"192.0.2.53/32\",\n          \"192.168.31.1/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"direct-resolver.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\",\n          \"office.home\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\",\n          \"office.home\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"lease-one\",\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"router.office.home\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"lease-one\",\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"router.office.home\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"action\": \"reject\",\n        \"domain_suffix\": [\n          \"office.home\"\n        ]\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\"\n        ],\n        \"outbound\": \"proxy\"\n      },\n      {\n        \"outbound\": \"proxy\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "9a7d9fe7c68d5490ed4c52387a5e8324b831fb36b8b384eed6d1404a0fb83ea0",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "config",
+          "index": -1,
+          "code": "cn-rules-incomplete",
+          "message": "domestic split needs staged cn-domain and cn-ip SRS; missing classifications use the default proxy policy"
+        }
+      ],
+      "endpointHosts": [
+        "192.0.2.2",
+        "direct-resolver.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "fake-ip-domain-block-direct-proxy",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "blocked.example",
+            "target": "block",
+            "noResolve": false,
+            "index": 11
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "direct.example",
+            "target": "direct",
+            "noResolve": false,
+            "index": 13
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "proxy-key",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 17
+          },
+          {
+            "kind": "match",
+            "value": "",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 19
+          }
+        ],
+        "overrides": null,
+        "ruleSets": [
+          {
+            "tag": "proxy-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/proxy-domain.srs",
+            "sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+            "sourceURL": "https://assets.example/proxy-domain.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-ip",
+            "kind": "ip",
+            "path": "/synthetic/be6500-native/cn-ip.srs",
+            "sha256": "0202020202020202020202020202020202020202020202020202020202020202",
+            "sourceURL": "https://assets.example/cn-ip.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/cn-domain.srs",
+            "sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+            "sourceURL": "https://assets.example/cn-domain.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": true,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"action\": \"reject\",\n        \"domain\": [\n          \"blocked.example\"\n        ]\n      },\n      {\n        \"domain_suffix\": [\n          \"direct.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"domain_keyword\": [\n          \"proxy-key\"\n        ],\n        \"query_type\": [\n          \"A\",\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 60,\n        \"server\": \"dns-fake\"\n      },\n      {\n        \"domain_keyword\": [\n          \"proxy-key\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"cn-domain\"\n        ],\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"query_type\": [\n          \"A\",\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 60,\n        \"rule_set\": [\n          \"proxy-domain\"\n        ],\n        \"server\": \"dns-fake\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"proxy-domain\"\n        ],\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"query_type\": [\n          \"A\",\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 60,\n        \"server\": \"dns-fake\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      },\n      {\n        \"inet4_range\": \"198.18.0.0/15\",\n        \"tag\": \"dns-fake\",\n        \"type\": \"fakeip\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"node.example\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-domain.srs\",\n        \"tag\": \"cn-domain\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-ip.srs\",\n        \"tag\": \"cn-ip\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/proxy-domain.srs\",\n        \"tag\": \"proxy-domain\",\n        \"type\": \"local\"\n      }\n    ],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"223.5.5.5/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"action\": \"reject\",\n        \"domain\": [\n          \"blocked.example\"\n        ]\n      },\n      {\n        \"domain_suffix\": [\n          \"direct.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain_keyword\": [\n          \"proxy-key\"\n        ],\n        \"outbound\": \"proxy\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-domain\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\",\n        \"rule_set\": [\n          \"proxy-domain\"\n        ]\n      },\n      {\n        \"action\": \"resolve\",\n        \"server\": \"dns-proxy\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-ip\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "f19b61c7809a3b6398dfcf7e6bbeba6f2eba6b80c5ffc52cad7c595000eb4714",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "config",
+          "index": -1,
+          "code": "fakeip-memory",
+          "message": "fake-IP identities use an unbounded native RAM map; restart or direct-failure withdrawal needs coordinated stale DNS cleanup before recapture"
+        }
+      ],
+      "endpointHosts": [
+        "dns.alidns.com",
+        "node.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "ordered-matchers-no-resolve-controlled-sets",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "UPPER.Example",
+            "target": "direct",
+            "noResolve": false,
+            "index": 7
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "proxy.example",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 11
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "公开\u003c\u003e\u0026\u2028\u2029",
+            "target": "block",
+            "noResolve": false,
+            "index": 13
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "192.0.2.129/24",
+            "target": "direct",
+            "noResolve": true,
+            "index": 17
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "2001:db8::1/64",
+            "target": "block",
+            "noResolve": false,
+            "index": 19
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct",
+            "noResolve": true,
+            "index": 23
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "block",
+            "noResolve": false,
+            "index": 29
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-domain",
+            "target": "direct",
+            "noResolve": false,
+            "index": 31
+          },
+          {
+            "kind": "rule-set",
+            "value": "proxy-domain",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 37
+          }
+        ],
+        "overrides": [
+          {
+            "kind": "domain",
+            "value": "override.example",
+            "target": "block",
+            "noResolve": false,
+            "index": 501
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "override-direct.example",
+            "target": "direct",
+            "noResolve": false,
+            "index": 502
+          }
+        ],
+        "ruleSets": [
+          {
+            "tag": "proxy-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/proxy-domain.srs",
+            "sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+            "sourceURL": "https://assets.example/proxy-domain.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-ip",
+            "kind": "ip",
+            "path": "/synthetic/be6500-native/cn-ip.srs",
+            "sha256": "0202020202020202020202020202020202020202020202020202020202020202",
+            "sourceURL": "https://assets.example/cn-ip.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/cn-domain.srs",
+            "sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+            "sourceURL": "https://assets.example/cn-domain.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"action\": \"reject\",\n        \"domain\": [\n          \"override.example\"\n        ]\n      },\n      {\n        \"domain_suffix\": [\n          \"override-direct.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"domain\": [\n          \"UPPER.Example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"domain_suffix\": [\n          \"proxy.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"action\": \"reject\",\n        \"domain_keyword\": [\n          \"公开\\u003c\\u003e\\u0026\\u2028\\u2029\"\n        ]\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"cn-domain\"\n        ],\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"proxy-domain\"\n        ],\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"cn-domain\"\n        ],\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"proxy-domain\"\n        ],\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"node.example\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-domain.srs\",\n        \"tag\": \"cn-domain\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-ip.srs\",\n        \"tag\": \"cn-ip\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/proxy-domain.srs\",\n        \"tag\": \"proxy-domain\",\n        \"type\": \"local\"\n      }\n    ],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"223.5.5.5/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"action\": \"reject\",\n        \"domain\": [\n          \"override.example\"\n        ]\n      },\n      {\n        \"domain_suffix\": [\n          \"override-direct.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"UPPER.Example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain_suffix\": [\n          \"proxy.example\"\n        ],\n        \"outbound\": \"proxy\"\n      },\n      {\n        \"action\": \"reject\",\n        \"domain_keyword\": [\n          \"公开\\u003c\\u003e\\u0026\\u2028\\u2029\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"192.0.2.129/24\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"server\": \"dns-proxy\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"action\": \"reject\",\n        \"ip_cidr\": [\n          \"2001:db8::1/64\"\n        ]\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-ip\"\n        ]\n      },\n      {\n        \"action\": \"resolve\",\n        \"server\": \"dns-proxy\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"action\": \"reject\",\n        \"rule_set\": [\n          \"cn-ip\"\n        ]\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-domain\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\",\n        \"rule_set\": [\n          \"proxy-domain\"\n        ]\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-domain\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\",\n        \"rule_set\": [\n          \"proxy-domain\"\n        ]\n      },\n      {\n        \"action\": \"resolve\",\n        \"server\": \"dns-proxy\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-ip\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "0855e419f2fa5142c0926771e48b17ce0087b0eabb9b630ed77e9195eff7eb74",
+      "coreVersion": "1.14.2",
+      "diagnostics": null,
+      "endpointHosts": [
+        "dns.alidns.com",
+        "node.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "endpoint-bootstrap-bypass-partial-cn-domain",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "198.51.100.9",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": [
+          {
+            "kind": "ip-cidr",
+            "value": "203.0.113.7/32",
+            "target": "block",
+            "noResolve": true,
+            "index": 40
+          },
+          {
+            "kind": "domain",
+            "value": "a-bootstrap.example",
+            "target": "block",
+            "noResolve": false,
+            "index": 41
+          }
+        ],
+        "ruleSets": [
+          {
+            "tag": "cn-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/cn-domain.srs",
+            "sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+            "sourceURL": "https://assets.example/cn-domain.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": [
+          "203.0.113.7",
+          "2001:db8::7",
+          "203.0.113.7"
+        ],
+        "bootstrapDomains": [
+          "z-bootstrap.example",
+          "a-bootstrap.example",
+          "a-bootstrap.example"
+        ],
+        "managementIPs": [
+          "192.168.31.1",
+          "fd00::1"
+        ],
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"a-bootstrap.example\",\n          \"dns.alidns.com\",\n          \"z-bootstrap.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"action\": \"reject\",\n        \"domain\": [\n          \"a-bootstrap.example\"\n        ]\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"cn-domain\"\n        ],\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"198.51.100.9\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-domain.srs\",\n        \"tag\": \"cn-domain\",\n        \"type\": \"local\"\n      }\n    ],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"192.168.31.1/32\",\n          \"198.51.100.9/32\",\n          \"2001:db8::7/128\",\n          \"203.0.113.7/32\",\n          \"223.5.5.5/32\",\n          \"fd00::1/128\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"a-bootstrap.example\",\n          \"dns.alidns.com\",\n          \"z-bootstrap.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"action\": \"reject\",\n        \"ip_cidr\": [\n          \"203.0.113.7/32\"\n        ]\n      },\n      {\n        \"action\": \"reject\",\n        \"domain\": [\n          \"a-bootstrap.example\"\n        ]\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-domain\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "df727ead391bb568609a8aea504a3fcbfeb6858001be4c65463112fc96da5220",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "config",
+          "index": -1,
+          "code": "cn-rules-incomplete",
+          "message": "domestic split needs staged cn-domain and cn-ip SRS; missing classifications use the default proxy policy"
+        }
+      ],
+      "endpointHosts": [
+        "198.51.100.9",
+        "2001:db8::7",
+        "203.0.113.7",
+        "a-bootstrap.example",
+        "dns.alidns.com",
+        "z-bootstrap.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "partial-cn-ip-resolving-fallback",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "explicit-proxy.example",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 2
+          }
+        ],
+        "overrides": null,
+        "ruleSets": [
+          {
+            "tag": "cn-ip",
+            "kind": "ip",
+            "path": "/synthetic/be6500-native/cn-ip.srs",
+            "sha256": "0202020202020202020202020202020202020202020202020202020202020202",
+            "sourceURL": "https://assets.example/cn-ip.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"domain\": [\n          \"explicit-proxy.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"node.example\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-ip.srs\",\n        \"tag\": \"cn-ip\",\n        \"type\": \"local\"\n      }\n    ],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"223.5.5.5/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"domain\": [\n          \"explicit-proxy.example\"\n        ],\n        \"outbound\": \"proxy\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"server\": \"dns-proxy\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-ip\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "60cdca39df58f075660584a5a0074b8225225835f0cad8e3bd0f8250c999e40a",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "config",
+          "index": -1,
+          "code": "cn-rules-incomplete",
+          "message": "domestic split needs staged cn-domain and cn-ip SRS; missing classifications use the default proxy policy"
+        }
+      ],
+      "endpointHosts": [
+        "dns.alidns.com",
+        "node.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "terminal-match-direct",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "before-match.example",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 5
+          },
+          {
+            "kind": "match",
+            "value": "",
+            "target": "direct",
+            "noResolve": false,
+            "index": 7
+          },
+          {
+            "kind": "domain",
+            "value": "unreachable.example",
+            "target": "direct",
+            "noResolve": false,
+            "index": 99
+          }
+        ],
+        "overrides": null,
+        "ruleSets": [
+          {
+            "tag": "proxy-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/proxy-domain.srs",
+            "sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+            "sourceURL": "https://assets.example/proxy-domain.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-ip",
+            "kind": "ip",
+            "path": "/synthetic/be6500-native/cn-ip.srs",
+            "sha256": "0202020202020202020202020202020202020202020202020202020202020202",
+            "sourceURL": "https://assets.example/cn-ip.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/cn-domain.srs",
+            "sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+            "sourceURL": "https://assets.example/cn-domain.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"domain\": [\n          \"before-match.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"cn-domain\"\n        ],\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"proxy-domain\"\n        ],\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"node.example\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-domain.srs\",\n        \"tag\": \"cn-domain\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-ip.srs\",\n        \"tag\": \"cn-ip\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/proxy-domain.srs\",\n        \"tag\": \"proxy-domain\",\n        \"type\": \"local\"\n      }\n    ],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"223.5.5.5/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"domain\": [\n          \"before-match.example\"\n        ],\n        \"outbound\": \"proxy\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-domain\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\",\n        \"rule_set\": [\n          \"proxy-domain\"\n        ]\n      },\n      {\n        \"action\": \"resolve\",\n        \"server\": \"dns-proxy\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-ip\"\n        ]\n      },\n      {\n        \"outbound\": \"direct\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "6442349a2161d2ad7dd0738cc93575bf594fc73647444529fe6112c8913c6b44",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "rule",
+          "index": 99,
+          "code": "unreachable-rule",
+          "message": "rule follows terminal MATCH and is unreachable"
+        }
+      ],
+      "endpointHosts": [
+        "dns.alidns.com",
+        "node.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "terminal-match-block",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "before-match.example",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 5
+          },
+          {
+            "kind": "match",
+            "value": "",
+            "target": "block",
+            "noResolve": false,
+            "index": 7
+          },
+          {
+            "kind": "domain",
+            "value": "unreachable.example",
+            "target": "direct",
+            "noResolve": false,
+            "index": 99
+          }
+        ],
+        "overrides": null,
+        "ruleSets": [
+          {
+            "tag": "proxy-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/proxy-domain.srs",
+            "sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+            "sourceURL": "https://assets.example/proxy-domain.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-ip",
+            "kind": "ip",
+            "path": "/synthetic/be6500-native/cn-ip.srs",
+            "sha256": "0202020202020202020202020202020202020202020202020202020202020202",
+            "sourceURL": "https://assets.example/cn-ip.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/cn-domain.srs",
+            "sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+            "sourceURL": "https://assets.example/cn-domain.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"domain\": [\n          \"before-match.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"cn-domain\"\n        ],\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"proxy-domain\"\n        ],\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"action\": \"reject\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"node.example\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-domain.srs\",\n        \"tag\": \"cn-domain\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-ip.srs\",\n        \"tag\": \"cn-ip\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/proxy-domain.srs\",\n        \"tag\": \"proxy-domain\",\n        \"type\": \"local\"\n      }\n    ],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"223.5.5.5/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"domain\": [\n          \"before-match.example\"\n        ],\n        \"outbound\": \"proxy\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-domain\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\",\n        \"rule_set\": [\n          \"proxy-domain\"\n        ]\n      },\n      {\n        \"action\": \"resolve\",\n        \"server\": \"dns-proxy\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-ip\"\n        ]\n      },\n      {\n        \"action\": \"reject\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "4c54b77d8604459a5cb4458dda20c81cef632edf5829df3b02899569f2928290",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "rule",
+          "index": 99,
+          "code": "unreachable-rule",
+          "message": "rule follows terminal MATCH and is unreachable"
+        }
+      ],
+      "endpointHosts": [
+        "dns.alidns.com",
+        "node.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "terminal-match-proxy",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "before-match.example",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 5
+          },
+          {
+            "kind": "match",
+            "value": "",
+            "target": "proxy",
+            "noResolve": false,
+            "index": 7
+          },
+          {
+            "kind": "domain",
+            "value": "unreachable.example",
+            "target": "direct",
+            "noResolve": false,
+            "index": 99
+          }
+        ],
+        "overrides": null,
+        "ruleSets": [
+          {
+            "tag": "proxy-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/proxy-domain.srs",
+            "sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+            "sourceURL": "https://assets.example/proxy-domain.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-ip",
+            "kind": "ip",
+            "path": "/synthetic/be6500-native/cn-ip.srs",
+            "sha256": "0202020202020202020202020202020202020202020202020202020202020202",
+            "sourceURL": "https://assets.example/cn-ip.srs",
+            "maxBytes": 2097152
+          },
+          {
+            "tag": "cn-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/cn-domain.srs",
+            "sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+            "sourceURL": "https://assets.example/cn-domain.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"domain\": [\n          \"before-match.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"cn-domain\"\n        ],\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"rule_set\": [\n          \"proxy-domain\"\n        ],\n        \"server\": \"dns-proxy\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-proxy\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"node.example\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-domain.srs\",\n        \"tag\": \"cn-domain\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/cn-ip.srs\",\n        \"tag\": \"cn-ip\",\n        \"type\": \"local\"\n      },\n      {\n        \"format\": \"binary\",\n        \"path\": \"/synthetic/be6500-native/proxy-domain.srs\",\n        \"tag\": \"proxy-domain\",\n        \"type\": \"local\"\n      }\n    ],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"223.5.5.5/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"domain\": [\n          \"before-match.example\"\n        ],\n        \"outbound\": \"proxy\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-domain\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\",\n        \"rule_set\": [\n          \"proxy-domain\"\n        ]\n      },\n      {\n        \"action\": \"resolve\",\n        \"server\": \"dns-proxy\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"outbound\": \"direct\",\n        \"rule_set\": [\n          \"cn-ip\"\n        ]\n      },\n      {\n        \"outbound\": \"proxy\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "8866f92b7fdcb395dc82f3ebfcaa52753ca0e0e5ea01097061f1a9cca4ac6da3",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "rule",
+          "index": 99,
+          "code": "unreachable-rule",
+          "message": "rule follows terminal MATCH and is unreachable"
+        }
+      ],
+      "endpointHosts": [
+        "dns.alidns.com",
+        "node.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "unsupported-diagnostic-refused",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": [
+          {
+            "scope": "rule",
+            "index": 17,
+            "code": "public-original-code",
+            "message": "public-original-message"
+          }
+        ]
+      },
+      "valid": false,
+      "error": "unsupported subscription rule at index 17 requires explicit acknowledgement"
+    },
+    {
+      "name": "unsupported-diagnostics-acknowledged-fixed-order",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": [
+          {
+            "kind": "match",
+            "value": "",
+            "target": "direct",
+            "noResolve": false,
+            "index": 29
+          },
+          {
+            "kind": "domain",
+            "value": "omitted.example",
+            "target": "block",
+            "noResolve": false,
+            "index": 31
+          }
+        ],
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": true,
+        "acceptUnsupportedRules": true,
+        "diagnostics": [
+          {
+            "scope": "node",
+            "index": 0,
+            "code": "public-original-code",
+            "message": "public-original-message"
+          },
+          {
+            "scope": "rule",
+            "index": 17,
+            "code": "public-original-code",
+            "message": "public-original-message"
+          },
+          {
+            "scope": "config",
+            "index": -1,
+            "code": "public-original-code",
+            "message": "public-original-message"
+          },
+          {
+            "scope": "rule",
+            "index": 23,
+            "code": "public-original-code",
+            "message": "public-original-message"
+          }
+        ]
+      },
+      "valid": true,
+      "config": "{\n  \"dns\": {\n    \"cache_capacity\": 1024,\n    \"final\": \"dns-proxy\",\n    \"reverse_mapping\": true,\n    \"rules\": [\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa\",\n          \"10.in-addr.arpa\",\n          \"100.100.in-addr.arpa\",\n          \"101.100.in-addr.arpa\",\n          \"102.100.in-addr.arpa\",\n          \"103.100.in-addr.arpa\",\n          \"104.100.in-addr.arpa\",\n          \"105.100.in-addr.arpa\",\n          \"106.100.in-addr.arpa\",\n          \"107.100.in-addr.arpa\",\n          \"108.100.in-addr.arpa\",\n          \"109.100.in-addr.arpa\",\n          \"110.100.in-addr.arpa\",\n          \"111.100.in-addr.arpa\",\n          \"112.100.in-addr.arpa\",\n          \"113.100.in-addr.arpa\",\n          \"114.100.in-addr.arpa\",\n          \"115.100.in-addr.arpa\",\n          \"116.100.in-addr.arpa\",\n          \"117.100.in-addr.arpa\",\n          \"118.100.in-addr.arpa\",\n          \"119.100.in-addr.arpa\",\n          \"120.100.in-addr.arpa\",\n          \"121.100.in-addr.arpa\",\n          \"122.100.in-addr.arpa\",\n          \"123.100.in-addr.arpa\",\n          \"124.100.in-addr.arpa\",\n          \"125.100.in-addr.arpa\",\n          \"126.100.in-addr.arpa\",\n          \"127.100.in-addr.arpa\",\n          \"127.in-addr.arpa\",\n          \"16.172.in-addr.arpa\",\n          \"168.192.in-addr.arpa\",\n          \"17.172.in-addr.arpa\",\n          \"18.172.in-addr.arpa\",\n          \"19.172.in-addr.arpa\",\n          \"20.172.in-addr.arpa\",\n          \"21.172.in-addr.arpa\",\n          \"22.172.in-addr.arpa\",\n          \"23.172.in-addr.arpa\",\n          \"24.172.in-addr.arpa\",\n          \"25.172.in-addr.arpa\",\n          \"254.169.in-addr.arpa\",\n          \"26.172.in-addr.arpa\",\n          \"27.172.in-addr.arpa\",\n          \"28.172.in-addr.arpa\",\n          \"29.172.in-addr.arpa\",\n          \"30.172.in-addr.arpa\",\n          \"31.172.in-addr.arpa\",\n          \"64.100.in-addr.arpa\",\n          \"65.100.in-addr.arpa\",\n          \"66.100.in-addr.arpa\",\n          \"67.100.in-addr.arpa\",\n          \"68.100.in-addr.arpa\",\n          \"69.100.in-addr.arpa\",\n          \"70.100.in-addr.arpa\",\n          \"71.100.in-addr.arpa\",\n          \"72.100.in-addr.arpa\",\n          \"73.100.in-addr.arpa\",\n          \"74.100.in-addr.arpa\",\n          \"75.100.in-addr.arpa\",\n          \"76.100.in-addr.arpa\",\n          \"77.100.in-addr.arpa\",\n          \"78.100.in-addr.arpa\",\n          \"79.100.in-addr.arpa\",\n          \"8.e.f.ip6.arpa\",\n          \"80.100.in-addr.arpa\",\n          \"81.100.in-addr.arpa\",\n          \"82.100.in-addr.arpa\",\n          \"83.100.in-addr.arpa\",\n          \"84.100.in-addr.arpa\",\n          \"85.100.in-addr.arpa\",\n          \"86.100.in-addr.arpa\",\n          \"87.100.in-addr.arpa\",\n          \"88.100.in-addr.arpa\",\n          \"89.100.in-addr.arpa\",\n          \"9.e.f.ip6.arpa\",\n          \"90.100.in-addr.arpa\",\n          \"91.100.in-addr.arpa\",\n          \"92.100.in-addr.arpa\",\n          \"93.100.in-addr.arpa\",\n          \"94.100.in-addr.arpa\",\n          \"95.100.in-addr.arpa\",\n          \"96.100.in-addr.arpa\",\n          \"97.100.in-addr.arpa\",\n          \"98.100.in-addr.arpa\",\n          \"99.100.in-addr.arpa\",\n          \"a.e.f.ip6.arpa\",\n          \"b.e.f.ip6.arpa\",\n          \"c.f.ip6.arpa\",\n          \"d.f.ip6.arpa\"\n        ],\n        \"query_type\": [\n          \"PTR\"\n        ],\n        \"server\": \"dns-local\"\n      },\n      {\n        \"query_type\": [\n          \"AAAA\"\n        ],\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      },\n      {\n        \"rewrite_ttl\": 300,\n        \"server\": \"dns-direct\"\n      }\n    ],\n    \"servers\": [\n      {\n        \"detour\": \"direct\",\n        \"server\": \"223.5.5.5\",\n        \"server_port\": 853,\n        \"tag\": \"dns-direct\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"dns.alidns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"proxy\",\n        \"server\": \"1.1.1.1\",\n        \"server_port\": 853,\n        \"tag\": \"dns-proxy\",\n        \"tls\": {\n          \"enabled\": true,\n          \"min_version\": \"1.2\",\n          \"server_name\": \"cloudflare-dns.com\"\n        },\n        \"type\": \"tls\"\n      },\n      {\n        \"detour\": \"direct\",\n        \"server\": \"127.0.0.1\",\n        \"server_port\": 53,\n        \"tag\": \"dns-local\",\n        \"type\": \"udp\"\n      },\n      {\n        \"inet4_range\": \"198.18.0.0/15\",\n        \"tag\": \"dns-fake\",\n        \"type\": \"fakeip\"\n      }\n    ],\n    \"strategy\": \"prefer_ipv4\",\n    \"timeout\": \"5s\"\n  },\n  \"inbounds\": [\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 2080,\n      \"tag\": \"mixed-in\",\n      \"type\": \"mixed\"\n    },\n    {\n      \"address\": [\n        \"172.31.255.253/30\"\n      ],\n      \"auto_redirect\": false,\n      \"auto_route\": false,\n      \"dns_mode\": \"disabled\",\n      \"interface_name\": \"b6p-tun\",\n      \"mtu\": 1500,\n      \"stack\": \"system\",\n      \"tag\": \"tun-in\",\n      \"type\": \"tun\",\n      \"udp_nat_max\": 1024,\n      \"udp_timeout\": \"2m\"\n    },\n    {\n      \"listen\": \"127.0.0.1\",\n      \"listen_port\": 1053,\n      \"tag\": \"dns-in\",\n      \"type\": \"direct\"\n    }\n  ],\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": true\n  },\n  \"outbounds\": [\n    {\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"tag\": \"direct\",\n      \"type\": \"direct\"\n    },\n    {\n      \"connect_timeout\": \"10s\",\n      \"domain_resolver\": {\n        \"server\": \"dns-direct\",\n        \"strategy\": \"prefer_ipv4\",\n        \"timeout\": \"5s\"\n      },\n      \"flow\": \"xtls-rprx-vision\",\n      \"packet_encoding\": \"xudp\",\n      \"server\": \"node.example\",\n      \"server_port\": 443,\n      \"tag\": \"proxy\",\n      \"tcp_fast_open\": true,\n      \"tls\": {\n        \"enabled\": true,\n        \"reality\": {\n          \"enabled\": true,\n          \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n          \"short_id\": \"01020304\"\n        },\n        \"server_name\": \"certificate.example\",\n        \"utls\": {\n          \"enabled\": true,\n          \"fingerprint\": \"chrome\"\n        }\n      },\n      \"type\": \"vless\",\n      \"uuid\": \"00000000-0000-4000-8000-000000000001\"\n    }\n  ],\n  \"route\": {\n    \"auto_detect_interface\": true,\n    \"default_domain_resolver\": {\n      \"server\": \"dns-direct\",\n      \"strategy\": \"prefer_ipv4\",\n      \"timeout\": \"5s\"\n    },\n    \"final\": \"proxy\",\n    \"rule_set\": [],\n    \"rules\": [\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"dns-in\"\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"223.5.5.5/32\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"domain\": [\n          \"dns.alidns.com\",\n          \"node.example\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"hijack-dns\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"port\": [\n          53\n        ]\n      },\n      {\n        \"ip_cidr\": [\n          \"0.0.0.0/8\",\n          \"10.0.0.0/8\",\n          \"100.64.0.0/10\",\n          \"127.0.0.0/8\",\n          \"169.254.0.0/16\",\n          \"172.16.0.0/12\",\n          \"192.168.0.0/16\",\n          \"192.0.0.0/24\",\n          \"198.18.0.0/15\",\n          \"224.0.0.0/4\",\n          \"240.0.0.0/4\",\n          \"::/128\",\n          \"::1/128\",\n          \"fe80::/10\",\n          \"fc00::/7\",\n          \"ff00::/8\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_suffix\": [\n          \"lan\",\n          \"local\",\n          \"localhost\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain\": [\n          \"miwifi.com\",\n          \"router.miwifi.com\",\n          \"www.miwifi.com\",\n          \"www.router.miwifi.com\",\n          \"xiaoqiang\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"resolve\",\n        \"disable_cache\": true,\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"server\": \"dns-local\",\n        \"timeout\": \"5s\"\n      },\n      {\n        \"domain_regex\": [\n          \"^[^.]+$\"\n        ],\n        \"outbound\": \"direct\"\n      },\n      {\n        \"ip_version\": 6,\n        \"outbound\": \"direct\"\n      },\n      {\n        \"action\": \"sniff\",\n        \"inbound\": [\n          \"mixed-in\",\n          \"tun-in\"\n        ],\n        \"sniffer\": [\n          \"http\",\n          \"tls\",\n          \"dns\",\n          \"quic\"\n        ],\n        \"timeout\": \"300ms\"\n      },\n      {\n        \"outbound\": \"direct\"\n      }\n    ]\n  }\n}\n",
+      "sha256": "f81aeb65060e5e87876ee85f6fd76a51e6d31982cb307022a67e0033c4aefc3b",
+      "coreVersion": "1.14.2",
+      "diagnostics": [
+        {
+          "scope": "rule",
+          "index": 17,
+          "code": "ignored-subscription-rule",
+          "message": "unsupported subscription rule explicitly acknowledged and omitted"
+        },
+        {
+          "scope": "rule",
+          "index": 23,
+          "code": "ignored-subscription-rule",
+          "message": "unsupported subscription rule explicitly acknowledged and omitted"
+        },
+        {
+          "scope": "config",
+          "index": -1,
+          "code": "cn-rules-incomplete",
+          "message": "domestic split needs staged cn-domain and cn-ip SRS; missing classifications use the default proxy policy"
+        },
+        {
+          "scope": "rule",
+          "index": 31,
+          "code": "unreachable-rule",
+          "message": "rule follows terminal MATCH and is unreachable"
+        },
+        {
+          "scope": "config",
+          "index": -1,
+          "code": "fakeip-memory",
+          "message": "fake-IP identities use an unbounded native RAM map; restart or direct-failure withdrawal needs coordinated stale DNS cleanup before recapture"
+        }
+      ],
+      "endpointHosts": [
+        "dns.alidns.com",
+        "node.example"
+      ],
+      "requiredFeatures": [
+        "with_utls",
+        "badlinkname",
+        "tcp_fast_open",
+        "system_tun_tcp_udp",
+        "tls_dns"
+      ],
+      "ipv6": "direct",
+      "failure": "direct"
+    },
+    {
+      "name": "invalid-node-uuid",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "public-invalid-uuid",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "invalid VLESS UUID"
+    },
+    {
+      "name": "invalid-node-reality-key",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "public-invalid-key",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "invalid REALITY public key"
+    },
+    {
+      "name": "invalid-node-fingerprint",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "public-invalid-fingerprint",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "only Chrome uTLS fingerprint is supported"
+    },
+    {
+      "name": "invalid-node-server",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "https://public-invalid-server.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "invalid server endpoint"
+    },
+    {
+      "name": "invalid-node-flow",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "public-invalid-flow",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "only xtls-rprx-vision flow is supported"
+    },
+    {
+      "name": "retired-tproxy-datapath",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "tproxy",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "tproxy datapath is no longer supported; use routed-tun"
+    },
+    {
+      "name": "unsupported-ipv6-follow",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "follow",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "routed-tun supports only IPv6 direct; IPv6 follow and block are not supported"
+    },
+    {
+      "name": "unsupported-ipv6-block",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "block",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "routed-tun supports only IPv6 direct; IPv6 follow and block are not supported"
+    },
+    {
+      "name": "unsupported-failure-block-proxy",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "block-proxy",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "block-proxy requires a surviving classification authority; not supported"
+    },
+    {
+      "name": "listener-port-collision",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 2080,
+          "tProxy": 0,
+          "dns": 2080
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "listener ports must be nonzero and distinct"
+    },
+    {
+      "name": "invalid-tun-network-host",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": {
+          "interfaceName": "b6p-tun",
+          "address": "172.31.255.252/30"
+        },
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "routed-tun address requires the first usable /30 host with a usable next peer"
+    },
+    {
+      "name": "tun-management-prefix-collision",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": [
+          "172.31.255.254"
+        ],
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "routed-tun address prefix overlaps router management"
+    },
+    {
+      "name": "local-dns-core-listener-collision",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": {
+          "server": "",
+          "port": 1053,
+          "domains": null,
+          "hostnames": null
+        },
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "local DNS must not point to a core listener port"
+    },
+    {
+      "name": "invalid-controlled-set-tag",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": [
+          {
+            "tag": "public-invalid-tag",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/proxy-domain.srs",
+            "sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+            "sourceURL": "https://assets.example/proxy-domain.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "invalid controlled rule set tag or kind"
+    },
+    {
+      "name": "invalid-controlled-set-path",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": [
+          {
+            "tag": "proxy-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/../public-invalid-path.srs",
+            "sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+            "sourceURL": "https://assets.example/proxy-domain.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "rule set requires an absolute clean SRS path"
+    },
+    {
+      "name": "invalid-controlled-set-hash",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": [
+          {
+            "tag": "proxy-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/proxy-domain.srs",
+            "sha256": "public-invalid-hash",
+            "sourceURL": "https://assets.example/proxy-domain.srs",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "rule set requires a pinned SHA256 and bounded size"
+    },
+    {
+      "name": "invalid-controlled-set-provenance",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": true
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": [
+          {
+            "tag": "proxy-domain",
+            "kind": "domain",
+            "path": "/synthetic/be6500-native/proxy-domain.srs",
+            "sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+            "sourceURL": "https://public-user:public-password@assets.example/proxy-domain.srs?public-token=yes",
+            "maxBytes": 2097152
+          }
+        ],
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "rule set provenance must be credential-free HTTPS"
+    },
+    {
+      "name": "node-udp-disabled-rejected",
+      "input": {
+        "node": {
+          "id": "public-fake-node",
+          "name": "Public synthetic node",
+          "server": "node.example",
+          "port": 443,
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "serverName": "certificate.example",
+          "realityPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "realityShortID": "01020304",
+          "fingerprint": "chrome",
+          "flow": "xtls-rprx-vision",
+          "udp": false
+        },
+        "rules": null,
+        "overrides": null,
+        "ruleSets": null,
+        "endpoints": null,
+        "bootstrapDomains": null,
+        "managementIPs": null,
+        "datapath": "",
+        "routedTUN": null,
+        "ipv6": "",
+        "failure": "",
+        "ports": {
+          "mixed": 0,
+          "tProxy": 0,
+          "dns": 0
+        },
+        "listenAddress": "",
+        "mixedListenAddress": "",
+        "tProxyListenAddress": "",
+        "dnsListenAddress": "",
+        "directDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "proxyDNS": {
+          "server": "",
+          "port": 0,
+          "serverName": ""
+        },
+        "localDNS": null,
+        "fakeIP": false,
+        "acceptUnsupportedRules": false,
+        "diagnostics": null
+      },
+      "valid": false,
+      "error": "VLESS UDP/XUDP must be enabled"
+    }
+  ]
+}
