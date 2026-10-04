@@ -104,6 +104,7 @@ pub enum ProcessError {
     StopDeadline,
     CheckFailed,
     CheckDeadline,
+    OperationDeadline,
     Cancelled,
 }
 impl fmt::Display for ProcessError {
@@ -120,11 +121,44 @@ impl fmt::Display for ProcessError {
             Self::StopDeadline => "owned child termination deadline exceeded",
             Self::CheckFailed => "candidate verification failed",
             Self::CheckDeadline => "candidate verification deadline exceeded",
+            Self::OperationDeadline => "managed process operation deadline exceeded",
             Self::Cancelled => "candidate verification cancelled",
         })
     }
 }
 impl std::error::Error for ProcessError {}
+
+/// Internal immutable operation budget shared through the existing command lane.
+/// Cleanup deliberately does not use it: an expired operation still owns children.
+#[derive(Default)]
+struct OperationBudget {
+    deadline: Option<Instant>,
+    cancel: Option<Arc<AtomicBool>>,
+}
+impl OperationBudget {
+    fn check_cancelled(&self) -> Result<(), ProcessError> {
+        if self.cancel.as_ref().is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return Err(ProcessError::Cancelled);
+        }
+        Ok(())
+    }
+    fn check(&self) -> Result<(), ProcessError> {
+        self.check_cancelled()?;
+        if self.deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(ProcessError::OperationDeadline);
+        }
+        Ok(())
+    }
+    fn io<T>(
+        &self,
+        action: impl FnOnce() -> Result<T, ProcessError>,
+    ) -> Result<T, ProcessError> {
+        self.check()?;
+        let result = action();
+        self.check()?;
+        result
+    }
+}
 
 /// Config root is physically separate from run/artifact roots. Artifact root may
 /// equal run root or be its private child, matching the existing volatile layout.
@@ -242,18 +276,18 @@ impl PinnedRoots {
         service: ServiceId,
         mode: LaunchMode,
         spec: &LaunchSpec,
+        budget: &OperationBudget,
     ) -> Result<(), ProcessError> {
+        budget.check()?;
         for (path, pinned) in [
             (&self.paths.artifact, &self.artifact),
             (&self.paths.config, &self.config),
             (&self.paths.run, &self.run),
         ] {
-            let current = private_directory(path)?;
-            if identity(
-                &current
-                    .metadata()
-                    .map_err(|_| ProcessError::UntrustedPath)?,
-            ) != identity(&pinned.metadata().map_err(|_| ProcessError::UntrustedPath)?)
+            let current = private_directory_until(path, budget)?;
+            let current_metadata = budget.io(|| current.metadata().map_err(|_| ProcessError::UntrustedPath))?;
+            let pinned_metadata = budget.io(|| pinned.metadata().map_err(|_| ProcessError::UntrustedPath))?;
+            if identity(&current_metadata) != identity(&pinned_metadata)
             {
                 return Err(ProcessError::UntrustedPath);
             }
@@ -271,16 +305,16 @@ impl PinnedRoots {
             &spec.artifact,
             spec.artifact_sha256,
             None,
-            MAX_ARTIFACT_BYTES,
-            true,
+            (MAX_ARTIFACT_BYTES, true),
+            budget,
         )?;
         validate_file(
             &self.config,
             &spec.config,
             spec.config_sha256,
             Some(spec.config_bytes),
-            MAX_CONFIG_BYTES,
-            false,
+            (MAX_CONFIG_BYTES, false),
+            budget,
         )
     }
 }
@@ -315,6 +349,10 @@ fn identity(m: &Metadata) -> (u64, u64) {
     (m.dev(), m.ino())
 }
 fn private_directory(path: &Path) -> Result<File, ProcessError> {
+    private_directory_until(path, &OperationBudget::default())
+}
+fn private_directory_until(path: &Path, budget: &OperationBudget) -> Result<File, ProcessError> {
+    budget.check()?;
     if !path.is_absolute() {
         return Err(ProcessError::UntrustedPath);
     }
@@ -325,9 +363,11 @@ fn private_directory(path: &Path) -> Result<File, ProcessError> {
         )
     };
     if fd < 0 {
+        budget.check()?;
         return Err(ProcessError::UntrustedPath);
     }
     let mut directory = unsafe { OwnedFd::from_raw_fd(fd) };
+    budget.check()?;
     let raw = path.as_os_str().as_bytes();
     if raw.split(|b| *b == b'/').any(|c| c == b"." || c == b"..") {
         return Err(ProcessError::UntrustedPath);
@@ -336,6 +376,7 @@ fn private_directory(path: &Path) -> Result<File, ProcessError> {
         match component {
             Component::RootDir => continue,
             Component::Normal(name) => {
+                budget.check()?;
                 let name =
                     CString::new(name.as_bytes()).map_err(|_| ProcessError::UntrustedPath)?;
                 fd = unsafe {
@@ -346,15 +387,17 @@ fn private_directory(path: &Path) -> Result<File, ProcessError> {
                     )
                 };
                 if fd < 0 {
+                    budget.check()?;
                     return Err(ProcessError::UntrustedPath);
                 }
                 directory = unsafe { OwnedFd::from_raw_fd(fd) };
+                budget.check()?;
             }
             _ => return Err(ProcessError::UntrustedPath),
         }
     }
     let file = File::from(directory);
-    let m = file.metadata().map_err(|_| ProcessError::UntrustedPath)?;
+    let m = budget.io(|| file.metadata().map_err(|_| ProcessError::UntrustedPath))?;
     if !m.is_dir() || m.uid() != unsafe { libc::geteuid() } || m.mode() & 0o7777 != 0o700 {
         return Err(ProcessError::UntrustedPath);
     }
@@ -365,9 +408,11 @@ fn validate_file(
     path: &Path,
     digest: [u8; 32],
     length: Option<u64>,
-    max: u64,
-    executable: bool,
+    limits: (u64, bool),
+    budget: &OperationBudget,
 ) -> Result<(), ProcessError> {
+    let (max, executable) = limits;
+    budget.check()?;
     let name = path.file_name().ok_or(ProcessError::UntrustedPath)?;
     let name = CString::new(name.as_bytes()).map_err(|_| ProcessError::UntrustedPath)?;
     let fd = unsafe {
@@ -378,10 +423,12 @@ fn validate_file(
         )
     };
     if fd < 0 {
+        budget.check()?;
         return Err(ProcessError::UntrustedPath);
     }
     let mut file = unsafe { File::from_raw_fd(fd) };
-    let before = file.metadata().map_err(|_| ProcessError::UntrustedPath)?;
+    budget.check()?;
+    let before = budget.io(|| file.metadata().map_err(|_| ProcessError::UntrustedPath))?;
     let mode = if executable { 0o700 } else { 0o600 };
     if !before.is_file()
         || before.uid() != unsafe { libc::geteuid() }
@@ -395,23 +442,8 @@ fn validate_file(
     if length.is_some_and(|n| n != before.len()) {
         return Err(ProcessError::Integrity);
     }
-    let mut hash = Sha256::new();
-    let mut buffer = [0u8; 8192];
-    let mut total = 0u64;
-    loop {
-        let n = file
-            .read(&mut buffer)
-            .map_err(|_| ProcessError::Integrity)?;
-        if n == 0 {
-            break;
-        }
-        total += n as u64;
-        if total > max {
-            return Err(ProcessError::Integrity);
-        }
-        hash.update(&buffer[..n]);
-    }
-    let after = file.metadata().map_err(|_| ProcessError::Integrity)?;
+    let (actual_digest, total) = hash_reader(&mut file, max, || budget.check())?;
+    let after = budget.io(|| file.metadata().map_err(|_| ProcessError::Integrity))?;
     if total != before.len()
         || identity(&before) != identity(&after)
         || before.len() != after.len()
@@ -419,11 +451,41 @@ fn validate_file(
         || before.mtime_nsec() != after.mtime_nsec()
         || before.ctime() != after.ctime()
         || before.ctime_nsec() != after.ctime_nsec()
-        || <[u8; 32]>::from(hash.finalize()) != digest
+        || actual_digest != digest
     {
         return Err(ProcessError::Integrity);
     }
-    Ok(())
+    budget.check()
+}
+
+// Private Read seam permits deterministic slow-hash fixtures without a public
+// fault hook or extra worker. Production checks use the operation's real clock.
+fn hash_reader(
+    reader: &mut impl Read,
+    max: u64,
+    mut check: impl FnMut() -> Result<(), ProcessError>,
+) -> Result<([u8; 32], u64), ProcessError> {
+    let mut hash = Sha256::new();
+    let mut bytes = [0u8; 8192];
+    let mut total = 0u64;
+    loop {
+        check()?;
+        let size = max.saturating_sub(total).max(1).min(bytes.len() as u64) as usize;
+        let result = reader.read(&mut bytes[..size]);
+        check()?;
+        let n = match result {
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            result => result.map_err(|_| ProcessError::Integrity)?,
+        };
+        if n == 0 { break; }
+        total = total.checked_add(n as u64).ok_or(ProcessError::Integrity)?;
+        if total > max { return Err(ProcessError::Integrity); }
+        hash.update(&bytes[..n]);
+    }
+    check()?;
+    let digest = hash.finalize().into();
+    check()?;
+    Ok((digest, total))
 }
 
 #[must_use = "explicitly stop/finish the owned child and close this service owner"]
@@ -476,7 +538,21 @@ impl ProcessOwner {
         })
     }
     pub fn start(&mut self, spec: LaunchSpec) -> Result<Status, ProcessError> {
-        self.request(Action::Start(spec))
+        self.start_budgeted(spec, OperationBudget::default())
+    }
+    /// Validate and spawn only within this absolute operation budget. If the
+    /// budget expires after spawn, the exact Run remains owned for withdrawal.
+    pub fn start_until(
+        &mut self,
+        spec: LaunchSpec,
+        deadline: Instant,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<Status, ProcessError> {
+        self.start_budgeted(spec, OperationBudget { deadline: Some(deadline), cancel })
+    }
+    fn start_budgeted(&mut self, spec: LaunchSpec, budget: OperationBudget) -> Result<Status, ProcessError> {
+        budget.check()?;
+        self.request(Action::Start(spec, budget))
     }
     pub fn status(&mut self) -> Result<Status, ProcessError> {
         self.request(Action::Status)
@@ -511,7 +587,21 @@ impl ProcessOwner {
         spec: LaunchSpec,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<(), ProcessError> {
-        self.request(Action::Verify(spec, cancel)).map(|_| ())
+        self.verify_budgeted(spec, OperationBudget { deadline: None, cancel })
+    }
+    /// Hashing before launch, finite check and post-check integrity all share
+    /// the same absolute deadline. Expiry never skips child finish/reaping.
+    pub fn verify_until(
+        &mut self,
+        spec: LaunchSpec,
+        deadline: Instant,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<(), ProcessError> {
+        self.verify_budgeted(spec, OperationBudget { deadline: Some(deadline), cancel })
+    }
+    fn verify_budgeted(&mut self, spec: LaunchSpec, budget: OperationBudget) -> Result<(), ProcessError> {
+        budget.check()?;
+        self.request(Action::Verify(spec, budget)).map(|_| ())
     }
     pub fn abort_check(&mut self) -> Result<Status, ProcessError> {
         self.request(Action::AbortCheck)
@@ -553,10 +643,10 @@ impl Drop for Slot {
     }
 }
 enum Action {
-    Start(LaunchSpec),
+    Start(LaunchSpec, OperationBudget),
     Status,
     Stop,
-    Verify(LaunchSpec, Option<Arc<AtomicBool>>),
+    Verify(LaunchSpec, OperationBudget),
     AbortCheck,
     Close,
 }
@@ -611,12 +701,12 @@ impl Supervisor {
                         && self.check.is_none();
                     let result = match request.action {
                         Action::Status => observed.map(|_| self.status()),
-                        Action::Start(spec) => {
-                            self.launch(spec, LaunchMode::Run).map(|_| self.status())
+                        Action::Start(spec, budget) => {
+                            self.launch(spec, LaunchMode::Run, &budget).map(|_| self.status())
                         }
                         Action::Stop => self.stop().map(|_| self.status()),
-                        Action::Verify(spec, cancel) => {
-                            self.verify(spec, cancel).map(|_| self.status())
+                        Action::Verify(spec, budget) => {
+                            self.verify(spec, &budget).map(|_| self.status())
                         }
                         Action::AbortCheck => self.finish(LaunchMode::Check).map(|_| self.status()),
                         Action::Close => {
@@ -672,11 +762,17 @@ impl Supervisor {
         }
         Ok(())
     }
-    fn launch(&mut self, spec: LaunchSpec, mode: LaunchMode) -> Result<(), ProcessError> {
+    fn launch(
+        &mut self,
+        spec: LaunchSpec,
+        mode: LaunchMode,
+        budget: &OperationBudget,
+    ) -> Result<(), ProcessError> {
+        budget.check()?;
         if self.check.is_some() || (mode == LaunchMode::Run && self.child.is_some()) {
             return Err(ProcessError::Busy);
         }
-        self.roots.validate(self.service, mode, &spec)?;
+        self.roots.validate(self.service, mode, &spec, budget)?;
         let mut command = Command::new(&spec.artifact);
         match (self.service, mode) {
             (ServiceId::SingBox, LaunchMode::Run) => {
@@ -722,7 +818,12 @@ impl Supervisor {
                 Ok(())
             });
         }
-        let child = command.spawn().map_err(|_| ProcessError::Launch)?;
+        budget.check()?;
+        let result = command.spawn();
+        let child = match result {
+            Ok(child) => child,
+            Err(_) => { budget.check()?; return Err(ProcessError::Launch); }
+        };
         match mode {
             LaunchMode::Run => {
                 self.child = Some(OwnedChild::new(child, mode));
@@ -731,10 +832,14 @@ impl Supervisor {
             }
             LaunchMode::Check => self.check = Some(OwnedChild::new(child, mode)),
         }
-        // Even a pipe-setup failure retains identity for explicit stop/retry.
-        self.owned_mut(mode)
+        // Pipe setup is part of ownership safety: cleanup must not encounter
+        // blocking pipes even if the budget expired during spawn. Keep the exact
+        // child before either error; Verify finishes it, Run needs withdrawal.
+        let result = self.owned_mut(mode)
             .ok_or(ProcessError::Launch)?
-            .nonblocking()
+            .nonblocking();
+        budget.check()?;
+        result
     }
     fn owned_mut(&mut self, mode: LaunchMode) -> Option<&mut OwnedChild> {
         match mode {
@@ -796,35 +901,36 @@ impl Supervisor {
     fn verify(
         &mut self,
         spec: LaunchSpec,
-        cancel: Option<Arc<AtomicBool>>,
+        budget: &OperationBudget,
     ) -> Result<(), ProcessError> {
-        if cancel
-            .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::Acquire))
-        {
-            return Err(ProcessError::Cancelled);
+        budget.check()?;
+        let had_check = self.check.is_some();
+        if let Err(error) = self.launch(spec.clone(), LaunchMode::Check, budget) {
+            // Launch may have created a Check before a post-spawn failure.
+            // Independent finish budgets remain valid after operation expiry.
+            if !had_check { self.finish(LaunchMode::Check)?; }
+            return Err(error);
         }
-        self.launch(spec.clone(), LaunchMode::Check)?;
-        let deadline = Instant::now() + self.limits.check_timeout;
-        let outcome = loop {
-            if let Err(error) = self.pump() {
-                break Err(error);
-            }
-            if let Some(exit) = self.check.as_ref().and_then(|c| c.exit) {
-                break if exit.code == Some(0) {
-                    Ok(())
-                } else {
-                    Err(ProcessError::CheckFailed)
-                };
-            }
-            if cancel
-                .as_ref()
-                .is_some_and(|flag| flag.load(Ordering::Acquire))
-            {
-                break Err(ProcessError::Cancelled);
-            }
+        let local_deadline = Instant::now() + self.limits.check_timeout;
+        let deadline = budget.deadline.map_or(local_deadline, |outer| outer.min(local_deadline));
+        let check_execution = || {
+            budget.check_cancelled()?;
             if Instant::now() >= deadline {
-                break Err(ProcessError::CheckDeadline);
+                return Err(if budget.deadline.is_some_and(|outer| outer <= local_deadline) {
+                    ProcessError::OperationDeadline
+                } else {
+                    ProcessError::CheckDeadline
+                });
+            }
+            Ok(())
+        };
+        let outcome = loop {
+            if let Err(error) = check_execution() { break Err(error); }
+            let pumped = self.pump();
+            if let Err(error) = check_execution() { break Err(error); }
+            if let Err(error) = pumped { break Err(error); }
+            if let Some(exit) = self.check.as_ref().and_then(|c| c.exit) {
+                break if exit.code == Some(0) { Ok(()) } else { Err(ProcessError::CheckFailed) };
             }
             if let Some(child) = &mut self.check
                 && let Err(error) = child.wait_tick(deadline)
@@ -834,8 +940,9 @@ impl Supervisor {
         };
         self.finish(LaunchMode::Check)?;
         outcome?;
-        // Candidate bytes and executable must still match after the checker.
-        self.roots.validate(self.service, LaunchMode::Check, &spec)
+        // Cleanup may itself finish after expiry; never attest success then.
+        budget.check()?;
+        self.roots.validate(self.service, LaunchMode::Check, &spec, budget)
     }
 }
 struct OwnedChild {
@@ -1006,6 +1113,72 @@ fn observe(pid: u32) -> Result<Option<ExitReport>, ProcessError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hash_callback_expiry_and_cancel_are_checked_before_and_after_reads() {
+        use std::cell::Cell;
+        struct Advances<'a> { elapsed: &'a Cell<bool>, reads: &'a Cell<usize>, fail: bool }
+        impl Read for Advances<'_> {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                assert!(bytes.len() <= 8192);
+                self.reads.set(self.reads.get() + 1);
+                self.elapsed.set(true);
+                if self.fail { return Err(io::Error::other("private source error")); }
+                bytes[0] = 7;
+                Ok(1)
+            }
+        }
+        for fail in [false, true] {
+            let elapsed = Cell::new(false);
+            let reads = Cell::new(0);
+            let mut reader = Advances { elapsed: &elapsed, reads: &reads, fail };
+            let result = hash_reader(&mut reader, 8192, || {
+                if elapsed.get() { Err(ProcessError::OperationDeadline) } else { Ok(()) }
+            });
+            assert_eq!(result, Err(ProcessError::OperationDeadline));
+            assert_eq!(reads.get(), 1);
+        }
+        let elapsed = Cell::new(false);
+        let reads = Cell::new(0);
+        let mut reader = Advances { elapsed: &elapsed, reads: &reads, fail: false };
+        assert_eq!(hash_reader(&mut reader, 8192, || Err(ProcessError::Cancelled)), Err(ProcessError::Cancelled));
+        assert_eq!(reads.get(), 0);
+    }
+
+    #[test]
+    fn cancelling_hash_reader_after_io_stops_before_another_read() {
+        struct Cancels { flag: Arc<AtomicBool>, reads: usize }
+        impl Read for Cancels {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                self.reads += 1;
+                self.flag.store(true, Ordering::Release);
+                bytes[0] = 7;
+                Ok(1)
+            }
+        }
+        let flag = Arc::new(AtomicBool::new(false));
+        let budget = OperationBudget {
+            deadline: Some(Instant::now() + Duration::from_secs(10)),
+            cancel: Some(flag.clone()),
+        };
+        let mut reader = Cancels { flag, reads: 0 };
+        assert_eq!(hash_reader(&mut reader, 8192, || budget.check()), Err(ProcessError::Cancelled));
+        assert_eq!(reader.reads, 1);
+    }
+
+    #[test]
+    fn hash_boundaries_and_real_budget_errors_stay_fixed() {
+        let raw = [7u8; 8192];
+        assert_eq!(hash_reader(&mut raw.as_slice(), 8192, || Ok(())),
+            Ok((Sha256::digest(raw).into(), 8192)));
+        assert_eq!(hash_reader(&mut raw.as_slice(), 8191, || Ok(())), Err(ProcessError::Integrity));
+        let budget = OperationBudget { deadline: Some(Instant::now()), cancel: None };
+        assert_eq!(budget.check(), Err(ProcessError::OperationDeadline));
+        let cancel = Arc::new(AtomicBool::new(true));
+        let budget = OperationBudget { deadline: Some(Instant::now()), cancel: Some(cancel) };
+        assert_eq!(budget.check(), Err(ProcessError::Cancelled));
+        assert_eq!(ProcessError::OperationDeadline.to_string(), "managed process operation deadline exceeded");
+    }
+
     #[test]
     fn combined_tail_is_bounded_suffix_and_private() {
         let mut tail = VecDeque::with_capacity(OUTPUT_TAIL_BYTES);

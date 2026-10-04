@@ -38,6 +38,10 @@ case "$behavior" in
     printf 'private-output-tail-end\n' >&2
     exit 0 ;;
   hang) trap '' TERM; while :; do sleep 1; done ;;
+  budget-hang)
+    trap '' TERM
+    printf '%s\n' "$$" > "$TMPDIR/check.pid"
+    while :; do sleep 1; done ;;
   descendant)
     sleep 15 &
     printf '%s\n' "$!" > "$TMPDIR/descendant.pid"
@@ -751,4 +755,94 @@ fn candidate_verification_keeps_existing_run_owned_and_untouched() {
             "cleanup\nterm\n"
         );
     }
+}
+
+
+#[test]
+fn expired_and_cancelled_absolute_start_and_verify_create_no_child() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new(ServiceId::SingBox);
+    let mut owner = fixture.owner();
+    let spec = fixture.spec("good");
+    for verify in [false, true] {
+        let result = if verify {
+            owner.verify_until(spec.clone(), Instant::now(), None)
+        } else {
+            owner.start_until(spec.clone(), Instant::now(), None).map(|_| ())
+        };
+        assert_eq!(result, Err(ProcessError::OperationDeadline));
+        assert!(owner.status().unwrap().pid.is_none());
+        assert!(!fixture.run.join("argv").exists());
+        let cancel = Arc::new(AtomicBool::new(true));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let result = if verify {
+            owner.verify_until(spec.clone(), deadline, Some(cancel))
+        } else {
+            owner.start_until(spec.clone(), deadline, Some(cancel)).map(|_| ())
+        };
+        assert_eq!(result, Err(ProcessError::Cancelled));
+        assert!(owner.status().unwrap().pid.is_none());
+        assert!(!fixture.run.join("argv").exists());
+    }
+}
+
+#[test]
+fn expired_candidate_verification_keeps_the_old_owned_run_unchanged() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new(ServiceId::SingBox);
+    let mut owner = fixture.owner();
+    let spec = fixture.spec("running");
+    let started = owner.start_until(spec.clone(), Instant::now() + Duration::from_secs(3), None).unwrap();
+    wait_started(&mut owner, &fixture);
+    let argv = fs::read(fixture.run.join("argv")).unwrap();
+    assert_eq!(owner.start_until(spec.clone(), Instant::now(), None), Err(ProcessError::OperationDeadline));
+    assert_eq!(owner.verify_until(spec, Instant::now(), None), Err(ProcessError::OperationDeadline));
+    let current = owner.status().unwrap();
+    assert_eq!(current.pid, started.pid);
+    assert_eq!(current.phase, Phase::Running);
+    assert_eq!(fs::read(fixture.run.join("argv")).unwrap(), argv);
+    assert!(exists(started.pid.unwrap()));
+}
+
+#[test]
+fn outer_check_expiry_still_finishes_child_under_independent_cleanup_budget() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new(ServiceId::SingBox);
+    let mut owner = fixture.owner();
+    let spec = fixture.spec("budget-hang");
+    assert_eq!(
+        owner.verify_until(spec, Instant::now() + Duration::from_millis(600), None),
+        Err(ProcessError::OperationDeadline)
+    );
+    let checker = pid_file(&fixture.run.join("check.pid"));
+    assert!(!exists(checker), "expired checker must be reaped before returning");
+    assert!(owner.status().unwrap().pid.is_none());
+    owner.abort_check().unwrap();
+    assert!(owner.status().unwrap().pid.is_none());
+}
+
+#[test]
+fn local_check_deadline_remains_distinct_from_later_outer_deadline() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new(ServiceId::Frpc);
+    let mut owner = fixture.owner();
+    let spec = fixture.spec("hang");
+    assert_eq!(
+        owner.verify_until(spec, Instant::now() + Duration::from_secs(10), None),
+        Err(ProcessError::CheckDeadline)
+    );
+    assert!(owner.status().unwrap().pid.is_none());
+}
+
+#[test]
+fn absolute_verified_success_uses_existing_owner_and_fixed_status() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new(ServiceId::SingBox);
+    let mut owner = fixture.owner();
+    owner.verify_until(fixture.spec("good"), Instant::now() + Duration::from_secs(3), None).unwrap();
+    assert!(owner.status().unwrap().pid.is_none());
+    let started = owner.start_until(fixture.spec("running"), Instant::now() + Duration::from_secs(3), None).unwrap();
+    wait_started(&mut owner, &fixture);
+    assert_eq!(owner.status().unwrap().pid, started.pid);
+    assert_eq!(started.mode, Some(be6500_panel::runtime_process::LaunchMode::Run));
 }
