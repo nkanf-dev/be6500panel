@@ -303,3 +303,356 @@ fn off_capture_native_observer_seam_has_no_constructor_or_lifecycle_actions() {
     assert!(!fixture.root.join("exec/commands").exists());
     assert!(!fixture.root.join("missing-native-source").exists());
 }
+
+#[test]
+fn explicit_startup_withdrawal_uses_only_validated_cleanup_without_core_or_builder() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let directory = fixture.root.join("capture");
+    let mut controller = Controller::open(&directory).unwrap();
+    controller
+        .set_desired(Desired {
+            scope: "gateway".into(),
+            lan_ipv4_prefixes: vec!["192.168.50.0/24".into()],
+            desired: true,
+            ..Desired::default()
+        })
+        .unwrap();
+    controller
+        .apply(
+            input(),
+            |_, _, _| Ok(()),
+            |_, _| Ok(CommandResult::success()),
+        )
+        .unwrap();
+    drop(controller);
+    let built = Rc::new(Cell::new(0));
+    let mut capture = fixture.capture(Controller::open(&directory).unwrap(), built.clone());
+    assert_eq!(capture.status().phase, Phase::Staged);
+    assert!(!fixture.root.join("exec/commands").exists());
+    assert!(directory.join("capture-journal.json").exists());
+    fs::write(fixture.root.join("exec/mode"), b"fail").unwrap();
+    assert!(
+        capture
+            .startup_withdraw(Instant::now() + Duration::from_secs(10))
+            .is_err()
+    );
+    assert_eq!(capture.status().phase, Phase::CleanupPending);
+    assert!(directory.join("capture-journal.json").exists());
+    assert_eq!(built.get(), 0);
+    fs::write(fixture.root.join("exec/mode"), b"success").unwrap();
+    capture
+        .startup_withdraw(Instant::now() + Duration::from_secs(10))
+        .unwrap();
+    assert_eq!(capture.status().phase, Phase::Off);
+    assert!(capture.desired().desired);
+    assert!(!directory.join("capture-journal.json").exists());
+    assert!(!fixture.root.join("run/sing-box/ready").exists());
+    assert_eq!(built.get(), 0);
+    let commands = fs::read_to_string(fixture.root.join("exec/commands")).unwrap();
+    assert!(commands.lines().all(|line| line.contains(" -D ")
+        || line.contains(" -F ")
+        || line.contains(" -X ")
+        || line.contains(" del ")
+        || line.starts_with("-4 rule del")));
+    let before = commands.len();
+    capture
+        .startup_withdraw(Instant::now() + Duration::from_secs(1))
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("exec/commands"))
+            .unwrap()
+            .len(),
+        before
+    );
+}
+#[test]
+fn off_without_journal_startup_withdrawal_is_zero_commands_even_with_expired_budget() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let built = Rc::new(Cell::new(0));
+    let mut capture = fixture.capture(
+        Controller::open(fixture.root.join("capture")).unwrap(),
+        built.clone(),
+    );
+    capture.startup_withdraw(Instant::now()).unwrap();
+    assert_eq!(built.get(), 0);
+    assert!(!fixture.root.join("exec/commands").exists());
+    assert_eq!(capture.status().phase, Phase::Off);
+}
+
+fn proof_input() -> RulesPlanInput {
+    let mut input = input();
+    input.management_ips = vec!["192.168.50.1".into()];
+    input
+}
+fn proof_config() -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({"inbounds":[{"type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080},{"type":"tun","tag":"tun-in","interface_name":"b6p-test","address":["172.30.0.1/30"],"mtu":1500,"stack":"system","dns_mode":"disabled","auto_route":false,"auto_redirect":false,"udp_timeout":"2m","udp_nat_max":1024},{"type":"direct","tag":"dns-in","listen":"192.168.50.1","listen_port":1053}],"route":{"rules":[{"inbound":["dns-in"],"action":"hijack-dns"},{"ip_version":6,"outbound":"direct"}]}})).unwrap()
+}
+fn quote_shell(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+fn kernel_proof_command(input: &RulesPlanInput) -> String {
+    let plan = be6500_panel::capture_plan::plan_owned_rules(input).unwrap();
+    let mut source = String::from(
+        "#!/bin/sh\numask 077\nprintf '%s\\n' \"$*\" >> \"$TMPDIR/commands\"\nIFS= read -r mode < \"$TMPDIR/mode\" || :\ncase \"$mode\" in fail) exit 8;; esac\n",
+    );
+    let last = plan.apply.last().unwrap()[1..].join(" ");
+    source.push_str(&format!(
+        "case \"$*\" in {}) printf 'installed\\n' > \"$TMPDIR/mode\"; exit 0;; esac\n",
+        quote_shell(&last)
+    ));
+    source.push_str("if [ \"$mode\" = preflight ]; then\ncase \"$*\" in\n");
+    source.push_str("'-4 route show table all') printf '%s\\n' '172.30.0.0/30 dev b6p-test proto kernel scope link src 172.30.0.1' 'local 172.30.0.1 dev b6p-test table local proto kernel scope host'; exit 0;;\n'-4 route show table 16500') printf '%s\\n' 'Error: ipv4: FIB table does not exist.'; exit 1;;\n'-4 rule show') printf '%s\\n' '0: from all lookup local' '32766: from all lookup main'; exit 0;;\n'-w 5 -t mangle -S') printf '%s\\n' '-P PREROUTING ACCEPT'; exit 0;;\n");
+    for chain in &plan.ownership.chains {
+        source.push_str(&format!(
+            "{}) printf '%s\\n' 'iptables: No chain/target/match by that name.'; exit 1;;\n",
+            quote_shell(&format!("-w 5 -t {} -S {}", chain.table, chain.name))
+        ));
+    }
+    source.push_str("esac\nfi\nif [ \"$mode\" = installed ]; then\ncase \"$*\" in\n'-4 route show table 16500') printf '%s\\n' 'default dev b6p-test proto static scope link'; exit 0;;\n'-4 rule show') printf '%s\\n' '0: from all lookup local' '16500: from 192.168.50.0/24 iif br-lan fwmark 0x4000/0x4000 lookup 16500' '32766: from all lookup main'; exit 0;;\n");
+    let mut seen = std::collections::BTreeSet::new();
+    for chain in &plan.ownership.chains {
+        let mut rows = vec![format!("-N {}", chain.name)];
+        for argv in &plan.apply {
+            if argv.len() > 6
+                && argv[0] == "iptables"
+                && argv[4] == chain.table
+                && argv[5] == "-A"
+                && argv[6] == chain.name
+            {
+                rows.push(argv[5..].join(" "));
+            }
+        }
+        source.push_str(&format!(
+            "{}) printf '%s\\n' {}; exit 0;;\n",
+            quote_shell(&format!("-w 5 -t {} -S {}", chain.table, chain.name)),
+            rows.iter()
+                .map(|row| quote_shell(row))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
+        if seen.insert((chain.table.clone(), chain.hook.clone())) {
+            let mut rows = vec![format!("-P {} ACCEPT", chain.hook)];
+            for argv in plan.apply.iter().rev() {
+                if argv.len() > 8
+                    && argv[0] == "iptables"
+                    && argv[4] == chain.table
+                    && argv[5] == "-I"
+                    && argv[6] == chain.hook
+                {
+                    let mut row = argv[5..].to_vec();
+                    row[0] = "-A".into();
+                    row.remove(2);
+                    rows.push(row.join(" "));
+                }
+            }
+            source.push_str(&format!(
+                "{}) printf '%s\\n' {}; exit 0;;\n",
+                quote_shell(&format!("-w 5 -t {} -S {}", chain.table, chain.hook)),
+                rows.iter()
+                    .map(|row| quote_shell(row))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+        }
+    }
+    source.push_str("esac\nfi\nexit 0\n");
+    source
+}
+#[test]
+fn current_capture_requires_live_origin_and_exact_readonly_queries_and_preserves_cleanup_failure() {
+    use be6500_panel::capture_runtime::CurrentState;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let directory = fixture.root.join("capture");
+    let mut controller = Controller::open(&directory).unwrap();
+    controller
+        .set_desired(Desired {
+            scope: "gateway".into(),
+            lan_ipv4_prefixes: vec!["192.168.50.0/24".into()],
+            desired: true,
+            ..Desired::default()
+        })
+        .unwrap();
+    let input = proof_input();
+    let source = kernel_proof_command(&input);
+    let command = fixture.root.join("artifacts/proof-command");
+    fs::write(&command, &source).unwrap();
+    fs::set_permissions(&command, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(fixture.root.join("exec/mode"), b"preflight").unwrap();
+    let digest = Sha256::digest(source.as_bytes()).into();
+    let changed = Rc::new(Cell::new(false));
+    let current_scope = changed.clone();
+    let capture = Rc::new(RefCell::new(CaptureRuntime::new(
+        controller,
+        Binaries {
+            ip: TrustedBinary::admit(&command, digest).unwrap(),
+            iptables: TrustedBinary::admit(&command, digest).unwrap(),
+        },
+        fixture.root.join("exec"),
+        table_names(b"").unwrap(),
+        move |_, _, _| {
+            let mut fresh = proof_input();
+            if current_scope.get() {
+                fresh.endpoint_ips.push("203.0.113.9".into());
+            }
+            Ok(fresh)
+        },
+    )));
+    assert_eq!(
+        capture.borrow().current_unobserved().state,
+        CurrentState::Suspended
+    );
+    let mut manager = fixture.manager(capture.clone());
+    manager
+        .configure(ServiceId::SingBox, 0, &proof_config(), None)
+        .unwrap();
+    manager.start(ServiceId::SingBox).unwrap();
+    assert_eq!(capture.borrow().status().phase, Phase::ActiveByApply);
+    assert!(!capture.borrow().current_unobserved().active);
+    let journal = fs::read(directory.join("capture-journal.json")).unwrap();
+    let before = fs::read(fixture.root.join("exec/commands")).unwrap().len();
+    // The callback seam supplies test-only current native proof; native Runtime
+    // identity/DNS failure and success are separately tested with actual owner.
+    let state = manager
+        .observe_current(
+            ServiceId::SingBox,
+            Instant::now() + Duration::from_secs(2),
+            |context| Ok(capture.borrow_mut().observe_current(context, |_| Ok(()))),
+        )
+        .unwrap();
+    assert_eq!(state.state, CurrentState::Active);
+    assert!(state.active);
+    let text = fs::read_to_string(fixture.root.join("exec/commands")).unwrap();
+    assert!(
+        text[before..].lines().all(|line| line.contains(" -S ")
+            || line.contains(" show ")
+            || line.ends_with(" show"))
+    );
+    assert_eq!(
+        fs::read(directory.join("capture-journal.json")).unwrap(),
+        journal
+    );
+    let query_count = text.len();
+    let state = manager
+        .observe_current(
+            ServiceId::SingBox,
+            Instant::now() + Duration::from_secs(1),
+            |context| {
+                Ok(capture
+                    .borrow_mut()
+                    .observe_current(context, |_| Err(HookError::Failed)))
+            },
+        )
+        .unwrap();
+    assert_eq!(state.state, CurrentState::Unknown);
+    assert_eq!(
+        fs::read(fixture.root.join("exec/commands")).unwrap().len(),
+        query_count
+    );
+    changed.set(true);
+    let state = manager
+        .observe_current(
+            ServiceId::SingBox,
+            Instant::now() + Duration::from_secs(1),
+            |context| Ok(capture.borrow_mut().observe_current(context, |_| Ok(()))),
+        )
+        .unwrap();
+    assert_eq!(state.state, CurrentState::ScopeChanged);
+    assert_eq!(
+        fs::read(fixture.root.join("exec/commands")).unwrap().len(),
+        query_count
+    );
+    changed.set(false);
+    fs::write(fixture.root.join("exec/mode"), b"fail").unwrap();
+    let state = manager
+        .observe_current(
+            ServiceId::SingBox,
+            Instant::now() + Duration::from_secs(1),
+            |context| Ok(capture.borrow_mut().observe_current(context, |_| Ok(()))),
+        )
+        .unwrap();
+    assert_eq!(state.state, CurrentState::Unknown);
+    assert_eq!(capture.borrow().status().phase, Phase::ActiveByApply);
+    assert_eq!(
+        fs::read(directory.join("capture-journal.json")).unwrap(),
+        journal
+    );
+    assert!(manager.stop(ServiceId::SingBox).is_err());
+    let capture_status = capture.borrow().current_unobserved();
+    assert_eq!(capture_status.state, CurrentState::CleanupPending);
+    assert!(!capture_status.active);
+    assert!(capture_status.intent.cleanup_pending);
+    assert!(directory.join("capture-journal.json").exists());
+    fs::write(fixture.root.join("exec/mode"), b"success").unwrap();
+    manager.stop(ServiceId::SingBox).unwrap();
+    assert_eq!(
+        capture.borrow().current_unobserved().state,
+        CurrentState::Suspended
+    );
+}
+
+#[test]
+fn shared_capture_handle_keeps_one_controller_and_explicit_cleanup_authority() {
+    use be6500_panel::{capture_runtime::CurrentState, native_runtime::NativeReadiness};
+    use std::sync::atomic::AtomicBool;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let directory = fixture.root.join("capture");
+    let mut controller = Controller::open(&directory).unwrap();
+    controller
+        .set_desired(Desired {
+            scope: "gateway".into(),
+            lan_ipv4_prefixes: vec!["192.168.50.0/24".into()],
+            desired: true,
+            ..Desired::default()
+        })
+        .unwrap();
+    controller
+        .apply(
+            input(),
+            |_, _, _| Ok(()),
+            |_, _| Ok(CommandResult::success()),
+        )
+        .unwrap();
+    drop(controller);
+    let built = Rc::new(Cell::new(0));
+    let capture = fixture.capture(Controller::open(&directory).unwrap(), built.clone());
+    let readiness = NativeReadiness::with_observer(
+        be6500_panel::readiness_tun::NativeObserver::with_proc_root(
+            fixture.root.join("unavailable-native"),
+        ),
+        Rc::new(AtomicBool::new(false)),
+    );
+    let (hooks, handle) = capture.into_hooks_with_handle(readiness);
+    let same = handle.clone();
+    assert_eq!(
+        handle.current_unobserved().unwrap().state,
+        CurrentState::Staged
+    );
+    assert!(!fixture.root.join("exec/commands").exists());
+    assert_eq!(built.get(), 0);
+    fs::write(fixture.root.join("exec/mode"), b"fail").unwrap();
+    assert!(
+        same.startup_withdraw(Instant::now() + Duration::from_secs(5))
+            .is_err()
+    );
+    assert_eq!(
+        handle.current_unobserved().unwrap().state,
+        CurrentState::CleanupPending
+    );
+    assert!(directory.join("capture-journal.json").exists());
+    fs::write(fixture.root.join("exec/mode"), b"success").unwrap();
+    handle
+        .startup_withdraw(Instant::now() + Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(
+        same.current_unobserved().unwrap().state,
+        CurrentState::Suspended
+    );
+    assert!(!directory.join("capture-journal.json").exists());
+    assert_eq!(built.get(), 0);
+    assert!(!fixture.root.join("unavailable-native").exists());
+    drop(hooks);
+}

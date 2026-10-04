@@ -810,6 +810,57 @@ impl Manager {
             .as_ref()
             .map(|run| &run.identity)
     }
+    /// Read-only native observation context from THIS retained live ready Run.
+    /// No checker/start/withdrawal, arbitrary path or persisted PID is exposed.
+    pub fn observe_current<T>(
+        &mut self,
+        service: ServiceId,
+        deadline: Instant,
+        mut observe: impl FnMut(&HookContext<'_>) -> Result<T, HookError>,
+    ) -> Result<T, HookError> {
+        let deadline = deadline.min(Instant::now() + Duration::from_secs(30));
+        if Instant::now() >= deadline {
+            return Err(HookError::Deadline);
+        }
+        let initial_sample = self.status(service);
+        let initial = current_status_after_io(initial_sample, deadline, Instant::now())?;
+        if !initial.active || !initial.desired || initial.durability_uncertain {
+            return Err(HookError::Failed);
+        }
+        let slot = &self.services[service.index()];
+        let run = slot.run.as_ref().ok_or(HookError::Failed)?;
+        let identity = run.identity.clone();
+        let config = config_identity(&run.record);
+        let config_path = slot.config_root.join(&run.record.file);
+        let status = || {
+            slot.owner
+                .as_ref()
+                .ok_or(ProcessError::Closed)?
+                .observe_retained()
+        };
+        let context = HookContext {
+            service,
+            config: &config,
+            config_path: &config_path,
+            run: Some(&run.identity),
+            artifact_root: Some(&run.binding.root),
+            artifact_path: Some(&run.binding.path),
+            artifact_file: run.artifact_file,
+            artifact_directory: run.artifact_directory,
+            owned_status: Some(&status),
+            deadline,
+        };
+        let result = observe(&context);
+        if Instant::now() >= deadline {
+            return Err(HookError::Deadline);
+        }
+        let final_sample = self.status(service);
+        let final_status = current_status_after_io(final_sample, deadline, Instant::now())?;
+        if !final_status.active || self.current_run(service) != Some(&identity) {
+            return Err(HookError::Failed);
+        }
+        result
+    }
     fn observe(&mut self, service: ServiceId) -> Result<Option<process::Status>, Failure> {
         self.services[service.index()]
             .owner
@@ -2396,6 +2447,16 @@ impl Manager {
         Ok(())
     }
 }
+fn current_status_after_io(
+    result: Result<Status, ManagerError>,
+    deadline: Instant,
+    completed: Instant,
+) -> Result<Status, HookError> {
+    if completed >= deadline {
+        return Err(HookError::Deadline);
+    }
+    result.map_err(|_| HookError::Failed)
+}
 fn slot_suspended(slot: &mut Service) {
     slot.needs_recovery = true;
     slot.resource_suspended = true;
@@ -2835,6 +2896,38 @@ IFS= read -r value < "$TMPDIR/wait"
         );
         assert!(!path.exists());
         assert!(manager.operation.is_none());
+        manager.close().unwrap();
+    }
+    #[test]
+    fn current_status_sample_completed_after_deadline_cannot_attest_success() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.manager();
+        let service = ServiceId::SingBox;
+        manager.configure(service, 0, b"good\n", None).unwrap();
+        manager.start(service).unwrap();
+        let sample = manager.status(service);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        assert!(sample.as_ref().unwrap().active);
+        assert_eq!(
+            current_status_after_io(sample.clone(), deadline, deadline),
+            Err(HookError::Deadline)
+        );
+        assert_eq!(
+            current_status_after_io(sample, deadline, deadline - Duration::from_nanos(1))
+                .unwrap()
+                .state,
+            State::Running
+        );
+        let error = manager.error(service, Failure::Exited, None);
+        assert_eq!(
+            current_status_after_io(Err(error), deadline, deadline),
+            Err(HookError::Deadline)
+        );
+        assert_eq!(
+            current_status_after_io(Err(error), deadline, deadline - Duration::from_nanos(1)),
+            Err(HookError::Failed)
+        );
         manager.close().unwrap();
     }
 }

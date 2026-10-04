@@ -426,7 +426,7 @@ impl Controller {
     {
         self.cleanup_until(&mut runner, Instant::now() + OPERATION_BUDGET)
     }
-    fn cleanup_until<R>(&mut self, mut runner: R, deadline: Instant) -> Result<(), Error>
+    pub(crate) fn cleanup_until<R>(&mut self, mut runner: R, deadline: Instant) -> Result<(), Error>
     where
         R: FnMut(&[String], Instant) -> Result<CommandResult, CommandError>,
     {

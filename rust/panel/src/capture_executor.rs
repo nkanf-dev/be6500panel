@@ -206,6 +206,16 @@ impl Executor {
             pending: None,
         })
     }
+    pub fn admit_readonly(
+        input: &RulesPlanInput,
+        binaries: Binaries,
+        run_dir: &Path,
+    ) -> Result<Self, AdmissionError> {
+        let mut executor = Self::admit(input, binaries, run_dir)?;
+        let plan = plan_owned_rules(input).map_err(|_| AdmissionError::Plan)?;
+        executor.allowed = inspection_commands(&plan).into_iter().collect();
+        Ok(executor)
+    }
     pub fn execute(
         &mut self,
         argv: &[String],

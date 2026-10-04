@@ -122,15 +122,31 @@ impl<O: Observer + 'static> NativeReadiness<O> {
         self.check(context)?;
         let initial = owned_status(context)?;
         self.check(context)?;
-        let root = context.artifact_root.ok_or(HookError::Failed)?.to_path_buf();
-        let path = context.artifact_path.ok_or(HookError::Failed)?.to_path_buf();
+        let root = context
+            .artifact_root
+            .ok_or(HookError::Failed)?
+            .to_path_buf();
+        let path = context
+            .artifact_path
+            .ok_or(HookError::Failed)?
+            .to_path_buf();
         let file = context.artifact_file.ok_or(HookError::Failed)?;
         let directory = context.artifact_directory.ok_or(HookError::Failed)?;
         let identity = OwnedIdentity::bind(
-            initial, root, path, file, directory, &mut self.observer,
-            context.deadline, &self.cancel,
-        ).map_err(tun_error)?;
-        let budget = readiness_tun::Budget { deadline: context.deadline, cancel: &self.cancel };
+            initial,
+            root,
+            path,
+            file,
+            directory,
+            &mut self.observer,
+            context.deadline,
+            &self.cancel,
+        )
+        .map_err(tun_error)?;
+        let budget = readiness_tun::Budget {
+            deadline: context.deadline,
+            cancel: &self.cancel,
+        };
         let mut status = || {
             owned_status(context).map_err(|error| match error {
                 HookError::Deadline => TunError::Deadline,
@@ -138,22 +154,31 @@ impl<O: Observer + 'static> NativeReadiness<O> {
                 _ => TunError::IdentityChanged,
             })
         };
-        identity.unchanged(&mut self.observer, &budget, &mut status).map_err(tun_error)?;
+        identity
+            .unchanged(&mut self.observer, &budget, &mut status)
+            .map_err(tun_error)?;
         if context.service == ServiceId::Frpc {
             // Identity/liveness only: no accepted listener or tunnel-health claim.
             return self.check(context);
         }
         let raw = read_accepted_until(context, Some(&self.cancel))?;
-        let tun = readiness_tun::native_target(&raw).map_err(tun_error)?.is_some();
+        let tun = readiness_tun::native_target(&raw)
+            .map_err(tun_error)?
+            .is_some();
         let targets = readiness_dns::native_readiness_targets(&raw).map_err(dns_error)?;
         if tun && !targets.iter().any(|target| target.domain.is_some()) {
             return Err(HookError::Failed);
         }
         if tun {
             readiness_tun::observe_owned_once(
-                &raw, &identity, &mut self.observer, context.deadline,
-                &self.cancel, &mut status,
-            ).map_err(tun_error)?;
+                &raw,
+                &identity,
+                &mut self.observer,
+                context.deadline,
+                &self.cancel,
+                &mut status,
+            )
+            .map_err(tun_error)?;
         }
         let listeners = (|| {
             for target in &targets {
@@ -165,19 +190,28 @@ impl<O: Observer + 'static> NativeReadiness<O> {
         })();
         // Reuse the ORIGINAL start-time stamp. Rebinding after DNS would accept
         // replacement identity and silently discard the proof's time interval.
-        identity.unchanged(&mut self.observer, &budget, &mut status).map_err(tun_error)?;
+        identity
+            .unchanged(&mut self.observer, &budget, &mut status)
+            .map_err(tun_error)?;
         if tun {
             readiness_tun::observe_owned_once(
-                &raw, &identity, &mut self.observer, context.deadline,
-                &self.cancel, &mut status,
-            ).map_err(tun_error)?;
+                &raw,
+                &identity,
+                &mut self.observer,
+                context.deadline,
+                &self.cancel,
+                &mut status,
+            )
+            .map_err(tun_error)?;
         }
         listeners?;
         // Release the first bounded config before its second disk/hash read.
         // Current observation must not retain two maximum-size config buffers.
         drop(raw);
         read_accepted_until(context, Some(&self.cancel))?;
-        identity.unchanged(&mut self.observer, &budget, &mut status).map_err(tun_error)?;
+        identity
+            .unchanged(&mut self.observer, &budget, &mut status)
+            .map_err(tun_error)?;
         if owned_status(context)? != initial {
             return Err(HookError::Failed);
         }

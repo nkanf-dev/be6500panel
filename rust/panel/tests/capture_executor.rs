@@ -89,6 +89,18 @@ impl Fixture {
         )
         .unwrap()
     }
+    fn readonly(&self) -> Executor {
+        let hash = Sha256::digest(HELPER.as_bytes()).into();
+        Executor::admit_readonly(
+            &self.input,
+            Binaries {
+                ip: TrustedBinary::admit(&self.artifact, hash).unwrap(),
+                iptables: TrustedBinary::admit(&self.artifact, hash).unwrap(),
+            },
+            &self.run,
+        )
+        .unwrap()
+    }
     fn command(&self) -> Vec<String> {
         plan_owned_rules(&self.input).unwrap().apply[0].clone()
     }
@@ -232,5 +244,30 @@ fn changed_executable_and_run_root_are_refused() {
                 None
             )
             .is_err()
+    );
+}
+
+#[test]
+fn readonly_executor_admits_inspection_but_never_apply_or_cleanup_vectors() {
+    let fixture = Fixture::new();
+    let mut executor = fixture.readonly();
+    let plan = plan_owned_rules(&fixture.input).unwrap();
+    for argv in plan.apply.iter().chain(&plan.cleanup) {
+        assert_eq!(
+            executor.execute(argv, Instant::now() + Duration::from_secs(1), None),
+            Err(CommandError::Failure)
+        );
+    }
+    assert!(!fixture.run.join("argv").exists());
+    let query = be6500_panel::capture_executor::inspection_commands(&plan)[0].clone();
+    assert!(
+        executor
+            .execute(&query, Instant::now() + Duration::from_secs(1), None)
+            .unwrap()
+            .success
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.run.join("argv")).unwrap(),
+        query[1..].join("\n") + "\n"
     );
 }

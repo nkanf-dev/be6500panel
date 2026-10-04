@@ -2090,3 +2090,82 @@ fn initial_changed_stage_cleanup_failure_retains_handle_without_leaking_owner_sl
     );
     manager.close().unwrap();
 }
+
+#[test]
+fn manager_current_context_uses_actual_retained_binding_and_never_starts_or_cleans() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    let mut called = false;
+    assert_eq!(
+        manager.observe_current(service, Instant::now() + Duration::from_secs(1), |_| {
+            called = true;
+            Ok(())
+        }),
+        Err(HookError::Failed)
+    );
+    assert!(!called);
+    assert!(fixture.control.borrow().events.is_empty());
+    let pid = live(&mut manager, service, b"good\n");
+    let before = fixture.control.borrow().events.len();
+    let manifest = fixture.manifest(service);
+    let observed = manager
+        .observe_current(
+            service,
+            Instant::now() + Duration::from_secs(1),
+            |context| {
+                assert_eq!(context.run.unwrap().pid(), pid);
+                assert_eq!(
+                    context.artifact_path.unwrap(),
+                    fixture.base.join("artifacts/fake-core")
+                );
+                assert_eq!(context.owned_status.unwrap()().unwrap().pid, Some(pid));
+                Ok(context.config.generation)
+            },
+        )
+        .unwrap();
+    assert_eq!(observed, 1);
+    assert_eq!(fixture.control.borrow().events.len(), before);
+    assert_eq!(fixture.manifest(service), manifest);
+    assert_eq!(
+        manager.observe_current(service, Instant::now(), |_| panic!("expired observation")),
+        Err::<(), _>(HookError::Deadline)
+    );
+    manager.stop(service).unwrap();
+    assert_eq!(
+        manager.observe_current(
+            service,
+            Instant::now() + Duration::from_secs(1),
+            |_| panic!("stopped observation")
+        ),
+        Err::<(), _>(HookError::Failed)
+    );
+}
+
+#[test]
+fn current_observation_exit_rejects_success_without_withdrawing_or_reaping_core() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    let pid = live(&mut manager, service, b"good\n");
+    let before = fixture.control.borrow().events.len();
+    let observed = manager.observe_current(
+        service,
+        Instant::now() + Duration::from_secs(2),
+        |context| {
+            assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
+            finite_until(context.deadline, || {
+                context.owned_status.unwrap()()
+                    .is_ok_and(|status| status.phase == process::Phase::Exited)
+            })?;
+            Ok(())
+        },
+    );
+    assert_eq!(observed, Err(HookError::Failed));
+    assert_eq!(fixture.control.borrow().events.len(), before);
+    assert_eq!(manager.status(service).unwrap().pid, Some(pid));
+    manager.handle_exit(service).unwrap();
+    assert!(manager.status(service).unwrap().pid.is_none());
+}

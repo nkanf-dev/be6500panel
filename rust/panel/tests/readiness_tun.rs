@@ -795,3 +795,58 @@ fn compiled_route_expansion_retains_only_exact_direct_ipv6_proof() {
     let over = CONFIG.replace(r#"{"ip_version":6,"outbound":"direct"}"#, &too_many);
     assert!(native_target(over.as_bytes()).is_err());
 }
+
+#[test]
+fn fixed_frpc_identity_can_be_rechecked_but_never_authorizes_tun_resources() {
+    let mut fixture = Fixture::new();
+    let mut owner = Fixture::owner();
+    owner.service = ServiceId::Frpc;
+    let artifact = fixture.artifact.clone();
+    let root = artifact.parent().unwrap().to_path_buf();
+    let identity = OwnedIdentity::bind(
+        owner,
+        root.clone(),
+        artifact.clone(),
+        FileIdentity::from_metadata(&fs::metadata(&artifact).unwrap()),
+        FileIdentity::from_metadata(&fs::metadata(root).unwrap()),
+        &mut fixture,
+        Instant::now() + Duration::from_secs(1),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(1),
+        cancel: &cancel,
+    };
+    identity
+        .unchanged(&mut fixture, &budget, &mut || Ok(owner))
+        .unwrap();
+    assert_eq!(
+        observe_owned_once(
+            CONFIG.as_bytes(),
+            &identity,
+            &mut fixture,
+            budget.deadline,
+            &cancel,
+            &mut || Ok(owner)
+        ),
+        Err(TunError::Identity)
+    );
+    assert_eq!(
+        observe_owned_once(
+            b"{}",
+            &identity,
+            &mut fixture,
+            budget.deadline,
+            &cancel,
+            &mut || Ok(owner)
+        ),
+        Err(TunError::Identity)
+    );
+    fixture.write("4321/stat", stat(123457, "S"));
+    assert_eq!(
+        identity.unchanged(&mut fixture, &budget, &mut || Ok(owner)),
+        Err(TunError::IdentityChanged)
+    );
+}

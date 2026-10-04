@@ -481,11 +481,7 @@ pub struct OwnedStatus {
 }
 impl OwnedStatus {
     fn validate(self) -> Result<(), TunError> {
-        if self.service != ServiceId::SingBox
-            || self.pid == 0
-            || self.pid > i32::MAX as u32
-            || !self.running
-        {
+        if self.pid == 0 || self.pid > i32::MAX as u32 || !self.running {
             Err(TunError::Identity)
         } else {
             Ok(())
@@ -600,7 +596,9 @@ impl OwnedIdentity {
         }
         Ok(start)
     }
-    fn unchanged(
+    /// Re-sample this exact bound retained process starttime and artifact.
+    /// Does not grant PID adoption, readiness or resource ownership by itself.
+    pub fn unchanged(
         &self,
         observer: &mut impl Observer,
         b: &Budget<'_>,
@@ -880,6 +878,9 @@ pub fn observe_owned_once(
 ) -> Result<OwnedObservation, TunError> {
     let b = Budget { deadline, cancel };
     b.check()?;
+    if identity.owner.service != ServiceId::SingBox {
+        return Err(TunError::Identity);
+    }
     let Some(target) = native_target(raw)? else {
         return Ok(OwnedObservation::NoTunTarget);
     };

@@ -1,0 +1,19 @@
+# Explicit capture withdrawal and current observation
+
+## Separate authorities
+
+Capture desired intent, validated journal ownership, prior Apply completion and current installed proof are separate. `startup_withdraw(deadline)` explicitly regenerates only validated ownedcleanup; no core/Apply/builder/PID adoption. Off/nojournal executeszero commands. Deadlinecapped30s; controller attempts allremainingcleanup or countsunattempted commands, retainsjournal/executor onfailure. It preserves desiredselection for laterexplicitrestoration. LegacyTPROXY journals remainrefused/retained, not converted or replayed here.
+
+`current_unobserved` is purephaseprojection. Loadedjournal isStaged, actualcleanupfailureCleanupPending, OffdesiredonSuspended, OffdesiredoffInactive; priorApply aloneUnknown. `observe_current` requiresthe exact retainedRun whose in-processrestore observedresources, currentacceptedconfig/hash, actualnativeowner/TUN/listener/DNS proof, freshLAN/selectedscope builder and exactinstalledcompilerresourcequeries. Freshscope changes reportScopeChanged, notActive. Missing/unavailablequery/core/identity/DNS/proof returnsUnknown and changes nojournal/intent/phase orcleanupfailure. Nohitcounts/inventedcoverage.
+
+Query-only executor admission includesfixedinspectioncommands only, never Apply/Cleanup vectors. Each one-shot querychild is bounded/terminated/reaped, not the core; unresolvedquerychild remainsretained and observationdoesnotabort/retry it. Explicitcleanupmayretry that sameexecutor later. Currentmanager readcontext pre/post requiresactualreadymatchingretainedRun/binding and rechecks cooperative deadline AFTER every finalsupervisorstatusIO before returning. Deadline takespriority over a statuserror afterbudget. The acceptedconfigbuffer drops immediatelyafterfreshinputvalidation, beforequeries/secondnativehashreread; no extra4MiBbuffer retained acrossthose phases. No targetmemorygainmeasured; callback exit cannot passsuccess or triggercorewithdrawal/reaping. No backgroundobserver orsecondowner.
+
+## Native evidence
+
+`NativeReadiness::observe_current` bindsoriginalprocessstarttime/admittedartifactinode beforeandafter actual one-shot DNS answers. TUN additionallyrequiresactualownedTUNfd/privateTCPsocket/UP/address/MTU/rpfproof. No startupwait/sleep orport-open-as-DNS. FRPC validatesretainedprocess/artifact/starttimeonly, never remotetunnelhealth. Exactidentity unchanged seam supportsbothfixedservices; TUNproof explicitlySingBox-only. Acceptedconfig reread/hash and cancellation/deadline before/after boundedIO. A clonedCaptureHandle shares onlyRc references tosamecapture/native hooks; no newManager/thread/copiedobserver.
+
+## Tests and boundary
+
+Before source-review fixes,404 fullserializedhost/fmt/strictClippy/diff checks passed. Two actualissues fixed:last-usebufferrelease andpoststatusIOdeadline. Deterministicstatusbudget regression firstreturnedactiveOk afterdeadline, thenexpectsDeadline; currentfocused/finalgates remainauthoritative. Syntheticproc/nativeObserver/localDNS,fakefixedcore andcommandkernelreplyfixtures coverpositive/missingTUN,DNS/identity/configdrift,deadlines/cancel,FRPCnottunnel,readonlycommandauthority,loadedjournalwithdrawalfailure/retry,coreexitovertheobservationinterval,scopechanged/queryfailure/cleanupfailure-preserved andsharedhandlecleanup. Callbackfake-native seam is not called actualdeviceproof. Latestfullhost/ARM/sourcecommitevidence is external rust-capture-startup-current-proof-* and remainspending untilreadback.
+
+This source slice is not currentrouterkernelexecution, legacyGo desired/journalmigration, authenticatedCaptureHTTPaction/parity, mainnativeowner/deployhandover orfullmanagementparity. Capturecurrentlyoff/retired8788 assumptions unchanged; zero livecore/capture operation. No targetRSS/latency oraggregatedmemorygainclaim.
