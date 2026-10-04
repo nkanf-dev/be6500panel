@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"be6500panel/internal/capture"
 	"be6500panel/internal/proxy"
@@ -18,13 +19,15 @@ func (s *Server) proxyCapture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
+		observeCtx, cancelObserve := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancelObserve()
 		var status capture.Status
 		var err error
 		desired := s.capture.Desired()
 		if desired.Enabled || len(desired.Devices) > 0 {
-			status, err = s.capture.ReconcileDesired(r.Context())
+			status, err = s.capture.ReconcileDesired(observeCtx)
 		} else {
-			status, err = s.capture.Reconcile(r.Context())
+			status, err = s.capture.Reconcile(observeCtx)
 		}
 		if err != nil {
 			code := status.Error
