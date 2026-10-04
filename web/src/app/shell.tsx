@@ -22,59 +22,23 @@ import { ThemeMenu } from "./theme-menu";
 import { errorMessage } from "../lib/api";
 import { timestamp } from "../lib/format";
 
-export function Shell({
-  page,
-  navigate,
-  onLogout,
-  authRequired,
-  children,
-  recoveryBanner,
-}: {
+type NavigationProps = {
   page: PageId;
-  navigate: (id: PageId) => void;
-  onLogout: () => void;
-  authRequired: boolean;
-  children: ReactNode;
-  recoveryBanner?: ReactNode;
-}) {
-  const [commandOpen, setCommandOpen] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-  const { health, connection, system, error, refresh } = useConsole();
-  const registration = moduleById(page);
-  const reducedMotion = useReducedMotion();
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setCommandOpen((open) => !open);
-      }
-      if (
-        event.key === "/" &&
-        !(
-          event.target instanceof HTMLInputElement ||
-          event.target instanceof HTMLTextAreaElement
-        ) &&
-        !event.metaKey &&
-        !event.ctrlKey
-      ) {
-        const input = document.querySelector<HTMLInputElement>(
-          '.page-content input[aria-label^="筛选"]',
-        );
-        if (input) {
-          event.preventDefault();
-          input.focus();
-        }
-      }
-    };
-    window.addEventListener("keydown", listener);
-    return () => window.removeEventListener("keydown", listener);
-  }, []);
-  const select = (id: PageId) => {
-    navigate(id);
-    setMobileOpen(false);
-  };
-  const Navigation = () => (
+  collapsed: boolean;
+  select: (id: PageId) => void;
+  toggleCollapsed: () => void;
+};
+
+// This component's type must stay stable across console sampling. Defining it
+// inside Shell remounts every menu link and restarts :hover transitions/focus.
+function Navigation({
+  page,
+  collapsed,
+  select,
+  toggleCollapsed,
+}: NavigationProps) {
+  const { health } = useConsole();
+  return (
     <>
       <div className="sidebar-brand">
         <span className="brand-icon">
@@ -144,7 +108,7 @@ export function Shell({
             variant="ghost"
             size="icon"
             aria-label={collapsed ? "展开导航" : "收起导航"}
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={toggleCollapsed}
           >
             <PanelLeftClose size={16} />
           </Button>
@@ -158,6 +122,61 @@ export function Shell({
       </div>
     </>
   );
+}
+
+export function Shell({
+  page,
+  navigate,
+  onLogout,
+  authRequired,
+  children,
+  recoveryBanner,
+}: {
+  page: PageId;
+  navigate: (id: PageId) => void;
+  onLogout: () => void;
+  authRequired: boolean;
+  children: ReactNode;
+  recoveryBanner?: ReactNode;
+}) {
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const { health, connection, system, error, refresh } = useConsole();
+  const registration = moduleById(page);
+  const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandOpen((open) => !open);
+      }
+      if (
+        event.key === "/" &&
+        !(
+          event.target instanceof HTMLInputElement ||
+          event.target instanceof HTMLTextAreaElement
+        ) &&
+        !event.metaKey &&
+        !event.ctrlKey
+      ) {
+        const input = document.querySelector<HTMLInputElement>(
+          '.page-content input[aria-label^="筛选"]',
+        );
+        if (input) {
+          event.preventDefault();
+          input.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+  const select = (id: PageId) => {
+    navigate(id);
+    setMobileOpen(false);
+  };
+
   return (
     <div className={cn("console-layout", collapsed && "sidebar-collapsed")}>
       <a
@@ -171,7 +190,12 @@ export function Shell({
         跳至主要内容
       </a>
       <aside className="desktop-sidebar">
-        <Navigation />
+        <Navigation
+          page={page}
+          collapsed={collapsed}
+          select={select}
+          toggleCollapsed={() => setCollapsed((value) => !value)}
+        />
       </aside>
       <div className="console-main">
         {recoveryBanner}
@@ -317,7 +341,12 @@ export function Shell({
             <Dialog.Close className="mobile-close" aria-label="关闭导航">
               <X size={18} />
             </Dialog.Close>
-            <Navigation />
+            <Navigation
+              page={page}
+              collapsed={collapsed}
+              select={select}
+              toggleCollapsed={() => setCollapsed((value) => !value)}
+            />
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
