@@ -210,3 +210,37 @@ describe("one-click node probes are independent of selection", () => {
     expect(nodeProbeApi.stop).not.toHaveBeenCalled();
   });
 });
+
+it("shows the real current-node delay and starts only that node without changing selection or saving", async () => {
+  vi.mocked(nodeProbeApi.snapshot).mockReturnValue(
+    Effect.succeed({
+      ...idle,
+      results: [
+        {
+          nodeId: "node-1",
+          status: "success",
+          delayMs: 185,
+          measuredAt: "2026-10-03T05:00:01Z",
+          target: NODE_PROBE_TARGET,
+        },
+      ],
+    }),
+  );
+  const view = setup();
+  const button = screen.getByRole("button", { name: "测试当前延迟" });
+  await waitFor(() => expect(button).toBeEnabled());
+  expect(screen.getByText(/当前延迟：185 ms/)).toBeInTheDocument();
+  expect(nodeProbeApi.start).not.toHaveBeenCalled();
+  await userEvent.setup().click(button);
+  expect(nodeProbeApi.start).toHaveBeenCalledExactlyOnceWith({
+    all: false,
+    nodeIds: ["node-1"],
+    revision: "import-one",
+  });
+  expect(api.proxySelect).not.toHaveBeenCalled();
+  expect(view.controller.run).not.toHaveBeenCalled();
+  expect(view.onSelected).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole("button", { name: "选择节点 Probe Node 1" }),
+  ).toHaveAttribute("aria-pressed", "true");
+});

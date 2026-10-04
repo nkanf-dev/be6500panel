@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
-import type { IPv6Policy, ProxySelectInput } from "../../lib/contracts";
+import type { ProxySelectInput, RoutedTUNConfig } from "../../lib/contracts";
 
 import { validRegion, type NodeRegion } from "./node-selector-regions";
 
 const VIEW_KEY = "be6500panel.proxy.node-view";
 const FAVORITES_KEY = "be6500panel.proxy.node-favorites";
 export const NODE_PAGE_SIZE = 20;
+export const TPROXY_RESERVED_PORT = 7893;
+export const DEFAULT_ROUTED_TUN: RoutedTUNConfig = {
+  interfaceName: "b6p-tun",
+  address: "172.31.255.253/30",
+};
 
 export type NodePreferences = {
   query: string;
@@ -16,8 +21,7 @@ export type NodePreferences = {
   page: number;
   selectedId: string;
   acceptedGeneration?: number;
-  ipv6: IPv6Policy;
-  ports: ProxySelectInput["ports"];
+  ports: Pick<ProxySelectInput["ports"], "mixed" | "dns">;
 };
 
 function readStorage(
@@ -58,6 +62,33 @@ export function validPort(value: unknown): value is number {
     value <= 65535
   );
 }
+/** Same owned interface and literal RFC1918 first-host /30 contract as Go. */
+export function validRoutedTUN(value: unknown): value is RoutedTUNConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const fields = value as Record<string, unknown>;
+  if (
+    Object.keys(fields).length !== 2 ||
+    typeof fields.interfaceName !== "string" ||
+    fields.interfaceName.match(/^b6p-[A-Za-z0-9_][A-Za-z0-9_-]{0,10}$/)?.[0] !==
+      fields.interfaceName ||
+    typeof fields.address !== "string"
+  )
+    return false;
+  const match = fields.address.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)\/30$/);
+  if (!match) return false;
+  const octets = match.slice(1).map(Number);
+  if (
+    octets.some((octet) => !Number.isInteger(octet) || octet > 255) ||
+    `${octets.join(".")}/30` !== fields.address ||
+    octets[3] % 4 !== 1
+  )
+    return false;
+  return (
+    octets[0] === 10 ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168)
+  );
+}
 function readPreferences(): NodePreferences {
   const saved = record(readStorage("sessionStorage", VIEW_KEY));
   const ports = record(saved.ports);
@@ -74,16 +105,21 @@ function readPreferences(): NodePreferences {
         ? saved.page
         : 1,
     selectedId: text(saved.selectedId),
+    // Re-read older backend-specific drafts instead of trusting their generation.
     acceptedGeneration:
+      !("datapath" in saved) &&
+      !("routedTUN" in saved) &&
+      !("ipv6" in saved) &&
+      !("tproxy" in ports) &&
+      validPort(ports.mixed) &&
+      validPort(ports.dns) &&
+      ports.mixed !== ports.dns &&
       typeof saved.acceptedGeneration === "number" &&
       Number.isSafeInteger(saved.acceptedGeneration)
         ? saved.acceptedGeneration
         : undefined,
-    ipv6:
-      saved.ipv6 === "follow" || saved.ipv6 === "block" ? saved.ipv6 : "direct",
     ports: {
       mixed: validPort(ports.mixed) ? ports.mixed : 2080,
-      tproxy: validPort(ports.tproxy) ? ports.tproxy : 7893,
       dns: validPort(ports.dns) ? ports.dns : 6450,
     },
   };

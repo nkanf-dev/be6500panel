@@ -321,8 +321,15 @@ export type RuntimeConfigureInput = {
 export type ProxyImportInput =
   | { url: string; content?: never }
   | { content: string; url?: never };
+export type DatapathMode = "routed-tun";
+export type RoutedTUNConfig = {
+  interfaceName: string;
+  address: string;
+};
 export type ProxySelectInput = {
   nodeId: string;
+  datapath?: DatapathMode;
+  routedTUN?: RoutedTUNConfig;
   acknowledgedRevision?: string;
   ipv6: IPv6Policy;
   failure: "direct";

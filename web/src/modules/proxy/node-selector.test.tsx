@@ -52,6 +52,30 @@ const nativeConfig = (
     },
   });
 
+const routedConfig = (
+  ports = { mixed: 3300, dns: 3302 },
+  tun = { interfaceName: "b6p-pilot_1", address: "10.203.4.1/30" },
+) => {
+  const native = JSON.parse(nativeConfig("direct", { ...ports, tproxy: 7893 }));
+  native.inbounds[1] = {
+    type: "tun",
+    tag: "tun-in",
+    interface_name: tun.interfaceName,
+    address: [tun.address],
+    mtu: 1500,
+    dns_mode: "disabled",
+    auto_route: false,
+    auto_redirect: false,
+    stack: "system",
+    udp_timeout: "2m",
+    udp_nat_max: 1024,
+  };
+  native.outbounds = [
+    { type: "vless", server: "private.example.test", uuid: "private-uuid" },
+  ];
+  return JSON.stringify(native);
+};
+
 const nodes: ProxyNodes = {
   selectedNodeId: "node-126",
   diagnostics: [],
@@ -102,7 +126,7 @@ function visibleRows() {
   ).getAllByRole("button", { name: /^选择节点 / });
 }
 function saveButton() {
-  return screen.getByRole("button", { name: "保存节点配置" });
+  return screen.getByRole("button", { name: "保存配置" });
 }
 
 beforeEach(() => {
@@ -139,7 +163,7 @@ describe("bounded node browsing", () => {
     await user.selectOptions(screen.getByLabelText("页码"), "8");
     expect(visibleRows()).toHaveLength(10);
     expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "定位当前节点" }));
+    await user.click(screen.getByRole("button", { name: "更换节点" }));
     const active = screen.getByRole("button", {
       name: "选择节点 东京 Node 126",
     });
@@ -194,6 +218,8 @@ describe("bounded node browsing", () => {
       nodeId: "node-3",
       ipv6: "direct",
       failure: "direct",
+      datapath: "routed-tun",
+      routedTUN: { interfaceName: "b6p-tun", address: "172.31.255.253/30" },
       ports: { mixed: 2080, tproxy: 7893, dns: 6450 },
     });
     expect(screen.getByText("节点配置已保存")).toBeInTheDocument();
@@ -286,7 +312,7 @@ describe("bounded node browsing", () => {
     expect(visibleRows()).toHaveLength(1);
     expect(visibleRows()[0]).toHaveAccessibleName("选择节点 东京 Node 126");
     expect(screen.getByText(/不推断实际地理位置/)).toBeInTheDocument();
-    expect(screen.getByText(/延迟未测/)).toBeInTheDocument();
+    expect(screen.getByText(/当前延迟：未测/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "其他" }));
     const selected = visibleRows()[0];
     await user.click(within(selected).getByText("Example Node 001"));
@@ -330,7 +356,7 @@ describe("bounded node browsing", () => {
 });
 
 describe("explicit compiler submission", () => {
-  it("hydrates accepted follow/custom ports before saving and preserves them on a fresh session", async () => {
+  it("reads legacy custom ports before saving the sole routed-TUN path on a fresh session", async () => {
     const user = userEvent.setup();
     const custom = { mixed: 3200, tproxy: 3201, dns: 3202 };
     vi.mocked(api.runtimeConfig).mockReturnValue(
@@ -343,7 +369,7 @@ describe("explicit compiler submission", () => {
     const view = setup();
     expect(saveButton()).toBeDisabled();
     await waitFor(() => expect(saveButton()).toBeEnabled());
-    expect(screen.getByLabelText("节点 IPv6 策略")).toHaveValue("follow");
+    expect(screen.queryByLabelText("节点 IPv6 策略")).not.toBeInTheDocument();
     expect(screen.getByLabelText("dns 监听端口")).toHaveValue(3202);
     await user.click(
       screen.getByRole("button", { name: "选择节点 Example Node 005" }),
@@ -351,15 +377,17 @@ describe("explicit compiler submission", () => {
     await user.click(saveButton());
     expect(api.proxySelect).toHaveBeenCalledWith({
       nodeId: "node-5",
-      ipv6: "follow",
+      ipv6: "direct",
       failure: "direct",
-      ports: custom,
+      datapath: "routed-tun",
+      routedTUN: { interfaceName: "b6p-tun", address: "172.31.255.253/30" },
+      ports: { ...custom, tproxy: 7893 },
     });
     view.unmount();
     window.sessionStorage.clear();
     setup();
     await waitFor(() => expect(saveButton()).toBeEnabled());
-    expect(screen.getByLabelText("节点 IPv6 策略")).toHaveValue("follow");
+    expect(screen.queryByLabelText("节点 IPv6 策略")).not.toBeInTheDocument();
     expect(screen.getByLabelText("mixed 监听端口")).toHaveValue(3200);
     expect(api.proxySelect).toHaveBeenCalledTimes(1);
     expect(
@@ -386,7 +414,7 @@ describe("explicit compiler submission", () => {
     expect(api.proxySelect).not.toHaveBeenCalled();
   });
 
-  it("lets keyboard users select and apply, preserves IPv6 and custom ports across remounts", async () => {
+  it("lets keyboard users select and save, preserves editable ports across remounts", async () => {
     const user = userEvent.setup();
     const view = setup();
     screen.getByRole("button", { name: "选择节点 Example Node 008" }).focus();
@@ -394,7 +422,7 @@ describe("explicit compiler submission", () => {
     expect(
       screen.getByRole("button", { name: "选择节点 Example Node 008" }),
     ).toHaveAttribute("aria-pressed", "true");
-    await user.selectOptions(screen.getByLabelText("节点 IPv6 策略"), "block");
+    expect(screen.queryByLabelText("节点 IPv6 策略")).not.toBeInTheDocument();
     expect(screen.getByText(/高级设置/).closest("details")).not.toHaveAttribute(
       "open",
     );
@@ -402,26 +430,26 @@ describe("explicit compiler submission", () => {
     fireEvent.change(screen.getByLabelText("mixed 监听端口"), {
       target: { value: "3100" },
     });
-    fireEvent.change(screen.getByLabelText("tproxy 监听端口"), {
-      target: { value: "3101" },
-    });
+    expect(screen.queryByLabelText("tproxy 监听端口")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("dns 监听端口"), {
       target: { value: "3102" },
     });
     view.unmount();
     const remount = setup();
     await waitFor(() =>
-      expect(screen.getByLabelText("节点 IPv6 策略")).toBeEnabled(),
+      expect(screen.getByLabelText("mixed 监听端口")).toBeEnabled(),
     );
-    expect(screen.getByLabelText("节点 IPv6 策略")).toHaveValue("block");
+    expect(screen.queryByLabelText("接管后端")).not.toBeInTheDocument();
     expect(screen.getByLabelText("mixed 监听端口")).toHaveValue(3100);
     saveButton().focus();
     await user.keyboard("{Enter}");
     expect(api.proxySelect).toHaveBeenCalledExactlyOnceWith({
       nodeId: "node-8",
-      ipv6: "block",
+      ipv6: "direct",
       failure: "direct",
-      ports: { mixed: 3100, tproxy: 3101, dns: 3102 },
+      datapath: "routed-tun",
+      routedTUN: { interfaceName: "b6p-tun", address: "172.31.255.253/30" },
+      ports: { mixed: 3100, tproxy: 7893, dns: 3102 },
     });
     expect(remount.selected).toHaveBeenCalledTimes(1);
   });
@@ -449,7 +477,7 @@ describe("explicit compiler submission", () => {
     expect(api.proxySelect).not.toHaveBeenCalled();
     if ("importing" in guard || "pending" in guard) {
       expect(visibleRows()[0]).toBeDisabled();
-      expect(screen.getByLabelText("节点 IPv6 策略")).toBeDisabled();
+      expect(screen.getByLabelText("mixed 监听端口")).toBeDisabled();
     }
   });
 
@@ -479,12 +507,10 @@ describe("explicit compiler submission", () => {
     expect(saveButton()).toBeEnabled();
   });
 
-  it("labels the running-core action without showing technical Commit or hashes", async () => {
+  it("shows the actual running core with a simple save action and no technical Commit or hashes", async () => {
     setup({ status: { ...runtimeStatus, state: "running" } });
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "保存并应用节点" }),
-      ).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "保存配置" })).toBeEnabled(),
     );
     expect(screen.queryByText(/Commit|SHA-256/)).not.toBeInTheDocument();
   });
@@ -509,4 +535,260 @@ describe("explicit compiler submission", () => {
       screen.queryAllByRole("button", { name: /^选择节点 / }),
     ).toHaveLength(0);
   });
+});
+
+describe("sole routed-TUN save path", () => {
+  it("loads actual TUN ports and preserves its safe interface/address on every explicit save", async () => {
+    const tun = { interfaceName: "b6p-pilot_1", address: "10.203.4.1/30" };
+    vi.mocked(api.runtimeConfig).mockReturnValue(
+      Effect.succeed({
+        service: "sing-box",
+        config: routedConfig(),
+        generation: 4,
+      }),
+    );
+    const user = userEvent.setup();
+    const view = setup();
+    expect(saveButton()).toBeDisabled();
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    expect(
+      screen.getByRole("heading", { name: "网关路由代理" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("当前节点")).toBeInTheDocument();
+    expect(screen.getByLabelText("mixed 监听端口")).toHaveValue(3300);
+    expect(screen.getByLabelText("dns 监听端口")).toHaveValue(3302);
+    expect(screen.queryByLabelText("接管后端")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("节点 IPv6 策略")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("tproxy 监听端口")).not.toBeInTheDocument();
+    expect(api.proxySelect).not.toHaveBeenCalled();
+    await user.click(saveButton());
+    expect(api.proxySelect).toHaveBeenCalledExactlyOnceWith({
+      nodeId: "node-126",
+      ipv6: "direct",
+      failure: "direct",
+      ports: { mixed: 3300, tproxy: 7893, dns: 3302 },
+      datapath: "routed-tun",
+      routedTUN: tun,
+    });
+    expect(view.selected).toHaveBeenCalledOnce();
+    const stored = window.sessionStorage.getItem(
+      "be6500panel.proxy.node-view",
+    )!;
+    expect(stored).not.toMatch(
+      /inbounds|outbounds|private|uuid|interfaceName|address|datapath|routedTUN/,
+    );
+    expect(JSON.parse(stored).ports).toEqual({ mixed: 3300, dns: 3302 });
+    view.unmount();
+    setup();
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(saveButton());
+    expect(api.proxySelect).toHaveBeenLastCalledWith({
+      nodeId: "node-126",
+      ipv6: "direct",
+      failure: "direct",
+      ports: { mixed: 3300, tproxy: 7893, dns: 3302 },
+      datapath: "routed-tun",
+      routedTUN: tun,
+    });
+  });
+
+  it("uses fixed TUN defaults only on explicit save from an unconfigured runtime", async () => {
+    const user = userEvent.setup();
+    setup({ status: { ...runtimeStatus, configured: false } });
+    expect(api.runtimeConfig).not.toHaveBeenCalled();
+    expect(api.proxySelect).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("mixed 监听端口")).toHaveValue(2080);
+    expect(screen.getByLabelText("dns 监听端口")).toHaveValue(6450);
+    expect(screen.getByText("保存配置不会自动开启接管。")).toBeInTheDocument();
+    await user.click(saveButton());
+    expect(api.proxySelect).toHaveBeenCalledExactlyOnceWith({
+      nodeId: "node-126",
+      ipv6: "direct",
+      failure: "direct",
+      ports: { mixed: 2080, tproxy: 7893, dns: 6450 },
+      datapath: "routed-tun",
+      routedTUN: { interfaceName: "b6p-tun", address: "172.31.255.253/30" },
+    });
+  });
+
+  it("ignores unknown and unsafe stored backend intent and re-reads actual accepted settings", async () => {
+    window.sessionStorage.setItem(
+      "be6500panel.proxy.node-view",
+      JSON.stringify({
+        acceptedGeneration: 4,
+        datapath: "unknown-private-mode",
+        ipv6: "block",
+        routedTUN: {
+          interfaceName: "br-lan",
+          address: "8.8.8.1/30",
+          netns: "private-ns",
+        },
+        ports: { mixed: 4400, tproxy: 4401, dns: 4402 },
+      }),
+    );
+    vi.mocked(api.runtimeConfig).mockReturnValue(
+      Effect.succeed({
+        service: "sing-box",
+        config: routedConfig(),
+        generation: 4,
+      }),
+    );
+    const user = userEvent.setup();
+    setup();
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    expect(screen.getByLabelText("mixed 监听端口")).toHaveValue(3300);
+    expect(screen.getByLabelText("dns 监听端口")).toHaveValue(3302);
+    expect(api.proxySelect).not.toHaveBeenCalled();
+    await user.click(saveButton());
+    expect(api.proxySelect).toHaveBeenCalledExactlyOnceWith({
+      nodeId: "node-126",
+      ipv6: "direct",
+      failure: "direct",
+      ports: { mixed: 3300, tproxy: 7893, dns: 3302 },
+      datapath: "routed-tun",
+      routedTUN: { interfaceName: "b6p-pilot_1", address: "10.203.4.1/30" },
+    });
+    expect(
+      window.sessionStorage.getItem("be6500panel.proxy.node-view"),
+    ).not.toMatch(/br-lan|private-ns|unknown-private-mode|8.8.8/);
+  });
+
+  it.each(["{}", "{", "null"])(
+    "blocks missing/unsupported actual config %s instead of auto-configuring",
+    async (config) => {
+      vi.mocked(api.runtimeConfig).mockReturnValue(
+        Effect.succeed({
+          service: "sing-box",
+          config,
+          generation: 4,
+        }),
+      );
+      setup();
+      await screen.findByText(/不受节点选择器支持/);
+      expect(saveButton()).toBeDisabled();
+      fireEvent.submit(saveButton().closest("form")!);
+      expect(api.proxySelect).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a config generation mismatch instead of saving defaults", async () => {
+    vi.mocked(api.runtimeConfig).mockReturnValue(
+      Effect.succeed({
+        service: "sing-box",
+        config: routedConfig(),
+        generation: 3,
+      }),
+    );
+    setup();
+    await screen.findByText("节点配置已变化，请重新读取当前设置。");
+    expect(saveButton()).toBeDisabled();
+    fireEvent.submit(saveButton().closest("form")!);
+    expect(api.proxySelect).not.toHaveBeenCalled();
+  });
+
+  it("does not let an old pending generation overwrite newer accepted TUN settings", async () => {
+    type Response = { service: "sing-box"; config: string; generation: number };
+    let completeOld!: (value: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => {
+      completeOld = resolve;
+    });
+    vi.mocked(api.runtimeConfig)
+      .mockReturnValueOnce(Effect.promise(() => oldResponse))
+      .mockReturnValue(
+        Effect.succeed({
+          service: "sing-box",
+          config: routedConfig(
+            { mixed: 3500, dns: 3502 },
+            {
+              interfaceName: "b6p-new",
+              address: "10.203.8.1/30",
+            },
+          ),
+          generation: 5,
+        }),
+      );
+    const view = setup();
+    expect(saveButton()).toBeDisabled();
+    await waitFor(() => expect(api.runtimeConfig).toHaveBeenCalledOnce());
+    view.rerender(
+      <NodeSelector
+        nodes={nodes}
+        runtime={{
+          ...view.controller,
+          status: { ...runtimeStatus, generation: 5 },
+        }}
+        onSelected={view.selected}
+      />,
+    );
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    expect(screen.getByLabelText("mixed 监听端口")).toHaveValue(3500);
+    await act(async () =>
+      completeOld({
+        service: "sing-box",
+        config: routedConfig(),
+        generation: 4,
+      }),
+    );
+    expect(screen.getByLabelText("mixed 监听端口")).toHaveValue(3500);
+    expect(screen.getByLabelText("dns 监听端口")).toHaveValue(3502);
+    fireEvent.submit(saveButton().closest("form")!);
+    await waitFor(() =>
+      expect(api.proxySelect).toHaveBeenCalledExactlyOnceWith({
+        nodeId: "node-126",
+        ipv6: "direct",
+        failure: "direct",
+        ports: { mixed: 3500, tproxy: 7893, dns: 3502 },
+        datapath: "routed-tun",
+        routedTUN: { interfaceName: "b6p-new", address: "10.203.8.1/30" },
+      }),
+    );
+  });
+
+  it.each(["3300", "0", "65536", "1.5"])(
+    "validates editable DNS port %s against the actual mixed listener",
+    async (port) => {
+      vi.mocked(api.runtimeConfig).mockReturnValue(
+        Effect.succeed({
+          service: "sing-box",
+          config: routedConfig(),
+          generation: 4,
+        }),
+      );
+      setup();
+      await waitFor(() => expect(saveButton()).toBeEnabled());
+      fireEvent.change(screen.getByLabelText("dns 监听端口"), {
+        target: { value: port },
+      });
+      expect(saveButton()).toBeDisabled();
+      expect(screen.getByRole("alert", { name: "" })).toHaveTextContent(
+        /监听端口须为/,
+      );
+      fireEvent.submit(saveButton().closest("form")!);
+      expect(api.proxySelect).not.toHaveBeenCalled();
+    },
+  );
+});
+
+it("allows an actual TUN listener on the unused TPROXY placeholder port", async () => {
+  vi.mocked(api.runtimeConfig).mockReturnValue(
+    Effect.succeed({
+      service: "sing-box",
+      config: routedConfig({ mixed: 7893, dns: 3302 }),
+      generation: 4,
+    }),
+  );
+  setup();
+  await waitFor(() => expect(saveButton()).toBeEnabled());
+  expect(screen.getByLabelText("mixed 监听端口")).toHaveValue(7893);
+  fireEvent.submit(saveButton().closest("form")!);
+  await waitFor(() =>
+    expect(api.proxySelect).toHaveBeenCalledExactlyOnceWith({
+      nodeId: "node-126",
+      ipv6: "direct",
+      failure: "direct",
+      ports: { mixed: 7893, tproxy: 7893, dns: 3302 },
+      datapath: "routed-tun",
+      routedTUN: { interfaceName: "b6p-pilot_1", address: "10.203.4.1/30" },
+    }),
+  );
 });

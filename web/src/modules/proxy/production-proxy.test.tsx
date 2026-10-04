@@ -118,7 +118,7 @@ describe("real proxy operations", () => {
     expect(
       fetch.mock.calls.filter(([url]) => url === "/api/proxy/select"),
     ).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "保存节点配置" }));
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
     await screen.findByText("节点配置已保存");
     expect(fetch).toHaveBeenCalledWith(
       "/api/proxy/select",
@@ -128,6 +128,8 @@ describe("real proxy operations", () => {
           ipv6: "direct",
           failure: "direct",
           ports: { mixed: 2080, tproxy: 7893, dns: 6450 },
+          datapath: "routed-tun",
+          routedTUN: { interfaceName: "b6p-tun", address: "172.31.255.253/30" },
         }),
       }),
     );
@@ -256,16 +258,14 @@ describe("real proxy operations", () => {
     const user = userEvent.setup();
     render(<ProxyPage />);
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "保存节点配置" }),
-      ).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "保存配置" })).toBeEnabled(),
     );
     await user.type(
       screen.getByLabelText("私密订阅 URL"),
       "https://subscriptions.example.test/new",
     );
     await user.click(screen.getByRole("button", { name: "解析并导入节点" }));
-    expect(screen.getByRole("button", { name: "保存节点配置" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "保存配置" })).toBeDisabled();
     expect(screen.getByRole("tab", { name: "运行管理" })).toBeDisabled();
     complete(jsonResponse(proxyNodes));
     await screen.findByText("已导入 1 个节点");

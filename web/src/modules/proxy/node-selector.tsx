@@ -11,13 +11,15 @@ import {
   PanelHeader,
 } from "../../components/ui/primitives";
 import { errorMessage } from "../../lib/api";
-import type { IPv6Policy, ProxyNodes } from "../../lib/contracts";
+import type { ProxyNodes } from "../../lib/contracts";
 import type { RuntimeController } from "../runtime/use-runtime";
 import { useAcceptedNodeConfig } from "./node-selector-config";
 import { NodeProbeBadge, NodeProbeControls } from "./node-probe-controls";
 import { useNodeProbes } from "./use-node-probes";
 import {
+  DEFAULT_ROUTED_TUN,
   NODE_PAGE_SIZE,
+  TPROXY_RESERVED_PORT,
   useNodeFavorites,
   useNodePreferences,
   validPort,
@@ -72,7 +74,7 @@ export function NodeSelector({
 }) {
   const probes = useNodeProbes(nodes?.revision);
   const [preferences, setPreferences] = useNodePreferences();
-  const { query, protocol, transport, favoritesOnly, region, ipv6, ports } =
+  const { query, protocol, transport, favoritesOnly, region, ports } =
     preferences;
   const nodeIds = useMemo(
     () => nodes?.nodes.map((node) => node.id),
@@ -99,6 +101,21 @@ export function NodeSelector({
   const selectedId = preferences.selectedId || nodes?.selectedNodeId || "";
   const selectedNode = all.find((node) => node.id === selectedId);
   const currentNode = all.find((node) => node.id === nodes?.selectedNodeId);
+  const currentProbe = probes.results.find(
+    (item) => item.nodeId === currentNode?.id,
+  );
+  const currentDelay =
+    currentProbe?.status === "success" && currentProbe.delayMs !== undefined
+      ? `${Math.round(currentProbe.delayMs)} ms`
+      : currentProbe?.status === "timeout"
+        ? "超时"
+        : currentProbe?.status === "unreachable"
+          ? "不可达"
+          : currentProbe?.status === "probing"
+            ? "测速中…"
+            : currentProbe?.status === "queued"
+              ? "等待测速…"
+              : "未测";
   const busy = runtime.pending || pending || importing;
   const configReady =
     accepted.ready &&
@@ -106,7 +123,7 @@ export function NodeSelector({
       preferences.acceptedGeneration === accepted.generation);
   const validPorts =
     Object.values(ports).every(validPort) &&
-    new Set(Object.values(ports)).size === 3;
+    new Set(Object.values(ports)).size === 2;
   const canSave =
     !busy &&
     runtime.enabled &&
@@ -155,12 +172,16 @@ export function NodeSelector({
   }, [policyRevision]);
   useEffect(() => {
     if (accepted.inputs && accepted.generation !== undefined) {
+      const inputs = accepted.inputs;
       setPreferences((previous) =>
         previous.acceptedGeneration === accepted.generation
           ? previous
           : {
               ...previous,
-              ...accepted.inputs,
+              ports: {
+                mixed: inputs.ports.mixed,
+                dns: inputs.ports.dns,
+              },
               acceptedGeneration: accepted.generation,
             },
       );
@@ -226,9 +247,17 @@ export function NodeSelector({
         () =>
           selectProxyPolicy({
             nodeId: selectedId,
-            ipv6,
+            ipv6: "direct",
             failure: "direct",
-            ports,
+            ports: {
+              mixed: ports.mixed,
+              tproxy: TPROXY_RESERVED_PORT,
+              dns: ports.dns,
+            },
+            datapath: "routed-tun",
+            routedTUN: {
+              ...(accepted.inputs?.routedTUN ?? DEFAULT_ROUTED_TUN),
+            },
             ...(policyAcknowledged
               ? { acknowledgedRevision: policyRevision }
               : {}),
@@ -253,15 +282,15 @@ export function NodeSelector({
   return (
     <Panel className="node-selector">
       <PanelHeader
-        title={strings.proxy.nodes.title}
-        subtitle="搜索、收藏并选择节点；保存前不会切换节点"
+        title="网关路由代理"
+        subtitle="搜索、收藏并更换节点"
         action={<Badge>{all.length} 个节点</Badge>}
       />
       <form onSubmit={submit}>
         <section className="node-selector-summary" aria-label="节点选择与保存">
           <div className="node-selector-summaries">
             <NodeSummary
-              title="当前配置节点"
+              title="当前节点"
               node={currentNode}
               fallback={
                 nodes?.selectedNodeId
@@ -293,15 +322,17 @@ export function NodeSelector({
                   : "与当前配置一致"}
             </Badge>
             <span className="text-muted text-xs">
-              核心
+              核心：
               {!runtime.status
                 ? "状态读取中"
                 : runtime.status.state === "running"
                   ? strings.states.running
                   : runtime.status.state === "stopped"
-                    ? "已停止"
+                    ? "已停用"
                     : strings.states.stopped}{" "}
-              · 延迟未测（支持独立测速）
+              · 分流配置：
+              {runtime.status?.configured ? "规则分流" : "未保存"}· 当前延迟：
+              {currentDelay}
             </span>
             <div className="node-selector-quick-actions">
               <Button
@@ -310,7 +341,17 @@ export function NodeSelector({
                 disabled={!currentNode}
                 onClick={() => jumpToNode(currentNode!.id)}
               >
-                定位当前节点
+                更换节点
+              </Button>
+              <Button
+                type="button"
+                size="small"
+                disabled={importing || !currentNode || !probes.canStart}
+                onClick={() =>
+                  void probes.start({ all: false, nodeIds: [currentNode!.id] })
+                }
+              >
+                测试当前延迟
               </Button>
               {draft && (
                 <Button
@@ -336,13 +377,10 @@ export function NodeSelector({
               )}
             </div>
             <Button type="submit" variant="primary" disabled={!canSave}>
-              {pending
-                ? "正在保存…"
-                : runtime.status?.state === "running"
-                  ? "保存并应用节点"
-                  : "保存节点配置"}
+              {pending ? "正在保存…" : "保存配置"}
             </Button>
           </div>
+          <p className="text-muted text-xs">保存配置不会自动开启接管。</p>
           {selectionFiltered && (
             <p className="text-muted text-xs">
               已选节点不在当前筛选结果中，保存仍使用此节点。
@@ -358,7 +396,7 @@ export function NodeSelector({
             !configReady &&
             accepted.error === undefined && (
               <p role="status" className="text-muted text-xs">
-                正在读取当前 IPv6 和监听端口设置…
+                正在读取当前配置…
               </p>
             )}
           {accepted.error !== undefined && (
@@ -637,28 +675,10 @@ export function NodeSelector({
         )}
 
         <div className="config-form node-selector-config">
-          <Field label="节点 IPv6 策略">
-            <select
-              className="select-trigger"
-              disabled={busy || !configReady}
-              value={ipv6}
-              onChange={(event) => {
-                setPreferences((previous) => ({
-                  ...previous,
-                  ipv6: event.target.value as IPv6Policy,
-                }));
-                setSaved(undefined);
-              }}
-            >
-              <option value="follow">跟随代理</option>
-              <option value="direct">直连</option>
-              <option value="block">阻断</option>
-            </select>
-          </Field>
           <details className="node-selector-advanced">
             <summary>高级设置 · 监听端口</summary>
             <div className="form-grid">
-              {(["mixed", "tproxy", "dns"] as const).map((name) => (
+              {(["mixed", "dns"] as const).map((name) => (
                 <Field key={name} label={`${name} 监听端口`}>
                   <input
                     disabled={busy || !configReady}
@@ -684,12 +704,9 @@ export function NodeSelector({
           </details>
           {!validPorts && (
             <p role="alert">
-              监听端口须为 1–65535 的整数，且三个端口不能重复。
+              监听端口须为 1–65535 的整数，且两个端口不能重复。
             </p>
           )}
-          <p className="text-muted text-xs">
-            故障策略：回退直连。保存节点配置不会接管 LAN 客户端。
-          </p>
         </div>
       </form>
     </Panel>

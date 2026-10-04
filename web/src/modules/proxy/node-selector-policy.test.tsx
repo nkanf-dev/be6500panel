@@ -56,7 +56,7 @@ const nodes: ProxyNodes & { policySummary?: ProxyPolicySummary } = {
 };
 const acknowledgment = () =>
   screen.getByRole("checkbox", { name: /我已了解.*规则将被忽略/ });
-const apply = () => screen.getByRole("button", { name: "保存并应用节点" });
+const apply = () => screen.getByRole("button", { name: "保存配置" });
 function setup(input = nodes) {
   const runtime: RuntimeController = {
     service: "sing-box",
@@ -136,6 +136,8 @@ describe("explicit current policy acknowledgment", () => {
       nodeId: "second",
       ipv6: "direct",
       failure: "direct",
+      datapath: "routed-tun",
+      routedTUN: { interfaceName: "b6p-tun", address: "172.31.255.253/30" },
       ports: { mixed: 2080, tproxy: 7893, dns: 6450 },
       acknowledgedRevision: summary.revision,
     });
@@ -240,6 +242,8 @@ describe("explicit current policy acknowledgment", () => {
       nodeId: "first",
       ipv6: "direct",
       failure: "direct",
+      datapath: "routed-tun",
+      routedTUN: { interfaceName: "b6p-tun", address: "172.31.255.253/30" },
       ports: { mixed: 2080, tproxy: 7893, dns: 6450 },
     });
   });
