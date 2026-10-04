@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"be6500panel/internal/proxy"
+	"fmt"
 	"testing"
 )
 
@@ -49,6 +50,15 @@ func TestImplicitDatapathDoesNotRewriteUnsafeTUN(t *testing.T) {
 	for _, unsafe := range []string{`{"inbounds":[{"type":"tun","tag":"tun-in","interface_name":"b6p-tun","address":["172.31.255.253/30"],"stack":"system","dns_mode":"disabled","mtu":1500,"auto_route":true,"udp_timeout":"2m","udp_nat_max":1024}]}`, `{"inbounds":[{"type":"tun","tag":"tun-in","interface_name":"b6p-tun","address":["172.31.255.253/30"],"stack":"gvisor","dns_mode":"disabled","mtu":1500,"udp_timeout":"2m","udp_nat_max":1024}]}`} {
 		if _, _, err := proxyDatapathSelection(nil, nil, []byte(unsafe)); err == nil {
 			t.Fatal("unsafe accepted native normalized silently")
+		}
+	}
+}
+
+func TestImplicitDatapathRefusesUnpreservedNativeFields(t *testing.T) {
+	base := `{"inbounds":[{"type":"tun","tag":"tun-in","interface_name":"b6p-tun","address":["172.31.255.253/30"],"stack":"system","dns_mode":"disabled","mtu":1500,"auto_route":false,"auto_redirect":false,"udp_timeout":"2m","udp_nat_max":1024%s}]}`
+	for _, extra := range []string{`,"netns":"isolated"`, `,"netns":""`, `,"include_uid":[0]`, `,"route_address":["0.0.0.0/0"]`, `,"udp_mapping":"endpoint-independent"`} {
+		if _, _, err := proxyDatapathSelection(nil, nil, []byte(fmt.Sprintf(base, extra))); err == nil {
+			t.Fatal("native semantics silently dropped", extra)
 		}
 	}
 }

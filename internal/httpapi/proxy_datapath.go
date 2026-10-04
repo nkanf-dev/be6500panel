@@ -53,9 +53,15 @@ func proxyDatapathSelection(requested *proxy.DatapathMode, tun *proxy.RoutedTUNC
 	if json.Unmarshal(accepted, &cfg) != nil {
 		return bad()
 	}
+	var rawConfig struct {
+		Inbounds []json.RawMessage `json:"inbounds"`
+	}
+	if json.Unmarshal(accepted, &rawConfig) != nil || len(rawConfig.Inbounds) != len(cfg.Inbounds) {
+		return bad()
+	}
 	var found *proxy.RoutedTUNConfig
 	legacy := false
-	for _, in := range cfg.Inbounds {
+	for index, in := range cfg.Inbounds {
 		if in.Type == "tproxy" {
 			if legacy {
 				return bad()
@@ -63,6 +69,16 @@ func proxyDatapathSelection(requested *proxy.DatapathMode, tun *proxy.RoutedTUNC
 			legacy = true
 		}
 		if in.Type == "tun" {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(rawConfig.Inbounds[index], &fields) != nil {
+				return bad()
+			}
+			allowed := map[string]bool{"type": true, "tag": true, "interface_name": true, "address": true, "stack": true, "dns_mode": true, "mtu": true, "auto_route": true, "auto_redirect": true, "udp_timeout": true, "udp_nat_max": true}
+			for key := range fields {
+				if !allowed[key] {
+					return bad()
+				}
+			}
 			if found != nil || in.Tag != "tun-in" || in.Interface == "" || len(in.Address) != 1 || in.Stack != "system" || in.DNSMode != "disabled" || in.MTU != 1500 || in.AutoRoute || in.AutoRedirect || in.UDPTimeout != "2m" || in.UDPNATMax != 1024 {
 				return bad()
 			}
