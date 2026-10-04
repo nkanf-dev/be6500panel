@@ -639,3 +639,58 @@ fn serde_shapes_use_go_tokens_omissions_and_owned_empty_arrays() {
         r#"{"rules":[],"subscriptionEdits":[]}"#
     );
 }
+
+#[test]
+fn merge_allocates_only_eligible_rule_and_provenance_slots() {
+    let subscription = vec![
+        domain("first.example", 11),
+        domain("second.example", 22),
+        domain("third.example", 33),
+    ];
+    let refs = subscription_fingerprints(&subscription).unwrap();
+    let policy = Policy {
+        rules: vec![
+            local("enabled", true, domain("local.example", 44)),
+            local("disabled", false, domain("draft.example", 55)),
+        ],
+        subscription_edits: vec![
+            disable("disabled-source", refs[0].clone()),
+            SubscriptionEdit {
+                id: "replacement".into(),
+                source_fingerprint: refs[1].clone(),
+                replacement: Some(domain("replacement.example", -1)),
+                ..SubscriptionEdit::default()
+            },
+            disable("orphan", fingerprint(1)),
+        ],
+    };
+    let out = merge_effective_policy(&subscription, &policy).unwrap();
+    assert_eq!(out.rules.len(), 3);
+    assert_eq!(out.rules.capacity(), out.rules.len());
+    assert_eq!(out.provenance.capacity(), out.provenance.len());
+    assert_eq!(out.rules[1].value, "replacement.example");
+    assert_eq!(out.rules[1].index, 22);
+    assert_eq!(out.provenance[1].stable_id, "replacement");
+    assert_eq!(out.provenance[1].source_fingerprint, refs[1]);
+    assert_eq!(
+        codes(&out),
+        ["disabled-rule", "disabled-rule", "orphaned-edit"]
+    );
+    assert_eq!(out.diagnostics[0].index, 1);
+    assert_eq!(out.diagnostics[1].index, 0);
+    assert_eq!(out.diagnostics[2].index, 2);
+
+    let all_disabled = Policy {
+        rules: vec![local("draft", false, domain("draft.example", 0))],
+        subscription_edits: refs
+            .into_iter()
+            .enumerate()
+            .map(|(i, reference)| disable(&format!("edit-{i}"), reference))
+            .collect(),
+    };
+    let empty = merge_effective_policy(&subscription, &all_disabled).unwrap();
+    assert!(empty.rules.is_empty() && empty.provenance.is_empty());
+    assert_eq!(empty.rules.capacity(), 0);
+    assert_eq!(empty.provenance.capacity(), 0);
+    assert_eq!(empty.diagnostics.len(), 4);
+}

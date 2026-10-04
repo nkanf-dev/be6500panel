@@ -544,13 +544,21 @@ impl Write for HashWriter {
     }
 }
 
-fn hash_policy_value(value: &impl Serialize) -> String {
+fn hash_policy_value(value: &impl Serialize) -> [u8; 32] {
     let mut writer = HashWriter(Sha256::new());
     let mut serializer = serde_json::Serializer::with_formatter(&mut writer, GoJsonFormatter);
     value
         .serialize(&mut serializer)
         .expect("concrete policy types and hash writer cannot fail");
-    format!("{:x}", writer.0.finalize())
+    writer.0.finalize().into()
+}
+
+fn append_digest_hex(out: &mut String, digest: &[u8; 32]) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in digest {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
 }
 
 /// Hashes ordered, typed policy content without `Rule.index`. Metadata stays
@@ -606,7 +614,9 @@ pub fn policy_revision(policy: &Policy) -> Result<String, PolicyError> {
             })
             .collect(),
     };
-    Ok(hash_policy_value(&identity))
+    let mut revision = String::with_capacity(64);
+    append_digest_hex(&mut revision, &hash_policy_value(&identity));
+    Ok(revision)
 }
 
 fn subscription_problems(subscription: &[Rule]) -> Vec<Diagnostic> {
@@ -629,14 +639,20 @@ fn subscription_problems(subscription: &[Rule]) -> Vec<Diagnostic> {
 }
 
 fn fingerprints_validated(subscription: &[Rule]) -> Vec<String> {
+    use std::fmt::Write as _;
+
+    // Duplicate counters need the digest bytes, not an owned hex string per key.
     let mut occurrences = HashMap::with_capacity(subscription.len());
     subscription
         .iter()
         .map(|rule| {
-            let hash = hash_policy_value(&normalized_rule(rule));
-            let occurrence = occurrences.entry(hash.clone()).or_insert(0);
+            let digest = hash_policy_value(&normalized_rule(rule));
+            let occurrence = occurrences.entry(digest).or_insert(0usize);
             *occurrence += 1;
-            format!("{hash}:{occurrence}")
+            let mut reference = String::with_capacity(69);
+            append_digest_hex(&mut reference, &digest);
+            write!(reference, ":{occurrence}").expect("writing to String cannot fail");
+            reference
         })
         .collect()
 }
@@ -671,7 +687,25 @@ pub fn merge_effective_policy(
         .map(|(i, edit)| (edit.source_fingerprint.as_str(), i))
         .collect();
     let mut used = vec![false; policy.subscription_edits.len()];
-    let mut out = EffectivePolicy::default();
+    let enabled_locals = policy.rules.iter().filter(|local| local.enabled).count();
+    let disabled_sources = refs
+        .iter()
+        .filter(|reference| {
+            edits
+                .get(reference.as_str())
+                .is_some_and(|&i| policy.subscription_edits[i].disabled)
+        })
+        .count();
+    let eligible_rules = enabled_locals + subscription.len() - disabled_sources;
+    let mut out = EffectivePolicy {
+        rules: Vec::with_capacity(eligible_rules),
+        provenance: Vec::with_capacity(eligible_rules),
+        // Draft/edit diagnostics are bounded here. Unreachable rules grow this
+        // only when a terminal MATCH actually requires those diagnostics.
+        diagnostics: Vec::with_capacity(
+            policy.rules.len() - enabled_locals + policy.subscription_edits.len(),
+        ),
+    };
     let mut terminal = false;
     fn append_rule(
         out: &mut EffectivePolicy,
@@ -722,36 +756,44 @@ pub fn merge_effective_policy(
         );
     }
     for (i, original) in subscription.iter().enumerate() {
-        let mut rule = original.clone();
-        let mut identity = EffectiveRuleIdentity {
+        let edit = edits.get(refs[i].as_str()).map(|&edit_index| {
+            used[edit_index] = true;
+            (edit_index, &policy.subscription_edits[edit_index])
+        });
+        if let Some((edit_index, edit)) = edit
+            && edit.disabled
+        {
+            out.diagnostics.push(diagnostic(
+                "subscription-edit",
+                edit_index as i64,
+                "disabled-rule",
+                "explicitly disabled subscription rule is not compiled",
+            ));
+            continue;
+        }
+        // Disabled sources need no owned rule or provenance strings. A replaced
+        // source needs only its replacement, never an intermediate source clone.
+        let (mut rule, stable_id, label) = match edit {
+            Some((_, edit)) => (
+                edit.replacement
+                    .as_ref()
+                    .expect("edit was validated")
+                    .clone(),
+                edit.id.clone(),
+                edit.label.clone(),
+            ),
+            None => (original.clone(), refs[i].clone(), String::new()),
+        };
+        rule.index = original.index;
+        let identity = EffectiveRuleIdentity {
             layer: "subscription".into(),
-            stable_id: refs[i].clone(),
+            stable_id,
+            label,
             source_fingerprint: refs[i].clone(),
             source_index: original.index,
             source_ordinal: i as i64,
             ..EffectiveRuleIdentity::default()
         };
-        if let Some(&edit_index) = edits.get(refs[i].as_str()) {
-            used[edit_index] = true;
-            let edit = &policy.subscription_edits[edit_index];
-            if edit.disabled {
-                out.diagnostics.push(diagnostic(
-                    "subscription-edit",
-                    edit_index as i64,
-                    "disabled-rule",
-                    "explicitly disabled subscription rule is not compiled",
-                ));
-                continue;
-            }
-            rule = edit
-                .replacement
-                .as_ref()
-                .expect("edit was validated")
-                .clone();
-            rule.index = original.index;
-            identity.stable_id = edit.id.clone();
-            identity.label = edit.label.clone();
-        }
         append_rule(&mut out, &mut terminal, rule, identity);
     }
     for (i, matched) in used.iter().enumerate() {
