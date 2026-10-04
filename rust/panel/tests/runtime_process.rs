@@ -20,11 +20,14 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 const HELPER: &str = r#"#!/bin/sh
 umask 077
 printf '%s\n' "$@" > "$TMPDIR/argv"
-env > "$TMPDIR/environment"
 pwd > "$TMPDIR/cwd"
 config="$2"
 case "$1" in run|check|verify) config="$3" ;; esac
-behavior=$(cat "$config")
+# Use a shell builtin: fake Run startup must not wait for env/cat subprocesses.
+IFS= read -r behavior < "$config" || :
+case "$behavior" in
+  good) env > "$TMPDIR/environment"; printf 'ready\n' > "$TMPDIR/environment.ready" ;;
+esac
 case "$behavior" in
   good) exit 0 ;;
   bad) printf 'private verifier failure\n' >&2; exit 9 ;;
@@ -39,9 +42,13 @@ case "$behavior" in
     sleep 15 &
     printf '%s\n' "$!" > "$TMPDIR/descendant.pid"
     exit 0 ;;
-  running)
+  running|running-env)
     trap 'printf "term\n" >> "$TMPDIR/events"; exit 0' TERM
     printf '%s\n' "$$" > "$TMPDIR/leader.pid"
+    if [ "$behavior" = running-env ]; then
+      env > "$TMPDIR/environment"
+      printf 'ready\n' > "$TMPDIR/environment.ready"
+    fi
     while :; do sleep 1; done ;;
   *) exit 11 ;;
 esac
@@ -151,6 +158,26 @@ fn until(mut condition: impl FnMut() -> bool) {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+// The fake Run readiness wait is not production readiness. Observe the exact
+// owned Child during the wait, so an early fixture exit is never hidden behind
+// a three-second marker timeout.
+fn wait_started(owner: &mut ProcessOwner, fixture: &Fixture) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !fixture.run.join("leader.pid").exists() {
+        let status = owner.status().unwrap();
+        assert_eq!(
+            status.phase,
+            Phase::Running,
+            "fake Run exited before startup marker: {:?}",
+            status.exit
+        );
+        assert!(
+            Instant::now() < deadline,
+            "finite fake Run startup wait exceeded; owned status={status:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 fn exists(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
@@ -196,15 +223,16 @@ fn fixed_arguments_private_environment_and_owner_exclusivity() {
             ProcessOwner::new(service, fixture.roots(), limits()).unwrap_err(),
             ProcessError::Busy
         );
-        let status = owner.start(fixture.spec("running")).unwrap();
+        let status = owner.start(fixture.spec("running-env")).unwrap();
         assert_eq!(status.phase, Phase::Running);
         assert!(status.pid.is_some_and(exists));
         assert_eq!(
-            owner.start(fixture.spec("running")).unwrap_err(),
+            owner.start(fixture.spec("running-env")).unwrap_err(),
             ProcessError::Busy
         );
         assert_eq!(owner.close().unwrap_err(), ProcessError::Busy);
-        until(|| fixture.run.join("leader.pid").exists());
+        wait_started(&mut owner, &fixture);
+        until(|| fixture.run.join("environment.ready").exists());
         let args = fs::read_to_string(fixture.run.join("argv")).unwrap();
         let expected = match service {
             ServiceId::SingBox => format!("run\n-c\n{}\n", fixture.config.display()),
@@ -249,7 +277,7 @@ fn cleanup_failure_retains_live_child_and_success_precedes_term() {
     let fixture = Fixture::new(ServiceId::SingBox);
     let mut owner = fixture.owner();
     let status = owner.start(fixture.spec("running")).unwrap();
-    until(|| fixture.run.join("leader.pid").exists());
+    wait_started(&mut owner, &fixture);
     assert_eq!(
         owner
             .stop_with_cleanup(|| Err::<(), _>("private failure"))
@@ -670,7 +698,7 @@ fn candidate_verification_keeps_existing_run_owned_and_untouched() {
         let fixture = Fixture::new(service);
         let mut owner = fixture.owner();
         let status = owner.start(fixture.spec("running")).unwrap();
-        until(|| fixture.run.join("leader.pid").exists());
+        wait_started(&mut owner, &fixture);
         for behavior in ["good", "bad", "noisy", "hang"] {
             let extension = match service {
                 ServiceId::SingBox => "json",
