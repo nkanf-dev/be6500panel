@@ -70,6 +70,11 @@ export const TrafficHistorySchema = Schema.Struct({
   persistent: Schema.Boolean,
   retentionDays: nonNegative,
   source: Schema.String,
+  supportedRanges: Schema.optional(
+    Schema.Array(Schema.Literal(...TRAFFIC_HISTORY_RANGES)).pipe(
+      Schema.maxItems(TRAFFIC_HISTORY_RANGES.length),
+    ),
+  ),
   range: Schema.Literal(...TRAFFIC_HISTORY_RANGES),
   resolutionSeconds: nonNegative,
   samples: Schema.Array(TrafficHistorySampleSchema).pipe(

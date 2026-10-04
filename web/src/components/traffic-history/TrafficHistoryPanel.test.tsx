@@ -47,6 +47,24 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("durable history panel", () => {
+  it("only offers the ranges reported by an unchanged runtime owner", async () => {
+    load.mockResolvedValue({
+      ...historyFixture(),
+      supportedRanges: ["30m", "3h", "6h", "1d", "7d", "30d", "180d", "1y"],
+    });
+    renderPanel();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("option", { name: "最近 1 小时" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      screen
+        .getAllByRole("option")
+        .map((option) => (option as HTMLOptionElement).value),
+    ).toEqual(["30m", "3h", "6h", "1d", "7d", "30d", "180d", "1y"]);
+  });
+
   it("keeps the common presets ordered, exact and canonical in labels and decoding", () => {
     const expected = [
       ["30m", 1800, "最近 30 分钟"],

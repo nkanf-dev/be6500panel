@@ -70,7 +70,10 @@ export function TrafficHistoryPanel({
             value={range}
             onChange={(value) => setRange(value as TrafficHistoryRange)}
           >
-            {TRAFFIC_HISTORY_RANGES.map((value) => (
+            {TRAFFIC_HISTORY_RANGES.filter(
+              (value) =>
+                !data?.supportedRanges || data.supportedRanges.includes(value),
+            ).map((value) => (
               <option key={value} value={value}>
                 {trafficHistoryRangeLabels[value]}
               </option>

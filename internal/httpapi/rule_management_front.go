@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -172,6 +173,30 @@ func newRuleManagementFront(cfg RuleManagementFrontConfig, upstream *url.URL) (*
 			if r.In.Header.Get("Origin") != "" {
 				r.Out.Header.Set("Origin", upstream.Scheme+"://"+upstream.Host)
 			}
+		}, ModifyResponse: func(res *http.Response) error {
+			// The unchanged owner supports eight WAN windows. Advertise actual
+			// capabilities without inventing or rewriting any historical samples.
+			if res.StatusCode != http.StatusOK || res.Request.URL.Path != "/api/traffic/history" {
+				return nil
+			}
+			raw, err := io.ReadAll(io.LimitReader(res.Body, (1<<20)+1))
+			res.Body.Close()
+			if err != nil || len(raw) > 1<<20 {
+				return errors.New("history response unavailable")
+			}
+			var doc map[string]json.RawMessage
+			if json.Unmarshal(raw, &doc) != nil {
+				return errors.New("history response invalid")
+			}
+			doc["supportedRanges"] = json.RawMessage(`["30m","3h","6h","1d","7d","30d","180d","1y"]`)
+			raw, err = json.Marshal(doc)
+			if err != nil {
+				return err
+			}
+			res.Body = io.NopCloser(bytes.NewReader(raw))
+			res.ContentLength = int64(len(raw))
+			res.Header.Set("Content-Length", strconv.Itoa(len(raw)))
+			return nil
 		}, ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			fail(w, 502, "upstream_unavailable", "原面板暂时不可用，请重新读取运行状态")
 		}, ErrorLog: slog.NewLogLogger(cfg.Logger.Handler(), slog.LevelError)}

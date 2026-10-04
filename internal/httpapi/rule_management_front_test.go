@@ -523,3 +523,46 @@ func TestRuleManagementFrontCancelledTimeoutSafeErrorsAndStreaming(t *testing.T)
 	}
 	stop()
 }
+
+func TestRuleManagementFrontAdvertisesOnlyActualOwnerRanges(t *testing.T) {
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/traffic/history" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		writeJSON(w, 200, map[string]any{"range": "30m", "samples": []map[string]any{{"rxBytes": uint64(123), "coverageSeconds": 30}}, "summary": map[string]any{"rxBytes": uint64(123), "coverageSeconds": 30}})
+	}))
+	defer old.Close()
+	u, _ := url.Parse(old.URL)
+	front, err := newRuleManagementFront(RuleManagementFrontConfig{DataDir: t.TempDir()}, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer front.Close()
+	ts := httptest.NewServer(front)
+	defer ts.Close()
+	res := ruleFrontRequest(t, ts, "GET", "/api/traffic/history?range=30m", "", "be6500panel_session=one")
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("response %d", res.StatusCode)
+	}
+	var doc struct {
+		SupportedRanges []string `json:"supportedRanges"`
+		Samples         []struct {
+			RXBytes  uint64  `json:"rxBytes"`
+			Coverage float64 `json:"coverageSeconds"`
+		} `json:"samples"`
+		Summary struct {
+			RXBytes uint64 `json:"rxBytes"`
+		} `json:"summary"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"30m", "3h", "6h", "1d", "7d", "30d", "180d", "1y"}
+	if strings.Join(doc.SupportedRanges, ",") != strings.Join(want, ",") {
+		t.Fatalf("ranges %v", doc.SupportedRanges)
+	}
+	if len(doc.Samples) != 1 || doc.Samples[0].RXBytes != 123 || doc.Samples[0].Coverage != 30 || doc.Summary.RXBytes != 123 {
+		t.Fatal("source data altered")
+	}
+}
