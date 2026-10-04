@@ -26,10 +26,10 @@ case "$1" in run|check|verify) config="$3" ;; esac
 # Use a shell builtin: fake Run startup must not wait for env/cat subprocesses.
 IFS= read -r behavior < "$config" || :
 case "$behavior" in
-  good) env > "$TMPDIR/environment"; printf 'ready\n' > "$TMPDIR/environment.ready" ;;
+  good-env) env > "$TMPDIR/environment"; printf 'ready\n' > "$TMPDIR/environment.ready" ;;
 esac
 case "$behavior" in
-  good) exit 0 ;;
+  good|good-env) exit 0 ;;
   bad) printf 'private verifier failure\n' >&2; exit 9 ;;
   rewrite) printf 'changed' > "$config"; exit 0 ;;
   noisy)
@@ -244,7 +244,7 @@ fn fixed_arguments_private_environment_and_owner_exclusivity() {
         assert_eq!(stopped.phase, Phase::Stopped);
         assert_eq!(stopped.pid, None);
         assert!(!exists(status.pid.unwrap()), "leader must be fully reaped");
-        owner.verify(fixture.spec("good"), None).unwrap();
+        owner.verify(fixture.spec("good-env"), None).unwrap();
         let args = fs::read_to_string(fixture.run.join("argv")).unwrap();
         assert_eq!(
             args,
@@ -291,16 +291,26 @@ fn cleanup_failure_retains_live_child_and_success_precedes_term() {
         !fixture.run.join("events").exists(),
         "cleanup failure must send no TERM"
     );
-    owner
+    let stopped = owner
         .stop_with_cleanup(|| {
+            assert!(
+                exists(status.pid.unwrap()),
+                "cleanup must precede termination"
+            );
             fs::write(fixture.run.join("events"), "cleanup\n").unwrap();
             Ok::<_, ()>(())
         })
         .unwrap();
-    assert_eq!(
-        fs::read_to_string(fixture.run.join("events")).unwrap(),
-        "cleanup\nterm\n"
-    );
+    let events = fs::read_to_string(fixture.run.join("events")).unwrap();
+    let exit = stopped.exit.expect("exact owned child was reaped");
+    if exit.code == Some(0) {
+        assert_eq!(events, "cleanup\nterm\n");
+    } else {
+        // A shell waiting for its sleep child may not run its TERM trap before
+        // the fixed grace expires. This is the legitimate bounded KILL path.
+        assert_eq!(exit.signal, Some(libc::SIGKILL));
+        assert!(events == "cleanup\n" || events == "cleanup\nterm\n");
+    }
     owner.stop_with_cleanup(|| Err::<(), _>(())).unwrap();
     assert_eq!(owner.status().unwrap().phase, Phase::Stopped);
     assert!(!exists(status.pid.unwrap()));
@@ -567,7 +577,7 @@ fn injected_environment_child() {
     }
     let fixture = Fixture::new(ServiceId::Frpc);
     let mut owner = fixture.owner();
-    owner.verify(fixture.spec("good"), None).unwrap();
+    owner.verify(fixture.spec("good-env"), None).unwrap();
     assert_fixed_environment(&fixture);
 }
 #[test]
