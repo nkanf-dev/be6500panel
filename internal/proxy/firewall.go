@@ -46,6 +46,9 @@ const (
 // FakeIP must match the compiler; false preserves ordinary private destinations.
 // FailureBlockProxy is unsupported without a surviving flow classifier.
 type RulesPlanInput struct {
+	Datapath           DatapathMode `json:",omitempty"`
+	TUNInterface       string       `json:",omitempty"`
+	TUNAddress         string       `json:",omitempty"`
 	ClientIPv4         string
 	ClientIPv6         string
 	ClientIPv4s        []string          `json:",omitempty"`
@@ -74,6 +77,9 @@ type OwnedChain struct {
 // mark, chains, route table and rule priority are unused before applying a plan,
 // serialize generations, and retain this metadata until cleanup completes.
 type RulesOwnership struct {
+	Datapath      DatapathMode `json:",omitempty"`
+	TUNInterface  string       `json:",omitempty"`
+	TUNAddress    string       `json:",omitempty"`
 	Mark          uint32
 	Mask          uint32
 	RouteTable    int
