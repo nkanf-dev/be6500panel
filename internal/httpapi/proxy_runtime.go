@@ -3,11 +3,9 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -209,6 +207,16 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "node_not_found", "节点不存在")
 		return
 	}
+	draft, err := s.localPolicySnapshot()
+	if err != nil {
+		fail(w, 503, "local_rules_unavailable", "本地规则存储不可用，请检查配置存储")
+		return
+	}
+	effective, err := proxy.MergeEffectivePolicy(sub.Rules, draft.Policy)
+	if err != nil {
+		fail(w, 422, "local_rules_invalid", "本地规则无法合并")
+		return
+	}
 	summary := summarizeProxyPolicy(sub)
 	if code, message := checkProxyPolicyAcknowledgment(summary, input.AcknowledgedRevision); code != "" {
 		fail(w, http.StatusConflict, code, message)
@@ -259,18 +267,28 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "proxy_datapath_invalid", "代理接管后端与已接受配置不一致")
 		return
 	}
-	out, err := proxy.CompileNative(proxy.CompileInput{Datapath: datapath, RoutedTUN: tunConfig, Node: node, Rules: sub.Rules, Diagnostics: sub.Diagnostics, AcceptUnsupportedRules: input.AcknowledgedRevision == summary.Revision, RuleSets: refs, Endpoints: endpoints, ManagementIPs: []string{"192.168.31.1"}, IPv6: input.IPv6, Failure: input.Failure, Ports: proxy.Ports{Mixed: input.Ports.Mixed, TProxy: input.Ports.TProxy, DNS: input.Ports.DNS}, MixedListenAddress: "192.168.31.1", DNSListenAddress: dnsBind})
+	options := proxy.CompileInput{Datapath: datapath, RoutedTUN: tunConfig, Endpoints: endpoints, ManagementIPs: []string{"192.168.31.1"}, IPv6: input.IPv6, Failure: input.Failure, Ports: proxy.Ports{Mixed: input.Ports.Mixed, TProxy: input.Ports.TProxy, DNS: input.Ports.DNS}, MixedListenAddress: "192.168.31.1", DNSListenAddress: dnsBind}
+	if state.Configured {
+		current, settingsErr := acceptedProxyCompileInput(accepted)
+		if settingsErr != nil {
+			fail(w, 409, "proxy_configuration_invalid", "当前代理设置无法保持，请检查高级设置")
+			return
+		}
+		// Node selection retains actual DNS authority, resolver strategy and
+		// listener bind intent; the explicit request still owns ports/backend.
+		options.DirectDNS, options.ProxyDNS, options.LocalDNS, options.FakeIP = current.DirectDNS, current.ProxyDNS, current.LocalDNS, current.FakeIP
+		options.MixedListenAddress, options.DNSListenAddress = current.MixedListenAddress, current.DNSListenAddress
+		options.ManagementIPs = current.ManagementIPs
+		for _, host := range current.BootstrapDomains {
+			if host != node.Server {
+				options.BootstrapDomains = append(options.BootstrapDomains, host)
+			}
+		}
+	}
+	out, err := compileEffectiveProxy(node, sub, effective, refs, options, accepted, input.AcknowledgedRevision == summary.Revision)
 	if err != nil {
 		fail(w, 422, "proxy_configuration_invalid", "代理策略生成失败")
 		return
-	}
-	if state.Configured {
-		out.Config, err = preserveLocalTelemetry(out.Config, accepted)
-		if err != nil {
-			fail(w, 409, "telemetry_configuration_invalid", "本机观测配置无效，请检查高级设置")
-			return
-		}
-		out.SHA256 = fmt.Sprintf("%x", sha256.Sum256(out.Config))
 	}
 	saved, _ := json.Marshal(struct {
 		NodeID    string         `json:"nodeId"`
@@ -290,6 +308,16 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.runtimeResult(w, managedruntime.SingBox, "config_committed", state, err)
 		return
+	}
+	// Only exact accepted readback can attest to the policy used by selection.
+	if s.localRules != nil {
+		if err = s.recordLocalRulesApplied(r.Context(), draft, out, state); err != nil {
+			p.mu.Lock()
+			p.selected = ""
+			p.mu.Unlock()
+			localRulesConfiguredUncertain(w, state, draft.Revision, out.SHA256)
+			return
+		}
 	}
 	// Admission is held across Configure, so a later write uses the same reservation.
 	if err = writePrivateFile(filepath.Join(s.dataDir, "proxy-selection.json"), saved); err != nil {

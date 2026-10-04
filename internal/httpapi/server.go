@@ -15,6 +15,7 @@ import (
 	"be6500panel/internal/core"
 	"be6500panel/internal/deviceannotations"
 	"be6500panel/internal/devicetelemetry"
+	"be6500panel/internal/localrules"
 	"be6500panel/internal/maintenance"
 	"be6500panel/internal/modules"
 	"be6500panel/internal/nodeprobe"
@@ -70,6 +71,8 @@ type Server struct {
 	control               *control.Manager
 	dataDir               string
 	proxyState            *proxyState
+	localRules            *localrules.Store
+	localRulesError       error
 	capture               capture.Backend
 	traffic               *traffic.Collector
 	trafficError          string
@@ -104,6 +107,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{system: cfg.System, network: cfg.Network, sampler: cfg.Sampler, registry: registry, coordinator: core.NewCoordinator(), auth: newAuth(cfg.Password), heartbeat: cfg.Heartbeat, logger: cfg.Logger, logs: cfg.Logs, router: cfg.Router, runtime: cfg.Runtime, control: cfg.Control, dataDir: cfg.DataDir, proxyState: newProxyState(cfg.DataDir), capture: cfg.Capture, traffic: cfg.Traffic, trafficError: cfg.TrafficError, telemetry: cfg.Telemetry, deviceTelemetry: cfg.DeviceTelemetry, requestTraces: cfg.RequestTraces, services: cfg.Services, deviceAnnotations: DeviceAnnotationsHandler(cfg.DeviceAnnotations), deviceAnnotationStore: cfg.DeviceAnnotations, maintenance: cfg.Maintenance, storageAdmission: cfg.StorageAdmission, static: staticHandler(cfg.WebDir), ctx: ctx, cancel: cancel, nodeProbes: cfg.NodeProbes}
+	if s.dataDir != "" {
+		s.localRules, s.localRulesError = localrules.New(localrules.Options{DataDir: s.dataDir, StorageAdmission: s.storageAdmission, Context: s.ctx})
+	}
 	if s.nodeProbes == nil {
 		s.nodeProbes, err = s.newNodeProbeManager()
 		if err != nil {
@@ -143,7 +149,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Unknown API path.")
 		return
 	}
-	allowedMethod := method == r.Method || (r.URL.Path == "/api/configuration/drafts" && r.Method == "DELETE") || (r.URL.Path == "/api/proxy/capture" && (r.Method == "POST" || r.Method == "DELETE")) || (r.URL.Path == "/api/proxy/request-traces" && r.Method == "POST") || (r.URL.Path == DeviceAnnotationsPath && r.Method == "POST") || (r.URL.Path == "/api/maintenance/import/preview" && r.Method == "DELETE") || (r.URL.Path == NodeProbesPath && (r.Method == "POST" || r.Method == "DELETE"))
+	allowedMethod := method == r.Method || (r.URL.Path == "/api/configuration/drafts" && r.Method == "DELETE") || (r.URL.Path == LocalRulesPath && r.Method == "POST") || (r.URL.Path == "/api/proxy/capture" && (r.Method == "POST" || r.Method == "DELETE")) || (r.URL.Path == "/api/proxy/request-traces" && r.Method == "POST") || (r.URL.Path == DeviceAnnotationsPath && r.Method == "POST") || (r.URL.Path == "/api/maintenance/import/preview" && r.Method == "DELETE") || (r.URL.Path == NodeProbesPath && (r.Method == "POST" || r.Method == "DELETE"))
 	if !allowedMethod {
 		w.Header().Set("Allow", method)
 		fail(w, 405, "method_not_allowed", "Method is not allowed for this endpoint.")
@@ -195,6 +201,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.proxyNodes(w, r)
 	case "/api/proxy/import":
 		s.proxyImport(w, r)
+	case LocalRulesPath:
+		s.proxyLocalRules(w, r)
+	case LocalRulesPreviewPath:
+		s.proxyLocalRulesPreview(w, r)
+	case LocalRulesApplyPath:
+		s.proxyLocalRulesApply(w, r)
 	case "/api/proxy/select":
 		s.proxySelect(w, r)
 	case "/api/proxy/capture":
@@ -280,6 +292,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var routes = map[string]string{
+	LocalRulesPath: "GET", LocalRulesPreviewPath: "POST", LocalRulesApplyPath: "POST",
 	NodeProbesPath:            "GET",
 	"/api/maintenance/backup": "POST", "/api/maintenance/import/preview": "POST", "/api/maintenance/import/stage": "POST",
 	DeviceAnnotationsPath:   "GET",
