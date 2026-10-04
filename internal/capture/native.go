@@ -111,9 +111,14 @@ func BuildFromAccepted(ctx context.Context, d Desired, raw []byte, observed rout
 			if seen["tun"] || seen["tproxy"] {
 				return bad("capture_datapath_ambiguous")
 			}
-			if err := acceptedTUN(rawInbound, inbound, observed); err != nil {
+			qualifiedObservation, err := withoutOwnedTUNManagement(observed, inbound)
+			if err != nil {
 				return bad(err.Error())
 			}
+			if err = acceptedTUN(rawInbound, inbound, qualifiedObservation); err != nil {
+				return bad(err.Error())
+			}
+			input.ManagementIPs = slices.Clone(qualifiedObservation.ManagementIPs)
 			seen["tun"] = true
 			input.Datapath = proxy.DatapathRoutedTUN
 			input.TUNInterface, input.TUNAddress = inbound.InterfaceName, inbound.Address[0]
@@ -411,4 +416,43 @@ func ResolveEndpoints(ctx context.Context, host string) ([]string, error) {
 		}
 	}
 	return result, nil
+}
+
+// Only a positively observed exact local address on the accepted owned TUN is
+// self-allocation, not management. A bare ManagementIPs value or a foreign
+// interface in the same /30 is never exempted from collision checks.
+func withoutOwnedTUNManagement(observed router.CaptureObservation, inbound acceptedInbound) (router.CaptureObservation, error) {
+	if len(inbound.Address) != 1 {
+		return observed, errors.New("capture_tun_invalid")
+	}
+	prefix, err := captureTUNPrefix(inbound.Address[0])
+	if err != nil {
+		return observed, err
+	}
+	acceptedPrefix, _ := netip.ParsePrefix(inbound.Address[0])
+	local, localObserved := acceptedPrefix.Addr(), false
+	for _, entry := range observed.InterfaceAddresses {
+		address, err := netip.ParsePrefix(entry.Address)
+		if err != nil {
+			return observed, errors.New("capture_lan_unavailable")
+		}
+		if !prefix.Contains(address.Addr()) {
+			continue
+		}
+		if entry.Interface != inbound.InterfaceName || address.Addr() != local || address.Bits() != 30 || localObserved {
+			return observed, errors.New("capture_tun_prefix_collision")
+		}
+		localObserved = true
+	}
+	if !localObserved {
+		return observed, nil
+	}
+	copy := observed
+	copy.ManagementIPs = nil
+	for _, raw := range observed.ManagementIPs {
+		if raw != local.String() {
+			copy.ManagementIPs = append(copy.ManagementIPs, raw)
+		}
+	}
+	return copy, nil
 }

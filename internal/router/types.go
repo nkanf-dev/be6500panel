@@ -34,6 +34,14 @@ type CaptureObservation struct {
 	// arbitrary addresses inside LANPrefixes. It can validate DNS binds.
 	LANAddresses  []string `json:"lanAddresses"`
 	ManagementIPs []string `json:"managementIPs"`
+	// InterfaceAddresses binds actual addresses to their observed interface.
+	// It distinguishes the core's own TUN address from a foreign collision.
+	InterfaceAddresses []CaptureInterfaceAddress `json:"interfaceAddresses,omitempty"`
+}
+
+type CaptureInterfaceAddress struct {
+	Interface string `json:"interface"`
+	Address   string `json:"address"`
 }
 
 type Device struct {

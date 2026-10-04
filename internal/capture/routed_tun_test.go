@@ -687,3 +687,31 @@ func TestRoutedTUNObservationRejectsInterfaceStateDriftReadOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestAcceptedRoutedTUNDoesNotCollideWithOwnObservedAddress(t *testing.T) {
+	observed := deviceObservation()
+	observed.ManagementIPs = append(observed.ManagementIPs, "172.31.255.253")
+	observed.InterfaceAddresses = []router.CaptureInterfaceAddress{{Interface: "br-lan", Address: "192.0.2.1/24"}, {Interface: "b6p-tun", Address: "172.31.255.253/30"}}
+	input, _, err := BuildFromAccepted(context.Background(), desiredDevices(), []byte(acceptedRoutedTUN), observed, fakeResolve)
+	if err != nil {
+		t.Fatal("core-created own TUN was rejected", err)
+	}
+	if slices.Contains(input.ManagementIPs, "172.31.255.253") {
+		t.Fatal("own address leaked into planner collision list")
+	}
+	if _, err = proxy.PlanOwnedRules(input); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []router.CaptureInterfaceAddress{{Interface: "foreign", Address: "172.31.255.253/30"}, {Interface: "b6p-tun", Address: "172.31.255.254/30"}, {Interface: "b6p-tun", Address: "172.31.255.253/24"}} {
+		wrong := observed
+		wrong.InterfaceAddresses = []router.CaptureInterfaceAddress{entry}
+		if _, _, err = BuildFromAccepted(context.Background(), desiredDevices(), []byte(acceptedRoutedTUN), wrong, fakeResolve); err == nil {
+			t.Fatal("foreign allocation exempted", entry)
+		}
+	}
+	unproved := observed
+	unproved.InterfaceAddresses = nil
+	if _, _, err = BuildFromAccepted(context.Background(), desiredDevices(), []byte(acceptedRoutedTUN), unproved, fakeResolve); err == nil {
+		t.Fatal("bare management address exempted without provenance")
+	}
+}

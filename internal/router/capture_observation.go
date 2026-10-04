@@ -90,6 +90,9 @@ func (a *Adapter) observeCaptureSources(ctx context.Context, now time.Time) (Cap
 		errs = append(errs, moduleError("devices.interfaces", code))
 	}
 	observation.LANPrefixes, observation.LANAddresses, observation.ManagementIPs = captureScope(addresses, routes)
+	for _, address := range addresses {
+		observation.InterfaceAddresses = append(observation.InterfaceAddresses, CaptureInterfaceAddress{Interface: address.name, Address: address.prefix.String()})
+	}
 	observation.Devices = captureDevices(leases, arp, observation.LANPrefixes, observation.ManagementIPs)
 	if len(errs) != 0 || ctx.Err() != nil {
 		for i := range observation.Devices {
