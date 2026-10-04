@@ -77,6 +77,12 @@ impl Fixture {
         }
     }
     fn runtime(&self) -> Guard {
+        self.runtime_mode(false)
+    }
+    fn saved_runtime(&self) -> Guard {
+        self.runtime_mode(true)
+    }
+    fn runtime_mode(&self, saved: bool) -> Guard {
         let binding = ArtifactBinding::trusted_local(
             ServiceId::SingBox,
             self.root.join("artifacts"),
@@ -110,28 +116,32 @@ impl Fixture {
             },
             |_| Ok(()),
         );
+        let mut runtime = RuntimeHttp::new(
+            Manager::open(
+                self.root.join("services"),
+                self.root.join("run"),
+                ArtifactBindings {
+                    sing_box: Some(binding),
+                    frpc: None,
+                },
+                hooks,
+                Limits {
+                    process: ProcessLimits {
+                        term_grace: Duration::from_millis(100),
+                        kill_grace: Duration::from_secs(1),
+                        check_timeout: Duration::from_secs(2),
+                    },
+                    readiness_timeout: Duration::from_secs(2),
+                    resource_timeout: Duration::from_secs(1),
+                },
+            )
+            .unwrap(),
+        );
+        if saved {
+            runtime.load_saved_intent(&self.root).unwrap();
+        }
         Guard {
-            runtime: RuntimeHttp::new(
-                Manager::open(
-                    self.root.join("services"),
-                    self.root.join("run"),
-                    ArtifactBindings {
-                        sing_box: Some(binding),
-                        frpc: None,
-                    },
-                    hooks,
-                    Limits {
-                        process: ProcessLimits {
-                            term_grace: Duration::from_millis(100),
-                            kill_grace: Duration::from_secs(1),
-                            check_timeout: Duration::from_secs(2),
-                        },
-                        readiness_timeout: Duration::from_secs(2),
-                        resource_timeout: Duration::from_secs(1),
-                    },
-                )
-                .unwrap(),
-            ),
+            runtime,
             reject: self.reject.clone(),
         }
     }
@@ -668,4 +678,425 @@ rules:
         200,
     );
     assert_eq!(stopped["applied"]["state"], "unknown");
+}
+
+#[test]
+fn saved_intent_requires_explicit_restore_and_shutdown_keeps_it() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let action = json!({"service":"sing-box"});
+    {
+        let mut owner = fixture.saved_runtime();
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/configure",
+            Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+            &cookie,
+            200,
+        );
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/start",
+            Some(&action),
+            &cookie,
+            200,
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(
+                &fs::read(fixture.root.join("desired-services.json")).unwrap()
+            )
+            .unwrap()["sing-box"],
+            true
+        );
+    }
+    fs::remove_file(fixture.root.join("run/sing-box/started")).unwrap();
+    let mut owner = fixture.saved_runtime();
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(Instant::now() + Duration::from_secs(600))
+            .is_empty()
+    );
+    assert!(!fixture.root.join("run/sing-box/started").exists());
+    let restored = owner.runtime.restore_saved();
+    assert_eq!(restored.len(), 1);
+    assert!(restored[0].1.as_ref().unwrap().active);
+    let stopped = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&action),
+        &cookie,
+        200,
+    );
+    assert_eq!(stopped["desired"], false);
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(Instant::now() + Duration::from_secs(600))
+            .is_empty()
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(
+            &fs::read(fixture.root.join("desired-services.json")).unwrap()
+        )
+        .unwrap()["sing-box"],
+        false
+    );
+}
+#[test]
+fn off_latch_survives_persistence_failure_and_does_not_restart_retained_child() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.saved_runtime();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let action = json!({"service":"sing-box"});
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+        &cookie,
+        200,
+    );
+    let live = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&action),
+        &cookie,
+        200,
+    );
+    let path = fixture.root.join("desired-services.json");
+    fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink("foreign-intent", &path).unwrap();
+    fixture.reject.set(true);
+    let refused = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&action),
+        &cookie,
+        503,
+    );
+    assert_eq!(refused["status"]["desired"], false);
+    assert_eq!(refused["status"]["pid"], live["pid"]);
+    assert_eq!(
+        unsafe { libc::kill(live["pid"].as_u64().unwrap() as i32, 0) },
+        0
+    );
+    fixture.reject.set(false);
+    let stopped = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&action),
+        &cookie,
+        500,
+    );
+    assert_eq!(stopped["error"]["code"], "storage_failed");
+    assert_eq!(stopped["status"]["intentDurabilityUncertain"], true);
+    assert_eq!(stopped["status"]["desired"], false);
+    assert!(stopped["status"].get("pid").is_none());
+    assert!(owner.runtime.restore_saved().is_empty());
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(Instant::now() + Duration::from_secs(600))
+            .is_empty()
+    );
+    assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
+}
+#[test]
+fn exit_cleanup_precedes_relaunch_and_eight_attempts_bound_crash_loop() {
+    use be6500_panel::runtime_http::RecoveryResult;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.saved_runtime();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let action = json!({"service":"sing-box"});
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":"good
+","generation":0})),
+        &cookie,
+        200,
+    );
+    let running = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&action),
+        &cookie,
+        200,
+    );
+    let mut pid = running["pid"].as_u64().unwrap();
+    let mut now = Instant::now();
+    for attempt in 0..8 {
+        assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let state = call(
+                &service,
+                &mut owner.runtime,
+                "/api/runtime",
+                None,
+                &cookie,
+                200,
+            );
+            if state["services"][0]["errorCode"] == "owned_run_exited" {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        if attempt == 0 {
+            fixture.reject.set(true);
+            assert_eq!(
+                owner.runtime.poll_recovery(now),
+                vec![(ServiceId::SingBox, RecoveryResult::Deferred)]
+            );
+            let held = call(
+                &service,
+                &mut owner.runtime,
+                "/api/runtime",
+                None,
+                &cookie,
+                200,
+            );
+            assert_eq!(held["services"][0]["pid"], pid);
+            assert_eq!(held["services"][0]["restarts"], 0);
+            fixture.reject.set(false);
+            assert!(
+                owner
+                    .runtime
+                    .poll_recovery(now + Duration::from_secs(1))
+                    .is_empty()
+            );
+            now += Duration::from_secs(2);
+            let results = owner.runtime.poll_recovery(now);
+            assert_eq!(
+                results,
+                vec![
+                    (ServiceId::SingBox, RecoveryResult::Withdrawn),
+                    (ServiceId::SingBox, RecoveryResult::Started)
+                ]
+            );
+        } else {
+            let withdrawn = owner.runtime.poll_recovery(now);
+            if attempt == 7 {
+                assert_eq!(
+                    withdrawn,
+                    vec![
+                        (ServiceId::SingBox, RecoveryResult::Withdrawn),
+                        (ServiceId::SingBox, RecoveryResult::Exhausted)
+                    ]
+                );
+                break;
+            }
+            assert_eq!(
+                withdrawn,
+                vec![(ServiceId::SingBox, RecoveryResult::Withdrawn)]
+            );
+            assert!(
+                owner
+                    .runtime
+                    .poll_recovery(now + Duration::from_secs(1))
+                    .is_empty()
+            );
+            now += Duration::from_secs(2);
+            assert_eq!(
+                owner.runtime.poll_recovery(now),
+                vec![(ServiceId::SingBox, RecoveryResult::Started)]
+            );
+        }
+        let state = call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime",
+            None,
+            &cookie,
+            200,
+        );
+        pid = state["services"][0]["pid"].as_u64().unwrap();
+        assert_eq!(state["services"][0]["restarts"], attempt + 1);
+        now += Duration::from_secs(1);
+    }
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(now + Duration::from_secs(600))
+            .is_empty()
+    );
+    let state = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(state["services"][0]["restarts"], 7);
+    assert_eq!(state["services"][0]["recoveryAttempts"], 8);
+    assert_eq!(state["services"][0]["recoveryExhausted"], true);
+    assert!(state["services"][0].get("pid").is_none());
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&action),
+        &cookie,
+        200,
+    );
+}
+
+#[test]
+fn failed_close_cancels_recovery_but_retains_child_and_saved_intent() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.saved_runtime();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let action = json!({"service":"sing-box"});
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":"good
+","generation":0})),
+        &cookie,
+        200,
+    );
+    let running = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&action),
+        &cookie,
+        200,
+    );
+    fixture.reject.set(true);
+    assert!(owner.runtime.close().is_err());
+    assert!(owner.runtime.restore_saved().is_empty());
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(Instant::now() + Duration::from_secs(600))
+            .is_empty()
+    );
+    let state = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(state["services"][0]["pid"], running["pid"]);
+    assert_eq!(state["services"][0]["restarts"], 0);
+    assert_eq!(
+        serde_json::from_slice::<Value>(
+            &fs::read(fixture.root.join("desired-services.json")).unwrap()
+        )
+        .unwrap()["sing-box"],
+        true
+    );
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/start",
+            Some(&action),
+            &cookie,
+            503
+        )["error"]["code"],
+        "runtime_shutting_down"
+    );
+    fixture.reject.set(false);
+    owner.runtime.close().unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(
+            &fs::read(fixture.root.join("desired-services.json")).unwrap()
+        )
+        .unwrap()["sing-box"],
+        true
+    );
+}
+
+#[test]
+fn rejected_intent_load_preserves_exclusive_owner_for_cleanup() {
+    use be6500_panel::runtime_intent::IntentError;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.runtime();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let action = json!({"service":"sing-box"});
+    let path = fixture.root.join("desired-services.json");
+    fs::write(&path, br#"{"sing-box":true,"sing-box":false}"#).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        owner.runtime.load_saved_intent(&fixture.root),
+        Err(IntentError::Invalid)
+    );
+    assert!(owner.runtime.restore_saved().is_empty());
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":"good
+","generation":0})),
+        &cookie,
+        200,
+    );
+    let running = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&action),
+        &cookie,
+        200,
+    );
+    assert_eq!(
+        owner.runtime.load_saved_intent(&fixture.root),
+        Err(IntentError::Invalid)
+    );
+    let read = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(read["services"][0]["pid"], running["pid"]);
+    assert_eq!(
+        unsafe { libc::kill(running["pid"].as_u64().unwrap() as i32, 0) },
+        0
+    );
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&action),
+        &cookie,
+        200,
+    );
+    owner.runtime.close().unwrap();
 }

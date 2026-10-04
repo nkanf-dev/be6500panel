@@ -26,6 +26,8 @@ pub mod rules_http;
 #[cfg(unix)]
 pub mod runtime_http;
 #[cfg(unix)]
+pub mod runtime_intent;
+#[cfg(unix)]
 pub mod runtime_manager;
 #[cfg(unix)]
 pub mod runtime_process;

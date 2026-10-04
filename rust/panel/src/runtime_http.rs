@@ -1,6 +1,7 @@
 //! Authenticated fixed-service runtime HTTP projection. The existing service
 //! borrows an actual exclusive Manager; no constructor/startup activation,
 //! arbitrary argv/path/PID, artifact fetch or extra thread is introduced.
+use crate::runtime_intent::{DesiredServices, IntentError, RuntimeIntent};
 use crate::{
     http::{self, Method},
     runtime_manager::{Failure, Manager, ManagerError, ServiceId, Status},
@@ -9,11 +10,41 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
+use std::path::Path;
+use std::time::{Duration, Instant};
 const MAX_RESPONSE: usize = 8 << 20;
 const JSON_TYPE: &str = "application/json; charset=utf-8";
+#[derive(Default)]
+struct Retry {
+    attempts: u32,
+    next: Option<Instant>,
+    exhausted: bool,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryResult {
+    Withdrawn,
+    Started,
+    Deferred,
+    Exhausted,
+}
 pub struct RuntimeHttp {
     manager: Manager,
+    intent: Option<RuntimeIntent>,
+    desired: [bool; 2],
+    retry: [Retry; 2],
+    restarts: [u32; 2],
+    closing: bool,
+    recovery_enabled: bool,
+    intent_uncertain: bool,
 }
+fn index(service: ServiceId) -> usize {
+    match service {
+        ServiceId::SingBox => 0,
+        ServiceId::Frpc => 1,
+    }
+}
+const SERVICES: [ServiceId; 2] = [ServiceId::SingBox, ServiceId::Frpc];
+const MAX_RECOVERY_ATTEMPTS: u32 = 8;
 impl std::fmt::Debug for RuntimeHttp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("RuntimeHttp([owned])")
@@ -21,9 +52,195 @@ impl std::fmt::Debug for RuntimeHttp {
 }
 impl RuntimeHttp {
     pub fn new(manager: Manager) -> Self {
-        Self { manager }
+        Self {
+            manager,
+            intent: None,
+            desired: [false; 2],
+            retry: [Retry::default(), Retry::default()],
+            restarts: [0; 2],
+            closing: false,
+            recovery_enabled: false,
+            intent_uncertain: false,
+        }
+    }
+    /// Load only. Even saved true intent executes no child/check/hook until
+    /// the owner explicitly calls restore_saved or poll_recovery.
+    pub fn load_saved_intent(&mut self, data_dir: &Path) -> Result<(), IntentError> {
+        if self.closing || self.recovery_enabled || self.intent.is_some() {
+            return Err(IntentError::Invalid);
+        }
+        for service in SERVICES {
+            let status = self
+                .manager
+                .status(service)
+                .map_err(|_| IntentError::Storage)?;
+            if status.desired || status.pid.is_some() {
+                return Err(IntentError::Invalid);
+            }
+        }
+        let store = RuntimeIntent::open(data_dir)?;
+        self.desired = SERVICES.map(|service| store.desired().get(service));
+        self.intent = Some(store);
+        Ok(())
+    }
+    fn save_intent(&mut self, service: ServiceId, value: bool) -> Result<(), IntentError> {
+        // An explicit off intent is effective even if private storage fails.
+        self.desired[index(service)] = value;
+        if value {
+            self.recovery_enabled = true;
+        }
+        self.retry[index(service)] = Retry::default();
+        if let Some(store) = &mut self.intent {
+            let desired = DesiredServices {
+                sing_box: self.desired[0],
+                frpc: self.desired[1],
+            };
+            let result = store.save_desired(desired);
+            self.intent_uncertain = !matches!(&result,Ok(outcome) if outcome.durable);
+            let outcome = result?;
+            if !outcome.durable {
+                return Err(IntentError::Storage);
+            }
+        }
+        Ok(())
+    }
+    /// Explicit startup integration call, not a constructor or GET side effect.
+    pub fn restore_saved(&mut self) -> Vec<(ServiceId, Result<Status, ManagerError>)> {
+        let mut outcomes = Vec::with_capacity(2);
+        if self.closing {
+            return outcomes;
+        }
+        self.recovery_enabled = true;
+        for service in SERVICES {
+            if self.desired[index(service)] {
+                self.retry[index(service)] = Retry::default();
+                let result = self.manager.start(service);
+                if result.is_err() {
+                    self.retry[index(service)].attempts = 1;
+                    self.retry[index(service)].next = Some(Instant::now() + Duration::from_secs(2));
+                }
+                outcomes.push((service, result));
+            }
+        }
+        outcomes
+    }
+    /// Caller-driven finite exit recovery. No timer thread, busy loop or GET
+    /// action. Cleanup must complete before the old child is reaped/restarted.
+    pub fn poll_recovery(&mut self, now: Instant) -> Vec<(ServiceId, RecoveryResult)> {
+        let mut results = Vec::with_capacity(2);
+        if self.closing || !self.recovery_enabled {
+            return results;
+        }
+        for service in SERVICES {
+            let slot = index(service);
+            let Ok(status) = self.manager.status(service) else {
+                continue;
+            };
+            let exited = status.pid.is_some() && status.error_code == Some(Failure::Exited.code());
+            let off_cleanup = !self.desired[slot] && status.pid.is_some() && status.needs_recovery;
+            if !exited && !off_cleanup && (!self.desired[slot] || status.pid.is_some()) {
+                continue;
+            }
+            let retry = &mut self.retry[slot];
+            if retry.exhausted {
+                continue;
+            }
+            if retry.next.is_some_and(|deadline| deadline > now) {
+                continue;
+            }
+            if retry.next.is_none() {
+                // Withdraw dead-core traffic immediately. Only launch attempts
+                // wait for backoff; failed withdrawal is also finite/backed off.
+                if exited || off_cleanup {
+                    let cleaned = if exited {
+                        self.manager.handle_exit(service)
+                    } else {
+                        self.manager.stop(service)
+                    };
+                    match cleaned {
+                        Ok(_) => {
+                            results.push((service, RecoveryResult::Withdrawn));
+                        }
+                        Err(_) => {
+                            retry.attempts += 1;
+                            retry.next = Some(now + Duration::from_secs(2));
+                            results.push((service, RecoveryResult::Deferred));
+                            continue;
+                        }
+                    }
+                    if !self.desired[slot] {
+                        continue;
+                    }
+                }
+                if retry.attempts >= MAX_RECOVERY_ATTEMPTS {
+                    retry.exhausted = true;
+                    results.push((service, RecoveryResult::Exhausted));
+                    continue;
+                }
+                retry.next = Some(now + Duration::from_secs(2));
+                continue;
+            }
+            if retry.attempts >= MAX_RECOVERY_ATTEMPTS {
+                retry.exhausted = true;
+                retry.next = None;
+                results.push((service, RecoveryResult::Exhausted));
+                continue;
+            }
+            retry.attempts += 1;
+            let seconds = (2u64 << retry.attempts.saturating_sub(1).min(5)).min(60);
+            retry.next = Some(now + Duration::from_secs(seconds));
+            let cleaned = if exited {
+                self.manager.handle_exit(service)
+            } else if off_cleanup {
+                self.manager.stop(service)
+            } else {
+                Ok(status)
+            };
+            let Ok(cleaned) = cleaned else {
+                results.push((service, RecoveryResult::Deferred));
+                continue;
+            };
+            if exited || off_cleanup {
+                results.push((service, RecoveryResult::Withdrawn));
+            }
+            if !self.desired[slot] {
+                retry.next = None;
+                continue;
+            }
+            if cleaned.pid.is_some() {
+                results.push((service, RecoveryResult::Deferred));
+                continue;
+            }
+            match self.manager.start(service) {
+                Ok(_) => {
+                    retry.next = None;
+                    self.restarts[slot] = self.restarts[slot].saturating_add(1);
+                    results.push((service, RecoveryResult::Started));
+                }
+                Err(_) => {
+                    results.push((service, RecoveryResult::Deferred));
+                }
+            }
+        }
+        results
+    }
+    fn wire(&self, status: Status) -> WireStatus {
+        let slot = index(status.service);
+        let mut wire = WireStatus::from(status);
+        if !self.closing && (self.intent.is_some() || self.recovery_enabled) {
+            wire.desired = self.desired[slot];
+        }
+        wire.restarts = self.restarts[slot];
+        wire.recovery_attempts = self.retry[slot].attempts;
+        wire.recovery_exhausted = self.retry[slot].exhausted;
+        wire.intent_durability_uncertain = self.intent_uncertain;
+        wire.needs_recovery |=
+            self.retry[slot].exhausted || self.retry[slot].next.is_some() || self.intent_uncertain;
+        wire
     }
     pub fn close(&mut self) -> Result<(), ManagerError> {
+        // Shutdown cancels retries but preserves saved startup intent.
+        self.closing = true;
         self.manager.close()
     }
     pub(crate) fn rule_status(&mut self) -> Result<Status, ManagerError> {
@@ -47,7 +264,7 @@ impl RuntimeHttp {
         writer: &mut impl Write,
         error: ManagerError,
     ) -> io::Result<()> {
-        failure(writer, &mut self.manager, error, false)
+        failure(writer, self, error, false)
     }
 
     pub(crate) fn respond(
@@ -59,6 +276,16 @@ impl RuntimeHttp {
     ) -> io::Result<()> {
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let head = method == Method::Head;
+        if self.closing && method == Method::Post && path != "/api/runtime/stop" {
+            return error(
+                writer,
+                503,
+                "Service Unavailable",
+                "runtime_shutting_down",
+                "Runtime shutdown is in progress.",
+                false,
+            );
+        }
         if path == "/api/runtime" {
             if method == Method::Post {
                 return method_error(writer, head, "GET, HEAD");
@@ -66,8 +293,10 @@ impl RuntimeHttp {
             let mut services = Vec::with_capacity(2);
             for service in [ServiceId::SingBox, ServiceId::Frpc] {
                 match self.manager.status(service) {
-                    Ok(status) => services.push(WireStatus::from(status)),
-                    Err(error) => return failure(writer, &mut self.manager, error, head),
+                    Ok(status) => {
+                        services.push(self.wire(status));
+                    }
+                    Err(error) => return failure(writer, self, error, head),
                 }
             }
             return write_json(
@@ -127,7 +356,7 @@ impl RuntimeHttp {
                     "Service is not configured.",
                     head,
                 ),
-                Err(failed) => failure(writer, &mut self.manager, failed, head),
+                Err(failed) => failure(writer, self, failed, head),
             };
         }
         if method != Method::Post {
@@ -178,10 +407,26 @@ impl RuntimeHttp {
                     Ok(input) => input,
                     Err(()) => return invalid_json(writer),
                 };
-                match path {
-                    "/api/runtime/start" => self.manager.start(input.service),
-                    "/api/runtime/stop" => self.manager.stop(input.service),
-                    _ => self.manager.restart(input.service),
+                if path == "/api/runtime/stop" {
+                    let saved = self.save_intent(input.service, false);
+                    let stopped = self.manager.stop(input.service);
+                    if let Err(failed) = stopped {
+                        return failure(writer, self, failed, false);
+                    }
+                    if saved.is_err() {
+                        return intent_failure(writer, self, input.service);
+                    }
+                    stopped
+                } else {
+                    let result = if path == "/api/runtime/start" {
+                        self.manager.start(input.service)
+                    } else {
+                        self.manager.restart(input.service)
+                    };
+                    if result.is_ok() && self.save_intent(input.service, true).is_err() {
+                        return intent_failure(writer, self, input.service);
+                    }
+                    result
                 }
             }
             "/api/runtime/acquire" => {
@@ -206,8 +451,8 @@ impl RuntimeHttp {
             }
         };
         match result {
-            Ok(status) => write_json(writer, 200, "OK", &WireStatus::from(status), false),
-            Err(error) => failure(writer, &mut self.manager, error, false),
+            Ok(status) => write_json(writer, 200, "OK", &self.wire(status), false),
+            Err(error) => failure(writer, self, error, false),
         }
     }
 }
@@ -288,6 +533,9 @@ pub(crate) struct WireStatus {
     rss_available: bool,
     desired: bool,
     restarts: u32,
+    recovery_attempts: u32,
+    recovery_exhausted: bool,
+    intent_durability_uncertain: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<&'static str>,
     restored: bool,
@@ -309,6 +557,9 @@ impl From<Status> for WireStatus {
             rss_available: false,
             desired: status.desired,
             restarts: 0,
+            recovery_attempts: 0,
+            recovery_exhausted: false,
+            intent_durability_uncertain: false,
             error_code: status.error_code,
             restored: status.restored,
             needs_recovery: status.needs_recovery,
@@ -342,7 +593,7 @@ struct ErrorResponse {
 }
 fn failure(
     writer: &mut impl Write,
-    manager: &mut Manager,
+    runtime: &mut RuntimeHttp,
     failed: ManagerError,
     head: bool,
 ) -> io::Result<()> {
@@ -365,8 +616,8 @@ fn failure(
     };
     let observed = failed
         .service
-        .and_then(|service| manager.status(service).ok())
-        .map(WireStatus::from);
+        .and_then(|service| runtime.manager.status(service).ok())
+        .map(|status| runtime.wire(status));
     write_json(
         writer,
         status,
@@ -379,6 +630,30 @@ fn failure(
             status: observed,
         },
         head,
+    )
+}
+fn intent_failure(
+    writer: &mut impl Write,
+    runtime: &mut RuntimeHttp,
+    service: ServiceId,
+) -> io::Result<()> {
+    let status = runtime
+        .manager
+        .status(service)
+        .ok()
+        .map(|status| runtime.wire(status));
+    write_json(
+        writer,
+        500,
+        "Internal Server Error",
+        &ErrorResponse {
+            error: ApiError {
+                code: "storage_failed",
+                message: "Runtime intent persistence is unconfirmed; current runtime state is returned.",
+            },
+            status,
+        },
+        false,
     )
 }
 fn reason(status: u16) -> &'static str {
