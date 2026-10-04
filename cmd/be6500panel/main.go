@@ -111,15 +111,12 @@ func run() error {
 			return err
 		}
 		captureManager.SetStorageAdmission(flashBudget.Admit)
-		// A boot journal proves ownership, not a healthy core. Withdraw it even
-		// when no runtime is desired; the saved MAC scope stays separate.
-		withdrawCtx, cancelWithdraw := context.WithTimeout(ctx, 30*time.Second)
-		withdrawErr := captureManager.Cleanup(withdrawCtx)
-		cancelWithdraw()
-		if withdrawErr != nil {
-			logger.Warn("Boot capture cleanup pending", "code", "capture_cleanup_failed", "module", "proxy")
-		}
-		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, HTTPClient: artifactClient, StorageAdmission: flashBudget.Admit, MaxConfigBytes: 512 << 10, MaxCompressedBytes: 20 << 20, DownloadTimeout: 6 * time.Minute, MaxUncompressedBytes: 40 << 20, ReadyHook: func(ctx context.Context, id string) error {
+		runtimeManager, err = managedruntime.New(managedruntime.Options{DataDir: filepath.Join(*dataDir, "services"), RunDir: *runDir, Logger: logger, LocalSourceRoot: *localArtifacts, HTTPClient: artifactClient, StorageAdmission: flashBudget.Admit, MaxConfigBytes: 512 << 10, MaxCompressedBytes: 20 << 20, DownloadTimeout: 6 * time.Minute, MaxUncompressedBytes: 40 << 20, PreStartHook: func(ctx context.Context, id string, raw []byte) error {
+			if id != managedruntime.SingBox {
+				return nil
+			}
+			return checkNativeTUNPreStart(ctx, raw)
+		}, ReadyHook: func(ctx context.Context, id string) error {
 			err := runtimeReadiness(func() *managedruntime.Manager { return runtimeManager })(ctx, id)
 			if err != nil && id == managedruntime.SingBox {
 				withdrawCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -149,14 +146,31 @@ func run() error {
 			return err
 		}
 		defer runtimeManager.Close()
+		// Exclusive runtime store admission must precede boot network mutations.
+		// A second panel that cannot own .manager.lock never withdraws live hooks.
+		withdrawCtx, cancelWithdraw := context.WithTimeout(ctx, 30*time.Second)
+		withdrawErr := captureManager.Cleanup(withdrawCtx)
+		cancelWithdraw()
+		if withdrawErr != nil {
+			logger.Warn("Boot capture cleanup pending", "code", "capture_cleanup_failed", "module", "proxy")
+		}
 		captureManager.SetBuilder(func(ctx context.Context, desired capture.Desired) (proxy.RulesPlanInput, []capture.Client, error) {
 			clients := make([]capture.Client, 0, len(desired.Devices))
 			for _, device := range desired.Devices {
 				clients = append(clients, capture.Client{MAC: device.MAC})
 			}
-			raw, _, err := runtimeManager.Config(managedruntime.SingBox)
+			raw, generation, err := runtimeManager.Config(managedruntime.SingBox)
 			if err != nil {
 				return proxy.RulesPlanInput{}, clients, errors.New("capture_configuration_unavailable")
+			}
+			if err = checkOwnedNativeReadiness(ctx, raw, func() (managedruntime.Status, error) {
+				state, err := runtimeManager.Status(managedruntime.SingBox)
+				if err != nil || state.Generation != generation {
+					return state, errors.New("capture accepted generation changed")
+				}
+				return state, nil
+			}); err != nil {
+				return proxy.RulesPlanInput{}, clients, errors.New("capture_backend_not_ready")
 			}
 			observation, err := routerAdapter.CaptureObservation(ctx)
 			if err != nil {
