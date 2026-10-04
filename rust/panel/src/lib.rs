@@ -11,6 +11,8 @@ pub mod policy_store;
 #[cfg(unix)]
 pub mod rules_http;
 #[cfg(unix)]
+pub mod runtime_manager;
+#[cfg(unix)]
 pub mod runtime_process;
 #[cfg(unix)]
 pub mod runtime_store;
