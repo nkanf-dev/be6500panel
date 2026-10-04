@@ -39,3 +39,38 @@ fn cli_help_is_explicit_diagnostic_slice() {
     assert!(help.contains("--proc-root"));
     assert!(help.contains("--web-dir"));
 }
+
+#[test]
+fn cli_password_flag_is_not_accepted_or_echoed() {
+    let output = Command::new(env!("CARGO_BIN_EXE_be6500-panel"))
+        .args(["--password", "private-secret"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        !String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("private-secret")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_invalid_secret_environment_is_fixed_before_listening() {
+    use std::os::unix::ffi::OsStringExt;
+    let output = Command::new(env!("CARGO_BIN_EXE_be6500-panel"))
+        .args(["--listen", "127.0.0.1:0"])
+        .env(
+            "BE6500PANEL_PASSWORD",
+            std::ffi::OsString::from_vec(vec![0xff]),
+        )
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        b"be6500-panel: invalid password environment\n"
+    );
+}

@@ -1,3 +1,4 @@
+use be6500_panel::auth::Auth;
 use be6500_panel::server::Service;
 use be6500_panel::static_files::StaticFiles;
 use std::ffi::OsString;
@@ -9,7 +10,8 @@ use std::process::ExitCode;
 const HELP: &str = "be6500-panel: loopback-only read-only diagnostic slice\n\
 Usage: be6500-panel [--listen 127.0.0.1:8790] [--proc-root /proc] [--web-dir PATH]\n\
 Only GET/HEAD /api/health and /api/system/memory are implemented.\n\
-No authentication or management operations are implemented.\n";
+Session login/logout are implemented; set BE6500PANEL_PASSWORD at startup.\n\
+Empty password means unauthenticated loopback diagnostics, not management.\n";
 
 struct Options {
     listen: SocketAddr,
@@ -71,7 +73,15 @@ fn parse_options() -> Result<Invocation, &'static str> {
 }
 
 fn run(options: Options) -> Result<(), &'static str> {
-    let mut service = Service::new(options.proc_root);
+    // Read once at startup. No flags, files, or request logs carry the password.
+    let password = match std::env::var("BE6500PANEL_PASSWORD") {
+        Ok(password) => password,
+        Err(std::env::VarError::NotPresent) => String::new(),
+        Err(_) => return Err("invalid password environment"),
+    };
+    let auth = Auth::new(&password);
+    drop(password);
+    let mut service = Service::new(options.proc_root).with_auth(auth);
     if let Some(root) = options.web_dir {
         let files = StaticFiles::new(&root).map_err(|_| "static root unavailable")?;
         service = service.with_static_files(files);

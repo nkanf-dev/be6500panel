@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod http;
 pub mod memory;
 pub mod policy;

@@ -93,3 +93,48 @@ fn http_header_size_and_count_limits() {
         ErrorKind::TargetTooLong
     );
 }
+
+#[test]
+fn http_post_framing_bounds_and_needed_headers() {
+    use be6500_panel::http::{MAX_BODY_BYTES, MAX_LOGIN_BODY_BYTES};
+    let req = parse_request(b"POST /api/session/login HTTP/1.1\r\nHost: panel.example:18890\r\nOrigin: http://panel.example:18890\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: 24\r\nCookie: other=x\r\n\r\n").unwrap();
+    assert_eq!(req.method, Method::Post);
+    assert_eq!(req.content_length, 24);
+    assert_eq!(req.host, Some("panel.example:18890"));
+    assert_eq!(req.origin, Some("http://panel.example:18890"));
+    assert_eq!(req.cookie, Some("other=x"));
+    for (path, length, good) in [
+        ("/api/session/login", MAX_LOGIN_BODY_BYTES, true),
+        ("/api/session/login", MAX_LOGIN_BODY_BYTES + 1, false),
+        ("/api/session/logout", MAX_BODY_BYTES, true),
+        ("/api/session/logout", MAX_BODY_BYTES + 1, false),
+    ] {
+        let bytes =
+            format!("POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {length}\r\n\r\n");
+        assert_eq!(parse_request(bytes.as_bytes()).is_ok(), good);
+    }
+    for headers in [
+        "",
+        "Content-Length: +1\r\n",
+        "Content-Length: 1,1\r\n",
+        "Content-Length: 0\r\nContent-Length: 0\r\n",
+        "Content-Length: 0\r\nTransfer-Encoding: identity\r\n",
+        "Content-Length: 0\r\nOrigin: http://localhost\r\nOrigin: http://localhost\r\n",
+        "Content-Length: 0\r\nCookie: a=b\r\nCookie: c=d\r\n",
+        "Content-Length: 0\r\nContent-Type: application/json\r\nContent-Type: application/json\r\n",
+    ] {
+        assert!(
+            parse_request(
+                format!("POST /api/session/login HTTP/1.1\r\nHost: localhost\r\n{headers}\r\n")
+                    .as_bytes()
+            )
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn http_request_debug_redacts_cookie_and_target() {
+    let request=parse_request(b"GET /private-secret HTTP/1.1\r\nHost: localhost\r\nCookie: be6500panel_session=private-secret\r\n\r\n").unwrap();
+    assert!(!format!("{request:?}").contains("private-secret"));
+}
