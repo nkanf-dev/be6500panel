@@ -169,12 +169,16 @@ impl Executor {
         {
             return Err(AdmissionError::Directory);
         }
-        let allowed = plan
+        let mut allowed: HashSet<Vec<String>> = plan
             .apply
-            .into_iter()
-            .chain(plan.cleanup)
-            .chain(plan.on_failure)
+            .iter()
+            .chain(&plan.cleanup)
+            .chain(&plan.on_failure)
+            .cloned()
             .collect();
+        for argv in inspection_commands(&plan) {
+            allowed.insert(argv);
+        }
         Ok(Self {
             binaries,
             allowed,
@@ -443,4 +447,60 @@ fn wait_exit(child: &Child, deadline: Instant) -> bool {
         }
     }
     false
+}
+
+/// Fixed queries derived from the same internally recompiled plan. These do
+/// not authorize arbitrary inspection arguments or a shell command.
+pub fn inspection_commands(plan: &crate::capture_plan::OwnedRulesPlan) -> Vec<Vec<String>> {
+    let mut commands = vec![
+        vec![
+            "ip".into(),
+            "-4".into(),
+            "route".into(),
+            "show".into(),
+            "table".into(),
+            "16500".into(),
+        ],
+        vec![
+            "ip".into(),
+            "-4".into(),
+            "route".into(),
+            "show".into(),
+            "table".into(),
+            "all".into(),
+        ],
+        vec!["ip".into(), "-4".into(), "rule".into(), "show".into()],
+        vec![
+            "iptables".into(),
+            "-w".into(),
+            "5".into(),
+            "-t".into(),
+            "mangle".into(),
+            "-S".into(),
+        ],
+    ];
+    let mut hooks = HashSet::new();
+    for chain in &plan.ownership.chains {
+        commands.push(vec![
+            "iptables".into(),
+            "-w".into(),
+            "5".into(),
+            "-t".into(),
+            chain.table.clone(),
+            "-S".into(),
+            chain.name.clone(),
+        ]);
+        if hooks.insert((chain.table.clone(), chain.hook.clone())) {
+            commands.push(vec![
+                "iptables".into(),
+                "-w".into(),
+                "5".into(),
+                "-t".into(),
+                chain.table.clone(),
+                "-S".into(),
+                chain.hook.clone(),
+            ]);
+        }
+    }
+    commands
 }

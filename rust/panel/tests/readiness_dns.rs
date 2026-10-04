@@ -759,3 +759,80 @@ fn unrelated_cname_cycles_and_non_name_compression_targets_are_rejected() {
         .is_err()
     );
 }
+
+#[test]
+fn compiled_configuration_over_256_rules_retains_dns_readiness_selection() {
+    use be6500_panel::native::{CompileInput, compile_native};
+    use be6500_panel::policy::{Rule, RuleKind, Target};
+    let fixtures: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/native-go.json")).unwrap();
+    let mut input: CompileInput =
+        serde_json::from_value(fixtures["cases"][0]["input"].clone()).unwrap();
+    input.rules = (0..512)
+        .map(|index| Rule {
+            kind: RuleKind::Domain,
+            value: format!("direct-{index}.example.test"),
+            target: Target::Direct,
+            no_resolve: false,
+            index,
+        })
+        .collect();
+    let compiled = compile_native(&input).unwrap();
+    let config: serde_json::Value = serde_json::from_slice(&compiled.config).unwrap();
+    assert!(config["route"]["rules"].as_array().unwrap().len() > 256);
+    assert!(config["dns"]["rules"].as_array().unwrap().len() > 256);
+    let targets = native_readiness_targets(&compiled.config).unwrap();
+    assert_eq!(targets.len(), 3);
+    assert_eq!(
+        targets
+            .iter()
+            .filter(|target| target.domain.is_some())
+            .count(),
+        2
+    );
+    assert!(
+        targets
+            .iter()
+            .filter_map(|target| target.domain.as_deref())
+            .all(|domain| domain == "dns.alidns.com")
+    );
+}
+
+#[test]
+fn large_readiness_lists_remain_bounded_and_field_order_independent() {
+    let many = std::iter::repeat_n("{}", be6500_panel::policy::MAX_RULES * 2 + 129)
+        .collect::<Vec<_>>()
+        .join(",");
+    let over_route = format!(
+        r#"{{"inbounds":[{{"type":"mixed","listen_port":2080}}],"route":{{"rules":[{many}]}}}}"#
+    );
+    assert_eq!(
+        native_readiness_targets(over_route.as_bytes()).unwrap_err(),
+        ReadinessError::Config
+    );
+    let over_dns = format!(
+        r#"{{"inbounds":[{{"type":"mixed","listen_port":2080}}],"dns":{{"rules":[{many}]}}}}"#
+    );
+    assert_eq!(
+        native_readiness_targets(over_dns.as_bytes()).unwrap_err(),
+        ReadinessError::Config
+    );
+    let dns = r#"{"rules":[{"domain":"first.test","server":"dns-direct"},{"domain":"resolver.test","server":"dns-direct"}],"servers":[{"tag":"dns-direct","tls":{"server_name":"resolver.test"}}]}"#;
+    let config = format!(
+        r#"{{"inbounds":[{{"type":"direct","tag":"dns-in","listen_port":1053}}],"dns":{dns},"route":{{"rules":[{{"action":"hijack-dns","inbound":"dns-in"}}]}}}}"#
+    );
+    let targets = native_readiness_targets(config.as_bytes()).unwrap();
+    assert!(
+        targets
+            .iter()
+            .all(|target| target.domain.as_deref() == Some("resolver.test"))
+    );
+    let duplicate = config.replace(
+        r#""action":"hijack-dns""#,
+        r#""action":"hijack-dns","action":"route""#,
+    );
+    assert_eq!(
+        native_readiness_targets(duplicate.as_bytes()).unwrap_err(),
+        ReadinessError::Config
+    );
+}

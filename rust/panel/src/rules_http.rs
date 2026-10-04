@@ -134,7 +134,9 @@ impl RulesState {
                 if !self.readback_fits(&candidate) {
                     return response_too_large(writer, false);
                 }
-                match self.store.save(&candidate.policy) {
+                let saved = self.store.save(&candidate.policy);
+                drop(candidate);
+                match saved {
                     Ok(outcome) if outcome.durability_error.is_some() => {
                         write_save_uncertain(writer, &outcome)
                     }

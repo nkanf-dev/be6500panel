@@ -1,6 +1,8 @@
 pub mod auth;
 #[cfg(unix)]
 pub mod capture_executor;
+#[cfg(unix)]
+pub mod capture_kernel;
 pub mod capture_plan;
 #[cfg(unix)]
 pub mod capture_state;

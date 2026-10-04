@@ -773,6 +773,7 @@ impl Manager {
         if readback != bytes {
             return Err(Failure::Store(StoreError::Verification));
         }
+        drop(readback);
         self.hook(service, HookStage::PreStart, record)?;
         let path = self.services[service.index()]
             .config_root

@@ -773,3 +773,25 @@ fn startup_after_callback_rechecks_fd_socket_and_inode() {
         );
     }
 }
+
+#[test]
+fn compiled_route_expansion_retains_only_exact_direct_ipv6_proof() {
+    let many = std::iter::repeat_n("{}", MAX_FDS + 1)
+        .collect::<Vec<_>>()
+        .join(",");
+    let raw = CONFIG.replace(
+        r#"{"ip_version":6,"outbound":"direct"}"#,
+        &format!(r#"{many},{{"ip_version":6,"outbound":"direct"}}"#),
+    );
+    assert!(native_target(raw.as_bytes()).unwrap().is_some());
+    let invalid = raw.replace(
+        r#""ip_version":6,"outbound":"direct""#,
+        r#""ip_version":6,"outbound":"proxy""#,
+    );
+    assert_eq!(native_target(invalid.as_bytes()), Err(TunError::Ipv6Policy));
+    let too_many = std::iter::repeat_n("{}", be6500_panel::policy::MAX_RULES * 2 + 129)
+        .collect::<Vec<_>>()
+        .join(",");
+    let over = CONFIG.replace(r#"{"ip_version":6,"outbound":"direct"}"#, &too_many);
+    assert!(native_target(over.as_bytes()).is_err());
+}

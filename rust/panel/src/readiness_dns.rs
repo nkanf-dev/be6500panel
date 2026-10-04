@@ -2,7 +2,7 @@
 //! probes use literal socket addresses and never resolve a target hostname.
 //! DNS success requires an actual local A answer. This does not prove Internet,
 //! routed-TUN ownership, or external FRPC tunnel health. No background worker.
-use serde::de::{self, SeqAccess, Visitor};
+use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -12,6 +12,10 @@ use std::time::{Duration, Instant};
 pub const MAX_CONFIG_BYTES: usize = 4 << 20;
 pub const MAX_LISTENERS: usize = 64;
 pub const MAX_ARRAY_ITEMS: usize = 256;
+// A compiler rule may expand to resolve+route entries. The byte cap remains
+// authoritative; this work limit is separate from an inner list's 256 items.
+const MAX_RULE_ENTRIES: usize = crate::policy::MAX_RULES * 2 + 128;
+const MAX_HIJACK_RULES: usize = MAX_ARRAY_ITEMS;
 pub const MAX_FIELD_BYTES: usize = 1024;
 pub const MAX_DNS_PACKET: usize = 4096;
 const IO_SLICE: Duration = Duration::from_millis(50);
@@ -248,10 +252,47 @@ struct RouteRule {
     inbound: Strings,
     port: Ports,
 }
+#[derive(Default)]
+struct HijackRules(Vec<RouteRule>);
+impl<'de> Deserialize<'de> for HijackRules {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        struct RulesVisitor;
+        impl<'de> Visitor<'de> for RulesVisitor {
+            type Value = HijackRules;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("bounded route rules")
+            }
+            fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                Ok(HijackRules::default())
+            }
+            fn visit_seq<A: SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
+                let mut kept = Vec::new();
+                let mut count = 0;
+                while let Some(rule) = seq.next_element::<RouteRule>()? {
+                    count += 1;
+                    if count > MAX_RULE_ENTRIES {
+                        return Err(de::Error::custom("route entry limit"));
+                    }
+                    if rule.action.0 == "hijack-dns" {
+                        if kept.len() == MAX_HIJACK_RULES {
+                            return Err(de::Error::custom("DNS hijack rule limit"));
+                        }
+                        kept.push(rule);
+                    }
+                }
+                Ok(HijackRules(kept))
+            }
+        }
+        d.deserialize_any(RulesVisitor)
+    }
+}
 #[derive(Default, Deserialize)]
 #[serde(default)]
 struct Route {
-    rules: Items<RouteRule, MAX_ARRAY_ITEMS>,
+    rules: HijackRules,
 }
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -275,7 +316,40 @@ struct DnsRule {
 #[serde(default)]
 struct Dns {
     servers: Items<DnsServer, MAX_ARRAY_ITEMS>,
-    rules: Items<DnsRule, MAX_ARRAY_ITEMS>,
+    // Rules are processed by a second streaming selection pass after the
+    // direct resolver identity is known, regardless of JSON field ordering.
+    #[serde(rename = "rules")]
+    _rules: IgnoredDnsRules,
+}
+#[derive(Default)]
+struct IgnoredDnsRules;
+impl<'de> Deserialize<'de> for IgnoredDnsRules {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        struct RulesVisitor;
+        impl<'de> Visitor<'de> for RulesVisitor {
+            type Value = IgnoredDnsRules;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("bounded DNS rules")
+            }
+            fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                Ok(IgnoredDnsRules)
+            }
+            fn visit_seq<A: SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
+                let mut count = 0;
+                while seq.next_element::<DnsRule>()?.is_some() {
+                    count += 1;
+                    if count > MAX_RULE_ENTRIES {
+                        return Err(de::Error::custom("DNS entry limit"));
+                    }
+                }
+                Ok(IgnoredDnsRules)
+            }
+        }
+        d.deserialize_any(RulesVisitor)
+    }
 }
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -291,7 +365,7 @@ pub fn native_readiness_targets(raw: &[u8]) -> Result<Vec<ListenerTarget>> {
         return Err(ReadinessError::Config);
     }
     let config: Config = serde_json::from_slice(raw).map_err(|_| ReadinessError::Config)?;
-    let domain = readiness_domain(&config.dns);
+    let domain = readiness_domain(raw, &config.dns)?;
     let mut targets = Vec::new();
     for inbound in &config.inbounds.0 {
         if inbound.kind.0 == "tproxy" {
@@ -389,7 +463,106 @@ fn normalized_domain(domain: &str) -> Option<String> {
     }
     Some(domain.to_ascii_lowercase())
 }
-fn readiness_domain(dns: &Dns) -> String {
+struct DnsSelection<'a> {
+    identity: Option<&'a str>,
+    first: Option<String>,
+    matched: bool,
+}
+struct DnsRulesSeed<'a, 'b>(&'a mut DnsSelection<'b>);
+impl<'de> DeserializeSeed<'de> for DnsRulesSeed<'_, '_> {
+    type Value = ();
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<(), D::Error> {
+        d.deserialize_any(self)
+    }
+}
+impl<'de> Visitor<'de> for DnsRulesSeed<'_, '_> {
+    type Value = ();
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("bounded DNS rules")
+    }
+    fn visit_unit<E: de::Error>(self) -> std::result::Result<(), E> {
+        Ok(())
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+        let mut count = 0;
+        while let Some(rule) = seq.next_element::<DnsRule>()? {
+            count += 1;
+            if count > MAX_RULE_ENTRIES {
+                return Err(de::Error::custom("DNS entry limit"));
+            }
+            if rule.server.0 == "dns-direct" {
+                for value in rule.domain.values() {
+                    if let Some(domain) = normalized_domain(&value.0) {
+                        if self.0.identity == Some(domain.as_str()) {
+                            self.0.matched = true;
+                        }
+                        if self.0.first.is_none() {
+                            self.0.first = Some(domain);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+struct DnsObjectSeed<'a, 'b>(&'a mut DnsSelection<'b>);
+impl<'de> DeserializeSeed<'de> for DnsObjectSeed<'_, '_> {
+    type Value = ();
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<(), D::Error> {
+        d.deserialize_map(self)
+    }
+}
+impl<'de> Visitor<'de> for DnsObjectSeed<'_, '_> {
+    type Value = ();
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("DNS object")
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+        let mut seen = false;
+        while let Some(key) = map.next_key::<String>()? {
+            if key == "rules" {
+                if seen {
+                    return Err(de::Error::custom("duplicate DNS rules"));
+                }
+                seen = true;
+                map.next_value_seed(DnsRulesSeed(self.0))?;
+            } else {
+                map.next_value::<de::IgnoredAny>()?;
+            }
+        }
+        Ok(())
+    }
+}
+struct DnsConfigSeed<'a, 'b>(&'a mut DnsSelection<'b>);
+impl<'de> DeserializeSeed<'de> for DnsConfigSeed<'_, '_> {
+    type Value = ();
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<(), D::Error> {
+        d.deserialize_map(self)
+    }
+}
+impl<'de> Visitor<'de> for DnsConfigSeed<'_, '_> {
+    type Value = ();
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("accepted object")
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+        let mut seen = false;
+        while let Some(key) = map.next_key::<String>()? {
+            if key == "dns" {
+                if seen {
+                    return Err(de::Error::custom("duplicate DNS object"));
+                }
+                seen = true;
+                map.next_value_seed(DnsObjectSeed(self.0))?;
+            } else {
+                map.next_value::<de::IgnoredAny>()?;
+            }
+        }
+        Ok(())
+    }
+}
+fn readiness_domain(raw: &[u8], dns: &Dns) -> Result<String> {
     let identity = dns
         .servers
         .0
@@ -399,25 +572,23 @@ fn readiness_domain(dns: &Dns) -> String {
             normalized_domain(&server.tls.server_name.0)
                 .or_else(|| normalized_domain(&server.server.0))
         });
-    let mut first = None;
-    for rule in &dns.rules.0 {
-        if rule.server.0 != "dns-direct" {
-            continue;
-        }
-        for domain in rule.domain.values() {
-            if let Some(domain) = normalized_domain(&domain.0) {
-                if identity.as_ref() == Some(&domain) {
-                    return domain;
-                }
-                if first.is_none() {
-                    first = Some(domain);
-                }
-            }
-        }
+    let mut selected = DnsSelection {
+        identity: identity.as_deref(),
+        first: None,
+        matched: false,
+    };
+    let mut decoder = serde_json::Deserializer::from_slice(raw);
+    DnsConfigSeed(&mut selected)
+        .deserialize(&mut decoder)
+        .map_err(|_| ReadinessError::Config)?;
+    decoder.end().map_err(|_| ReadinessError::Config)?;
+    if selected.matched {
+        return Ok(identity.expect("matched resolver identity"));
     }
-    first
+    Ok(selected
+        .first
         .or(identity)
-        .unwrap_or_else(|| "dns.alidns.com".to_owned())
+        .unwrap_or_else(|| "dns.alidns.com".to_owned()))
 }
 
 /// Build a normalized A/IN question. Network probes supply an OS-random ID.

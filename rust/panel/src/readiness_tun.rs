@@ -178,8 +178,43 @@ struct Accepted {
 }
 #[derive(Default, Deserialize)]
 struct Route {
-    #[serde(default, deserialize_with = "bounded_rules")]
-    rules: Vec<Rule>,
+    #[serde(default)]
+    rules: DirectIpv6Rules,
+}
+// Outer compiled entries have their own budget; retain only IPv6 proof, not a
+// vector of every route. The accepted-byte cap remains unchanged.
+const MAX_COMPILED_ROUTE_ENTRIES: usize = crate::policy::MAX_RULES * 2 + 128;
+#[derive(Default)]
+struct DirectIpv6Rules {
+    present: bool,
+    invalid: bool,
+}
+impl<'de> Deserialize<'de> for DirectIpv6Rules {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = DirectIpv6Rules;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("bounded compiled route rules")
+            }
+            fn visit_seq<S: SeqAccess<'de>>(self, mut s: S) -> Result<Self::Value, S::Error> {
+                let mut proof = DirectIpv6Rules::default();
+                let mut count = 0;
+                while let Some(rule) = s.next_element::<Rule>()? {
+                    count += 1;
+                    if count > MAX_COMPILED_ROUTE_ENTRIES {
+                        return Err(de::Error::custom("route entry limit"));
+                    }
+                    if rule.version == Some(6) {
+                        proof.present = true;
+                        proof.invalid |= !rule.direct || rule.fields != 2;
+                    }
+                }
+                Ok(proof)
+            }
+        }
+        d.deserialize_seq(V)
+    }
 }
 fn bounded_list<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
@@ -209,9 +244,6 @@ fn bounded_list<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
 }
 fn bounded_inbounds<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Inbound>, D::Error> {
     bounded_list(d, MAX_INTERFACES)
-}
-fn bounded_rules<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Rule>, D::Error> {
-    bounded_list(d, MAX_FDS)
 }
 #[derive(Default)]
 struct Rule {
@@ -340,7 +372,7 @@ pub fn native_target(raw: &[u8]) -> Result<Option<TunTarget>, TunError> {
         return Err(TunError::Limit);
     }
     let c: Accepted = serde_json::from_slice(raw).map_err(|_| TunError::Config)?;
-    if c.inbounds.len() > MAX_INTERFACES || c.route.rules.len() > MAX_FDS {
+    if c.inbounds.len() > MAX_INTERFACES {
         return Err(TunError::Limit);
     }
     let mut target = None;
@@ -383,19 +415,8 @@ pub fn native_target(raw: &[u8]) -> Result<Option<TunTarget>, TunError> {
             address,
         });
     }
-    if target.is_some() {
-        let mut direct = false;
-        for rule in c.route.rules {
-            if rule.version == Some(6) {
-                if !rule.direct || rule.fields != 2 {
-                    return Err(TunError::Ipv6Policy);
-                }
-                direct = true;
-            }
-        }
-        if !direct {
-            return Err(TunError::Ipv6Policy);
-        }
+    if target.is_some() && (!c.route.rules.present || c.route.rules.invalid) {
+        return Err(TunError::Ipv6Policy);
     }
     Ok(target)
 }

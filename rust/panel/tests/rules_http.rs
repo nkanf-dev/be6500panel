@@ -620,22 +620,25 @@ fn subscription_is_stable_for_service_lifetime_not_reloaded_or_cloned_per_get() 
     );
 }
 
-
 #[test]
 fn prepared_duplicate_source_preserves_preview_save_readback_and_omissions() {
     use be6500_panel::policy::{Policy, merge_effective_policy, subscription_fingerprints};
     use be6500_panel::subscription::{parse_clash_yaml, summarize_policy};
 
     let fixture = Fixture::new();
-    let yaml = br#"rules:
+    fixture.subscription();
+    let base = fs::read_to_string(fixture.0.join("subscription.yaml")).unwrap();
+    let header = base.split_once("rules:").unwrap().0;
+    let rule_yaml = r#"rules:
   - DOMAIN,DUP.example,PROXY
   - DOMAIN,dup.example,PROXY
   - PROCESS-NAME,synthetic-omission,DIRECT
   - MATCH,DIRECT
   - DOMAIN,after.example,PROXY
 "#;
-    fs::write(fixture.0.join("subscription.yaml"), yaml).unwrap();
-    let source = parse_clash_yaml(yaml).unwrap();
+    let yaml = format!("{header}{rule_yaml}");
+    fs::write(fixture.0.join("subscription.yaml"), &yaml).unwrap();
+    let source = parse_clash_yaml(yaml.as_bytes()).unwrap();
     let refs = subscription_fingerprints(&source.rules).unwrap();
     let draft = json!({
         "rules": [{
@@ -665,13 +668,10 @@ fn prepared_duplicate_source_preserves_preview_save_readback_and_omissions() {
         serde_json::to_value(merge_effective_policy(&source.rules, &policy).unwrap()).unwrap();
     let summary = summarize_policy(&source);
     for omission in &summary.omitted_rules {
-        expected["diagnostics"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({
-                "scope": "subscription", "index": omission.index,
-                "code": omission.code, "message": omission.message
-            }));
+        expected["diagnostics"].as_array_mut().unwrap().push(json!({
+            "scope": "subscription", "index": omission.index,
+            "code": omission.code, "message": omission.message
+        }));
     }
     let service = fixture.service();
     let body = json!({"policy": draft}).to_string();
