@@ -44,7 +44,7 @@ const PRIVATE: &[&str] = &[
 /// Only `routed-tun` generation is admitted. IPv6 literals are retained as
 /// direct-only metadata; they authorize no IPv6 or MAC hooks.
 /// Optional client lists/maps preserve Go nil versus non-nil empty intent.
-#[derive(Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RulesPlanInput {
     #[serde(rename = "scope", alias = "Scope")]
@@ -73,7 +73,12 @@ pub struct RulesPlanInput {
     pub client_macs: Option<BTreeMap<String, String>>,
     #[serde(rename = "lanInterface", alias = "LANInterface")]
     pub lan_interface: String,
-    #[serde(rename = "ports", alias = "Ports", deserialize_with = "input_ports")]
+    #[serde(
+        rename = "ports",
+        alias = "Ports",
+        deserialize_with = "input_ports",
+        serialize_with = "serialize_input_ports"
+    )]
     pub ports: Ports,
     #[serde(rename = "ipv6", alias = "IPv6")]
     pub ipv6: String,
@@ -130,45 +135,109 @@ fn input_ports<'de, D: Deserializer<'de>>(d: D) -> Result<Ports, D::Error> {
     })
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "PascalCase")]
+fn serialize_input_ports<S: serde::Serializer>(ports: &Ports, s: S) -> Result<S::Ok, S::Error> {
+    #[derive(Serialize)]
+    struct PortsDto {
+        mixed: u16,
+        #[serde(rename = "tProxy")]
+        tproxy: u16,
+        dns: u16,
+    }
+    PortsDto {
+        mixed: ports.mixed,
+        tproxy: ports.tproxy,
+        dns: ports.dns,
+    }
+    .serialize(s)
+}
+
+fn nil_map<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<String, String>, D::Error> {
+    Ok(Option::<BTreeMap<String, String>>::deserialize(d)?.unwrap_or_default())
+}
+fn nil_chains<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<OwnedChain>, D::Error> {
+    Ok(Option::<Vec<OwnedChain>>::deserialize(d)?.unwrap_or_default())
+}
+fn nil_families<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+    Ok(Option::<Vec<u8>>::deserialize(d)?.unwrap_or_default())
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "PascalCase")]
 pub struct OwnedChain {
+    #[serde(alias = "family")]
     pub family: u8,
+    #[serde(alias = "table")]
     pub table: String,
+    #[serde(alias = "name")]
     pub name: String,
+    #[serde(alias = "hook")]
     pub hook: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "PascalCase")]
 pub struct RulesOwnership {
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(alias = "scope", skip_serializing_if = "String::is_empty")]
     pub scope: String,
-    #[serde(rename = "LANIPv4Prefixes", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "LANIPv4Prefixes",
+        alias = "lanIPv4Prefixes",
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nil_vec"
+    )]
     pub lan_ipv4_prefixes: Vec<String>,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(alias = "datapath", skip_serializing_if = "String::is_empty")]
     pub datapath: String,
-    #[serde(rename = "TUNInterface", skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "TUNInterface",
+        alias = "tunInterface",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub tun_interface: String,
-    #[serde(rename = "TUNAddress", skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "TUNAddress",
+        alias = "tunAddress",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub tun_address: String,
+    #[serde(alias = "mark")]
     pub mark: u32,
+    #[serde(alias = "mask")]
     pub mask: u32,
+    #[serde(alias = "routeTable")]
     pub route_table: u32,
+    #[serde(alias = "rulePriority")]
     pub rule_priority: u32,
-    #[serde(rename = "LANInterface")]
+    #[serde(rename = "LANInterface", alias = "lanInterface")]
     pub lan_interface: String,
-    #[serde(rename = "ClientIPv4")]
+    #[serde(rename = "ClientIPv4", alias = "clientIPv4")]
     pub client_ipv4: String,
-    #[serde(rename = "ClientIPv6")]
+    #[serde(rename = "ClientIPv6", alias = "clientIPv6")]
     pub client_ipv6: String,
-    #[serde(rename = "ClientIPv4s", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "ClientIPv4s",
+        alias = "clientIPv4s",
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nil_vec"
+    )]
     pub client_ipv4s: Vec<String>,
-    #[serde(rename = "ClientIPv6s", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "ClientIPv6s",
+        alias = "clientIPv6s",
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nil_vec"
+    )]
     pub client_ipv6s: Vec<String>,
-    #[serde(rename = "ClientMACs", skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        rename = "ClientMACs",
+        alias = "clientMACs",
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "nil_map"
+    )]
     pub client_macs: BTreeMap<String, String>,
+    #[serde(alias = "routeFamilies", deserialize_with = "nil_families")]
     pub route_families: Vec<u8>,
+    #[serde(alias = "chains", deserialize_with = "nil_chains")]
     pub chains: Vec<OwnedChain>,
 }
 
