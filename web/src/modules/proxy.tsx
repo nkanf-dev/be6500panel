@@ -74,13 +74,6 @@ export function ProxyPage() {
       )}
       {tab === "nodes" ? (
         <>
-          <ProxySetupGuidance
-            runtime={runtime}
-            nodes={nodes}
-            busy={importing || runtime.pending || capturing}
-            onRuntime={() => setTab("runtime")}
-            onCapture={() => setTab("capture")}
-          />
           <NodeSelector
             nodes={nodes}
             runtime={runtime}
@@ -90,11 +83,21 @@ export function ProxyPage() {
               resource.reload();
             }}
           />
-          <ProxyImportForm
-            enabled={runtime.enabled && !runtime.pending}
-            onImported={setImported}
-            onPending={setImporting}
-          />
+          <details>
+            <summary>订阅与高级设置</summary>
+            <ProxyImportForm
+              enabled={runtime.enabled && !runtime.pending}
+              onImported={setImported}
+              onPending={setImporting}
+            />
+            <ProxySetupGuidance
+              runtime={runtime}
+              nodes={nodes}
+              busy={importing || runtime.pending || capturing}
+              onRuntime={() => setTab("runtime")}
+              onCapture={() => setTab("capture")}
+            />
+          </details>
         </>
       ) : tab === "runtime" ? (
         <>
