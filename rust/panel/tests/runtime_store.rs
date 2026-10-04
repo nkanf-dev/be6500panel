@@ -496,3 +496,87 @@ fn directory_replacement_is_not_authorized_by_retained_fd() {
 }
 // Compile-time proof that candidates are the only accepted commit input, not arbitrary paths.
 fn _candidate_type(_: Candidate) {}
+
+#[test]
+fn bounded_artifact_intent_metadata_is_atomic_and_never_changes_config_authority() {
+    let fixture = Fixture::new();
+    let mut store = fixture.open();
+    let raw = b"{}";
+    commit(&mut store, SB, raw);
+    ready(&mut store, SB, raw);
+    let previous = store.snapshot(SB);
+    let metadata = Artifact {
+        url: "https://example.invalid/core.gz".into(),
+        sha256: "AB".repeat(32),
+        compression: "gzip".into(),
+        version: "fixture-v1".into(),
+    };
+    let outcome = store
+        .set_artifact_intent(SB, previous.generation, Some(metadata.clone()))
+        .unwrap();
+    assert_eq!(outcome.state.generation, previous.generation);
+    assert_eq!(outcome.state.current, previous.current);
+    assert_eq!(outcome.state.last_good, previous.last_good);
+    assert_eq!(
+        outcome.state.artifact.as_ref().unwrap().sha256,
+        "ab".repeat(32)
+    );
+    assert_eq!(
+        store
+            .read_config(SB, outcome.state.current.as_ref().unwrap())
+            .unwrap(),
+        raw
+    );
+    let manifest = fs::read(fixture.service(SB).join("state.json")).unwrap();
+    assert_eq!(
+        store
+            .set_artifact_intent(SB, previous.generation + 1, Some(metadata.clone()))
+            .unwrap_err(),
+        StoreError::Generation
+    );
+    for invalid in [
+        Artifact {
+            url: "".into(),
+            ..metadata.clone()
+        },
+        Artifact {
+            url: "x".repeat(4097),
+            ..metadata.clone()
+        },
+        Artifact {
+            version: "private\nsecret".into(),
+            ..metadata.clone()
+        },
+        Artifact {
+            version: "x".repeat(129),
+            ..metadata.clone()
+        },
+        Artifact {
+            sha256: "gg".repeat(32),
+            ..metadata.clone()
+        },
+        Artifact {
+            compression: "zip".into(),
+            ..metadata.clone()
+        },
+    ] {
+        assert_eq!(
+            store
+                .set_artifact_intent(SB, previous.generation, Some(invalid))
+                .unwrap_err(),
+            StoreError::InvalidInput
+        );
+        assert_eq!(
+            fs::read(fixture.service(SB).join("state.json")).unwrap(),
+            manifest
+        );
+    }
+    drop(store);
+    let mut reopened = fixture.open();
+    assert_eq!(reopened.snapshot(SB), outcome.state);
+    let cleared = reopened
+        .set_artifact_intent(SB, previous.generation, None)
+        .unwrap();
+    assert!(cleared.state.artifact.is_none());
+    assert_eq!(cleared.state.current, previous.current);
+}

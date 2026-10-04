@@ -8,7 +8,11 @@
 
 **Tech Stack:** Existing Rust serde store/sha validation/nativefaultfixtures.
 
-- [ ] Add focused tests in `rust/panel/tests/runtime_store.rs`: unchangedgeneration/current/lastGood acrossmetadata set/restoreNone,reopen;wronggenrefuses;url/version/hash/compressionbounds leaveoldmanifest.
-- [ ] Add method+fixedmetadatavalidator in `src/runtime_store.rs`, onlyknownNone|gzipcompressed intent,64hexnormalize. No download/path/command orrecordprune.
-- [ ] Internal fault test exercises all premanifestwrite/sync/rename/spacefailures retainingoldstate; postrename syncerror returns authoritativecommittedmetadata while retainingconfigs and uncertainty. Storeerrors neverprivateURL/version/hashbody.
-- [ ] Rootfocusedstoretests+fmt/clippy; include laterfullstaging/managergate and ARM. Do not enable HTTPAcquire from this method. Next rootmanagerownsfixedartifactroot/newcheckerwhileoldrunalive/metadataadmission/cleanup/restart/readyrollback.
+- [x] Add focused tests in `rust/panel/tests/runtime_store.rs`: unchangedgeneration/current/lastGood acrossmetadata set/restoreNone,reopen;wronggenrefuses;url/version/hash/compressionbounds leaveoldmanifest.
+- [x] Add method+fixedmetadatavalidator in `src/runtime_store.rs`, onlyknownNone|gzipcompressed intent,64hexnormalize. No download/path/command orrecordprune.
+- [x] Internal fault test exercises all premanifestwrite/sync/rename/spacefailures retainingoldstate; postrename syncerror returns authoritativecommittedmetadata while retainingconfigs and uncertainty. Storeerrors neverprivateURL/version/hashbody.
+- [x] Rootfocusedstoretests+fmt/clippy; include laterfullstaging/managergate and ARM. Do not enable HTTPAcquire from this method. Next rootmanagerownsfixedartifactroot/newcheckerwhileoldrunalive/metadataadmission/cleanup/restart/readyrollback.
+
+## Result
+
+302 full host tests, fmt, strict all-target Clippy, diff check and current-source ARMv7 build passed. Metadata-only transaction never changes config generation/current/lastGood and cannot authorize binary or process. HTTPS/HTTPAcquire remains unavailable. Pure-Rust gzipdependency/lockprepared for separate Stage lane; noCzlib.

@@ -575,6 +575,23 @@ impl RuntimeStore {
             .ready = true;
         self.save_state(service, next)
     }
+    /// Persist only a bounded artifact request. This is NOT executable trust
+    /// or activation: the caller must stage/check/withdraw/own it separately.
+    /// Config generation, current and proven lastGood records stay unchanged.
+    pub fn set_artifact_intent(
+        &mut self,
+        service: ServiceId,
+        expected_generation: u64,
+        artifact: Option<Artifact>,
+    ) -> Result<CommitOutcome, StoreError> {
+        let slot = self.checked(service)?;
+        if slot.state.generation != expected_generation {
+            return Err(StoreError::Generation);
+        }
+        let mut next = slot.state.clone();
+        next.artifact = artifact.map(validate_artifact_intent).transpose()?;
+        self.save_state(service, next)
+    }
     fn save_state(
         &mut self,
         service: ServiceId,
@@ -967,6 +984,21 @@ impl Write for BoundedBytes {
         Ok(())
     }
 }
+fn validate_artifact_intent(mut artifact: Artifact) -> Result<Artifact, StoreError> {
+    if artifact.url.is_empty()
+        || artifact.url.len() > 4096
+        || artifact.url.bytes().any(|b| b < 0x20 || b == 0x7f)
+        || artifact.version.len() > 128
+        || artifact.version.bytes().any(|b| b < 0x20 || b == 0x7f)
+        || artifact.sha256.len() != 64
+        || !artifact.sha256.bytes().all(|b| b.is_ascii_hexdigit())
+        || !matches!(artifact.compression.as_str(), "none" | "gzip")
+    {
+        return Err(StoreError::InvalidInput);
+    }
+    artifact.sha256.make_ascii_lowercase();
+    Ok(artifact)
+}
 fn serialize_state(state: &DiskState) -> Result<Vec<u8>, StoreError> {
     let mut bytes = BoundedBytes(Vec::with_capacity(1024));
     serde_json::to_writer(&mut bytes, state).map_err(|_| StoreError::InvalidState)?;
@@ -1316,6 +1348,51 @@ mod tests {
         assert_eq!(fs::read(&reserve).unwrap(), vec![7; 64 << 10]);
         let now = fs::metadata(reserve).unwrap();
         assert_eq!(identity(&now), identity(&old));
+    }
+    #[test]
+    fn artifact_metadata_faults_obey_authoritative_manifest_boundary() {
+        for fault in [
+            Fault::Write,
+            Fault::ShortWrite,
+            Fault::FileSync,
+            Fault::BeforeSync,
+            Fault::ManifestRename,
+            Fault::Measurement,
+            Fault::Space,
+            Fault::CommittedSync,
+        ] {
+            let fixture = Fixture::new();
+            let mut store = fixture.open();
+            accept(&mut store, b"{}");
+            let previous = store.snapshot(ServiceId::SingBox);
+            let manifest = fixture.manifest();
+            let artifact = Artifact {
+                url: "https://example.invalid/private-artifact".into(),
+                sha256: "ab".repeat(32),
+                compression: "gzip".into(),
+                version: "fixture".into(),
+            };
+            store.fault = Some(fault);
+            let result = store.set_artifact_intent(
+                ServiceId::SingBox,
+                previous.generation,
+                Some(artifact.clone()),
+            );
+            if fault == Fault::CommittedSync {
+                let outcome = result.unwrap();
+                assert_eq!(outcome.state.artifact, Some(artifact));
+                assert_eq!(outcome.state.current, previous.current);
+                assert_eq!(outcome.state.generation, previous.generation);
+                assert_eq!(outcome.durability_error, Some(StoreError::Durability));
+                drop(store);
+                assert_eq!(fixture.open().snapshot(ServiceId::SingBox), outcome.state);
+            } else {
+                assert!(result.is_err());
+                assert_eq!(store.snapshot(ServiceId::SingBox), previous);
+                assert_eq!(fixture.manifest(), manifest);
+            }
+            fixture.no_temps();
+        }
     }
     #[test]
     fn bounded_metadata_serialization_refuses_growth_before_write() {
