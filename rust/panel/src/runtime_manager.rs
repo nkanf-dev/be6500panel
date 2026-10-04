@@ -366,6 +366,7 @@ struct PendingArtifact {
     checked: bool,
     previous_metadata: Option<store::Artifact>,
     metadata_committed: bool,
+    initial_owner: bool,
 }
 struct ArtifactRecovery {
     binding: ArtifactBinding,
@@ -378,6 +379,7 @@ struct Service {
     artifact_file: Option<crate::readiness_tun::FileIdentity>,
     artifact_directory: Option<crate::readiness_tun::FileIdentity>,
     config_root: PathBuf,
+    run_root: PathBuf,
     owner: Option<ProcessOwner>,
     run: Option<Run>,
     pending_check: Option<Candidate>,
@@ -471,30 +473,13 @@ impl Manager {
             if binding.service != service || binding.path.parent() != Some(binding.root.as_path()) {
                 return Err(Failure::InvalidInput);
             }
-            let run_root = run.join(service.as_str());
-            match fs::symlink_metadata(&run_root) {
-                Ok(meta) if !meta.is_dir() || meta.file_type().is_symlink() => {
-                    return Err(Failure::Process(ProcessError::UntrustedPath));
-                }
-                Ok(_) => (),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    fs::DirBuilder::new()
-                        .mode(0o700)
-                        .create(&run_root)
-                        .map_err(|_| Failure::Store(StoreError::Storage))?;
-                }
-                Err(_) => return Err(Failure::Store(StoreError::Storage)),
-            }
-            fs::set_permissions(&run_root, fs::Permissions::from_mode(0o700))
-                .map_err(|_| Failure::Store(StoreError::Storage))?;
-            Some(
-                ProcessOwner::new(
-                    service.into(),
-                    TrustedRoots::new(&binding.root, &config_root, run_root),
-                    limits.process,
-                )
-                .map_err(Failure::Process)?,
-            )
+            Some(Self::create_process_owner(
+                service,
+                &binding.root,
+                &config_root,
+                &run.join(service.as_str()),
+                limits,
+            )?)
         } else {
             None
         };
@@ -519,6 +504,7 @@ impl Manager {
             artifact_file,
             artifact_directory,
             config_root,
+            run_root: run.join(service.as_str()),
             owner,
             run: None,
             pending_check: None,
@@ -534,6 +520,35 @@ impl Manager {
             artifact_durability_uncertain: false,
             failure: None,
         })
+    }
+    fn create_process_owner(
+        service: ServiceId,
+        artifact_root: &Path,
+        config_root: &Path,
+        run_root: &Path,
+        limits: Limits,
+    ) -> Result<ProcessOwner, Failure> {
+        match fs::symlink_metadata(run_root) {
+            Ok(meta) if !meta.is_dir() || meta.file_type().is_symlink() => {
+                return Err(Failure::Process(ProcessError::UntrustedPath));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::DirBuilder::new()
+                    .mode(0o700)
+                    .create(run_root)
+                    .map_err(|_| Failure::Store(StoreError::Storage))?;
+            }
+            Err(_) => return Err(Failure::Store(StoreError::Storage)),
+        }
+        fs::set_permissions(run_root, fs::Permissions::from_mode(0o700))
+            .map_err(|_| Failure::Store(StoreError::Storage))?;
+        ProcessOwner::new(
+            service.into(),
+            TrustedRoots::new(artifact_root, config_root, run_root),
+            limits.process,
+        )
+        .map_err(Failure::Process)
     }
     fn error(
         &self,
@@ -712,6 +727,191 @@ impl Manager {
         }
         Ok(candidate)
     }
+    /// First artifact for a missing fixed owner. Typed Stage trust is required;
+    /// saved request metadata or boot files cannot authorize an executable.
+    /// Optional accepted config is checked; no Run or readiness is created.
+    pub fn initialize_staged_artifact(
+        &mut self,
+        service: ServiceId,
+        expected_generation: u64,
+        stage: Stage,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<Status, ManagerError> {
+        self.generation(service, expected_generation)
+            .map_err(|failure| self.error(service, failure, None))?;
+        if cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))
+        {
+            return Err(self.error(service, Failure::Process(ProcessError::Cancelled), None));
+        }
+        let slot = &self.services[service.index()];
+        if slot.binding.is_some()
+            || slot.owner.is_some()
+            || slot.run.is_some()
+            || slot.active_artifact.is_some()
+        {
+            return Err(self.error(service, Failure::Process(ProcessError::Busy), None));
+        }
+        let admitted = stage
+            .admitted()
+            .map_err(|error| self.error(service, Failure::ArtifactStage(error), None))?;
+        let binding = ArtifactBinding::trusted_local(
+            service,
+            admitted.root,
+            admitted.path,
+            admitted.extracted_sha256,
+            ArtifactProvenance::TrustedLocalModule,
+        );
+        let metadata = admitted.artifact.clone();
+        let previous_metadata = self.store.service_state(service.into()).artifact.clone();
+        let record = self.store.service_state(service.into()).current.clone();
+        let bytes = record
+            .as_ref()
+            .map(|record| self.store.read_config(service.into(), record))
+            .transpose()
+            .map_err(|error| self.error(service, Failure::Store(error), None))?;
+        self.store
+            .admit_artifact_intent(service.into(), expected_generation, Some(metadata.clone()))
+            .map_err(|error| self.error(service, Failure::Store(error), None))?;
+        let retained = stage
+            .into_retained()
+            .map_err(|error| self.error(service, Failure::ArtifactStage(error), None))?;
+        self.services[service.index()].pending_artifact = Some(PendingArtifact {
+            stage: retained,
+            generation: expected_generation,
+            checked: false,
+            previous_metadata,
+            metadata_committed: false,
+            initial_owner: true,
+        });
+        let owner = Self::create_process_owner(
+            service,
+            &binding.root,
+            &self.services[service.index()].config_root,
+            &self.services[service.index()].run_root,
+            self.limits,
+        );
+        match owner {
+            Ok(owner) => self.services[service.index()].owner = Some(owner),
+            Err(failure) => {
+                let recovery = self
+                    .abort_staged_artifact(service)
+                    .err()
+                    .map(|error| error.failure);
+                return Err(self.error(service, failure, recovery));
+            }
+        }
+        if let (Some(record), Some(bytes)) = (&record, &bytes) {
+            let spec = LaunchSpec::new(
+                &binding.path,
+                binding.sha256,
+                self.services[service.index()]
+                    .config_root
+                    .join(&record.file),
+                Sha256::digest(bytes).into(),
+                bytes.len() as u64,
+            );
+            let result = self.services[service.index()]
+                .owner
+                .as_mut()
+                .ok_or(ProcessError::Closed)
+                .and_then(|owner| owner.verify(spec, cancel.clone()));
+            if let Err(error) = result {
+                let recovery = self
+                    .abort_staged_artifact(service)
+                    .err()
+                    .map(|error| error.failure);
+                return Err(self.error(service, Failure::Process(error), recovery));
+            }
+        }
+        let verification = (|| {
+            if cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))
+            {
+                return Err(Failure::Process(ProcessError::Cancelled));
+            }
+            if self.store.service_state(service.into()).generation != expected_generation {
+                return Err(Failure::Generation);
+            }
+            let pending = self.services[service.index()]
+                .pending_artifact
+                .as_ref()
+                .ok_or(Failure::CheckPending)?;
+            pending.stage.admitted().map_err(Failure::ArtifactStage)?;
+            if let (Some(record), Some(bytes)) = (&record, &bytes)
+                && self
+                    .store
+                    .read_config(service.into(), record)
+                    .map_err(Failure::Store)?
+                    != *bytes
+            {
+                return Err(Failure::Store(StoreError::Verification));
+            }
+            Ok(())
+        })();
+        if let Err(failure) = verification {
+            let recovery = self
+                .abort_staged_artifact(service)
+                .err()
+                .map(|error| error.failure);
+            return Err(self.error(service, failure, recovery));
+        }
+        if let Some(pending) = self.services[service.index()].pending_artifact.as_mut() {
+            pending.checked = record.is_some();
+        }
+        drop(bytes);
+        let committed =
+            self.store
+                .set_artifact_intent(service.into(), expected_generation, Some(metadata));
+        let outcome = match committed {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let recovery = self
+                    .abort_staged_artifact(service)
+                    .err()
+                    .map(|error| error.failure);
+                return Err(self.error(service, Failure::Store(error), recovery));
+            }
+        };
+        if let Some(pending) = self.services[service.index()].pending_artifact.as_mut() {
+            pending.metadata_committed = true;
+        }
+        self.artifact_outcome(service, outcome.durability_error)
+            .map_err(|failure| self.error(service, failure, None))?;
+        let admitted = self.services[service.index()]
+            .pending_artifact
+            .as_ref()
+            .ok_or_else(|| self.error(service, Failure::CheckPending, None))?
+            .stage
+            .admitted();
+        if let Err(error) = admitted {
+            let recovery = self
+                .abort_staged_artifact(service)
+                .err()
+                .map(|error| error.failure);
+            return Err(self.error(service, Failure::ArtifactStage(error), recovery));
+        }
+        if let Err(failure) = self.bind_artifact(service, binding) {
+            let recovery = self
+                .abort_staged_artifact(service)
+                .err()
+                .map(|error| error.failure);
+            return Err(self.error(service, failure, recovery));
+        }
+        let pending = self.services[service.index()]
+            .pending_artifact
+            .take()
+            .ok_or_else(|| self.error(service, Failure::CheckPending, None))?;
+        let slot = &mut self.services[service.index()];
+        slot.active_artifact = Some(pending.stage);
+        slot.desired = false;
+        slot.failure = None;
+        slot.needs_recovery = false;
+        slot.resource_suspended = true;
+        self.status(service)
+    }
     /// Check typed verified stage with the SAME fixed service owner while its
     /// old Run remains live. No metadata/binding/Run activation is performed.
     /// A finite checker or cleanup failure retains the stage in this manager;
@@ -764,6 +964,7 @@ impl Manager {
             checked: false,
             previous_metadata: None,
             metadata_committed: false,
+            initial_owner: false,
         });
         let checked = self.services[service.index()]
             .owner
@@ -1176,6 +1377,18 @@ impl Manager {
             if let Some(pending) = self.services[service.index()].pending_artifact.as_mut() {
                 pending.metadata_committed = false;
             }
+        }
+        let initial = self.services[service.index()]
+            .pending_artifact
+            .as_ref()
+            .is_some_and(|pending| pending.initial_owner);
+        if initial {
+            if let Some(owner) = self.services[service.index()].owner.as_mut() {
+                owner
+                    .close()
+                    .map_err(|error| self.error(service, Failure::Process(error), None))?;
+            }
+            self.services[service.index()].owner.take();
         }
         if let Some(pending) = self.services[service.index()].pending_artifact.as_mut() {
             pending
@@ -1979,6 +2192,12 @@ IFS= read -r value < "$TMPDIR/wait"
             }
         }
         fn manager(&self) -> Manager {
+            self.manager_mode(true)
+        }
+        fn unbound(&self) -> Manager {
+            self.manager_mode(false)
+        }
+        fn manager_mode(&self, bound: bool) -> Manager {
             let count = self.cleanup.clone();
             let marker = self.root.join("run/sing-box/marker");
             let hooks = Hooks::new(
@@ -2006,13 +2225,15 @@ IFS= read -r value < "$TMPDIR/wait"
                 self.root.join("services"),
                 self.root.join("run"),
                 ArtifactBindings {
-                    sing_box: Some(ArtifactBinding::trusted_local(
-                        ServiceId::SingBox,
-                        self.root.join("artifacts"),
-                        self.root.join("artifacts/fake-core"),
-                        Sha256::digest(core.as_bytes()).into(),
-                        ArtifactProvenance::TrustedLocalModule,
-                    )),
+                    sing_box: bound.then(|| {
+                        ArtifactBinding::trusted_local(
+                            ServiceId::SingBox,
+                            self.root.join("artifacts"),
+                            self.root.join("artifacts/fake-core"),
+                            Sha256::digest(core.as_bytes()).into(),
+                            ArtifactProvenance::TrustedLocalModule,
+                        )
+                    }),
                     frpc: None,
                 },
                 hooks,
@@ -2132,6 +2353,74 @@ IFS= read -r value < "$TMPDIR/wait"
         assert!(manager.store.snapshot(service.into()).artifact.is_none());
         assert!(!manager.status(service).unwrap().durability_uncertain);
         assert!(manager.start(service).unwrap().active);
+        manager.close().unwrap();
+    }
+    #[test]
+    fn initial_metadata_precommit_failure_cleans_stage_and_owner_then_allows_same_manager_retry() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.unbound();
+        let service = ServiceId::SingBox;
+        let stage = fixture.stage();
+        let path = stage.admitted().unwrap().path.to_path_buf();
+        manager.store.inject_artifact_fault(false);
+        let failure = manager
+            .initialize_staged_artifact(service, 0, stage, None)
+            .unwrap_err();
+        assert_eq!(failure.failure, Failure::Store(StoreError::Storage));
+        assert_eq!(failure.recovery_failure, None);
+        assert!(!path.exists());
+        assert!(manager.services[service.index()].owner.is_none());
+        assert!(manager.services[service.index()].pending_artifact.is_none());
+        assert!(manager.store.snapshot(service.into()).artifact.is_none());
+        assert!(!manager.status(service).unwrap().artifact_available);
+        assert!(
+            manager
+                .initialize_staged_artifact(service, 0, fixture.stage(), None)
+                .unwrap()
+                .artifact_available
+        );
+        manager.close().unwrap();
+    }
+    #[test]
+    fn initial_metadata_postrename_uncertainty_keeps_unavailable_stage_until_explicit_abort() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.unbound();
+        let service = ServiceId::SingBox;
+        let stage = fixture.stage();
+        let path = stage.admitted().unwrap().path.to_path_buf();
+        manager.store.inject_artifact_fault(true);
+        let failure = manager
+            .initialize_staged_artifact(service, 0, stage, None)
+            .unwrap_err();
+        assert_eq!(failure.failure, Failure::Store(StoreError::Durability));
+        let status = manager.status(service).unwrap();
+        assert!(
+            !status.artifact_available
+                && !status.active
+                && !status.desired
+                && status.pid.is_none()
+                && status.durability_uncertain
+        );
+        assert!(path.exists());
+        assert!(manager.services[service.index()].owner.is_some());
+        assert!(manager.store.snapshot(service.into()).artifact.is_some());
+        assert_eq!(
+            manager.start(service).unwrap_err().failure,
+            Failure::CheckPending
+        );
+        manager.abort_staged_artifact(service).unwrap();
+        assert!(!path.exists());
+        assert!(manager.services[service.index()].owner.is_none());
+        assert!(manager.store.snapshot(service.into()).artifact.is_none());
+        assert!(!manager.status(service).unwrap().durability_uncertain);
+        assert!(
+            manager
+                .initialize_staged_artifact(service, 0, fixture.stage(), None)
+                .unwrap()
+                .artifact_available
+        );
         manager.close().unwrap();
     }
 }

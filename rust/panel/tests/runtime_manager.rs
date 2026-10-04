@@ -281,6 +281,19 @@ impl Fixture {
             control: self.control.clone(),
         }
     }
+    fn unbound_manager(&self) -> Guard {
+        Guard {
+            manager: Manager::open(
+                self.base.join("services"),
+                self.base.join("run"),
+                ArtifactBindings::default(),
+                self.hooks(),
+                limits(),
+            )
+            .unwrap(),
+            control: self.control.clone(),
+        }
+    }
     fn run(&self, service: ServiceId) -> PathBuf {
         self.base.join("run").join(service.as_str())
     }
@@ -1708,4 +1721,372 @@ fn changed_off_accepted_config_refuses_checked_artifact_before_metadata_or_start
     assert!(!manager.status(service).unwrap().desired);
     manager.abort_staged_artifact(service).unwrap();
     assert!(!path.exists());
+}
+
+#[test]
+fn initial_verified_artifact_without_configuration_stays_off_until_explicit_config_and_start() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.unbound_manager();
+    let service = ServiceId::SingBox;
+    assert!(!manager.status(service).unwrap().artifact_available);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "initial".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    let state = manager
+        .initialize_staged_artifact(service, 0, stage, None)
+        .unwrap();
+    assert_eq!(state.state, State::NotConfigured);
+    assert!(
+        state.artifact_available
+            && !state.desired
+            && !state.configured
+            && !state.ready
+            && !state.active
+            && state.pid.is_none()
+    );
+    assert_eq!(state.generation, 0);
+    assert!(fixture.control.borrow().events.is_empty());
+    assert!(!fixture.run(service).join("checks").exists());
+    manager.configure(service, 0, b"good\n", None).unwrap();
+    assert!(!fixture.run(service).join("starts").exists());
+    assert!(manager.start(service).unwrap().active);
+    manager.close().unwrap();
+    assert!(!path.exists());
+    assert!(fixture.base.join("artifacts/fake-core").exists());
+}
+#[test]
+fn initial_verified_artifact_checks_saved_configuration_without_implicit_start() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let service = ServiceId::SingBox;
+    {
+        let mut old = fixture.manager();
+        old.configure(service, 0, b"good\n", None).unwrap();
+    }
+    let mut manager = fixture.unbound_manager();
+    let generation = manager.status(service).unwrap().generation;
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "initial".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let state = manager
+        .initialize_staged_artifact(service, generation, stage, None)
+        .unwrap();
+    assert_eq!(state.generation, 1);
+    assert_eq!(state.state, State::Stopped);
+    assert!(
+        state.configured
+            && state.artifact_available
+            && !state.desired
+            && !state.ready
+            && state.pid.is_none()
+    );
+    assert!(fixture.run(service).join("checks").exists());
+    assert!(!fixture.run(service).join("starts").exists());
+    assert_eq!(manager.config(service).unwrap().unwrap().bytes(), b"good\n");
+    assert!(manager.start(service).unwrap().active);
+}
+#[test]
+fn initial_artifact_failed_checker_releases_slot_and_keeps_saved_config_metadata() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let service = ServiceId::SingBox;
+    {
+        let mut old = fixture.manager();
+        old.configure(service, 0, b"good\n", None).unwrap();
+    }
+    let mut manager = fixture.unbound_manager();
+    let manifest = fixture.manifest(service);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let bad = b"#!/bin/sh\nexit 9\n";
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(bad)),
+        compression: "none".into(),
+        version: "initial".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        &bad[..],
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    assert_eq!(
+        manager
+            .initialize_staged_artifact(service, 1, stage, None)
+            .unwrap_err()
+            .failure,
+        Failure::Process(ProcessError::CheckFailed)
+    );
+    assert!(!path.exists());
+    assert_eq!(fixture.manifest(service), manifest);
+    let status = manager.status(service).unwrap();
+    assert!(!status.artifact_available && !status.desired && status.pid.is_none());
+    let artifact = store::Artifact {
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        ..artifact
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    assert!(
+        manager
+            .initialize_staged_artifact(service, 1, stage, None)
+            .unwrap()
+            .artifact_available
+    );
+}
+
+#[test]
+fn initial_artifact_cancel_and_stale_generation_leave_no_owner_then_both_services_admit() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.unbound_manager();
+    let flag = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(5),
+        cancel: &flag,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "initial".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    assert_eq!(
+        manager
+            .initialize_staged_artifact(ServiceId::SingBox, 1, stage, None)
+            .unwrap_err()
+            .failure,
+        Failure::Generation
+    );
+    assert!(!path.exists());
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    assert_eq!(
+        manager
+            .initialize_staged_artifact(
+                ServiceId::SingBox,
+                0,
+                stage,
+                Some(Arc::new(AtomicBool::new(true)))
+            )
+            .unwrap_err()
+            .failure,
+        Failure::Process(ProcessError::Cancelled)
+    );
+    assert!(!path.exists());
+    assert!(
+        !manager
+            .status(ServiceId::SingBox)
+            .unwrap()
+            .artifact_available
+    );
+    for service in [ServiceId::SingBox, ServiceId::Frpc] {
+        let stage = Stage::from_reader(
+            &fixture.base.join("artifacts"),
+            &artifact,
+            HELPER.as_bytes(),
+            &budget,
+        )
+        .unwrap();
+        assert!(
+            manager
+                .initialize_staged_artifact(service, 0, stage, None)
+                .unwrap()
+                .artifact_available
+        );
+        manager.configure(service, 0, b"good\n", None).unwrap();
+        assert!(manager.start(service).unwrap().active);
+    }
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    assert_eq!(
+        manager
+            .initialize_staged_artifact(ServiceId::SingBox, 1, stage, None)
+            .unwrap_err()
+            .failure,
+        Failure::Process(ProcessError::Busy)
+    );
+    assert!(!path.exists());
+    manager.close().unwrap();
+}
+#[test]
+fn initial_artifact_changed_config_checker_refuses_without_accepted_metadata() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let service = ServiceId::SingBox;
+    {
+        let mut old = fixture.manager();
+        old.configure(service, 0, b"rewrite\n", None).unwrap_err();
+        old.configure(service, 0, b"good\n", None).unwrap();
+    }
+    let mut manager = fixture.unbound_manager();
+    let manifest = fixture.manifest(service);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let rewrite = b"#!/bin/sh\nprintf 'changed\\n' > \"$3\"\nexit 0\n";
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(rewrite)),
+        compression: "none".into(),
+        version: "rewrite".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        &rewrite[..],
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    assert!(
+        manager
+            .initialize_staged_artifact(service, 1, stage, None)
+            .is_err()
+    );
+    assert!(!path.exists());
+    assert_eq!(fixture.manifest(service), manifest);
+    assert!(!manager.status(service).unwrap().artifact_available);
+    assert!(!fixture.run(service).join("starts").exists());
+}
+
+#[test]
+fn initial_changed_stage_cleanup_failure_retains_handle_without_leaking_owner_slot() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let service = ServiceId::SingBox;
+    {
+        let mut old = fixture.manager();
+        old.configure(service, 0, b"good\n", None).unwrap();
+    }
+    let mut manager = fixture.unbound_manager();
+    let manifest = fixture.manifest(service);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(5),
+        cancel: &cancel,
+    };
+    // Synthetic checker replaces only its own staged binary name. This cannot
+    // turn the new name into cleanup authority or committed executable trust.
+    let helper=b"#!/bin/sh\ncase \"$1\" in check|verify) rm -f -- \"$0\"; printf 'foreign replacement' > \"$0\"; exit 9;; esac\nexit 9\n";
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(helper)),
+        compression: "none".into(),
+        version: "initial".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        &helper[..],
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    let failed = manager
+        .initialize_staged_artifact(service, 1, stage, None)
+        .unwrap_err();
+    assert_eq!(failed.failure, Failure::Process(ProcessError::CheckFailed));
+    assert!(matches!(
+        failed.recovery_failure,
+        Some(Failure::ArtifactStage(_))
+    ));
+    assert_eq!(fs::read(&path).unwrap(), b"foreign replacement");
+    assert_eq!(fixture.manifest(service), manifest);
+    assert!(!manager.status(service).unwrap().artifact_available);
+    assert_eq!(
+        manager.start(service).unwrap_err().failure,
+        Failure::CheckPending
+    );
+    fs::remove_file(path).unwrap();
+    manager.abort_staged_artifact(service).unwrap();
+    let metadata = store::Artifact {
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        ..artifact
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &metadata,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    assert!(
+        manager
+            .initialize_staged_artifact(service, 1, stage, None)
+            .unwrap()
+            .artifact_available
+    );
+    manager.close().unwrap();
 }
