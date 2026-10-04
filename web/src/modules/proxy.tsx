@@ -14,6 +14,7 @@ import { ConnectionAnalysis } from "./proxy/connection-analysis";
 import { ProxyDiagnostics } from "./proxy/diagnostics";
 import { ProxyPlanPreview } from "./proxy-plan-preview";
 import { NetworkDiagnosticPanel } from "./proxy/network-diagnostic-panel";
+import { LocalRulesEditor } from "./proxy/local-rules";
 
 export function ProxyPage() {
   const runtime = useRuntime("sing-box");
@@ -21,13 +22,15 @@ export function ProxyPage() {
   const [imported, setImported] = useState<ProxyNodes>();
   const [importing, setImporting] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [rulesPending, setRulesPending] = useState(false);
+  const [rulesVisited, setRulesVisited] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [tab, setTab] = useState("nodes");
   const nodes =
     imported || (resource.error === undefined ? resource.data : undefined);
-  const busy = importing || runtime.pending || capturing;
+  const busy = importing || runtime.pending || capturing || rulesPending;
   const guardedRuntime = { ...runtime, pending: busy };
   function openSetup(setup: GatewaySetup) {
     if (busy) return;
@@ -43,11 +46,28 @@ export function ProxyPage() {
         runtime={runtime}
         nodes={nodes}
         nodesLoading={resource.loading}
-        pending={importing || capturing}
+        pending={importing || capturing || rulesPending}
         refreshVersion={refreshVersion}
         onPending={setCapturing}
         onSetup={openSetup}
       />
+      <div className="form-actions" style={{ flexWrap: "wrap" }}>
+        <span className="text-muted text-xs">
+          精确域名直连、规则排序与订阅编辑
+        </span>
+        <Button
+          type="button"
+          size="small"
+          disabled={busy}
+          onClick={() => {
+            setRulesVisited(true);
+            setTab("rules");
+            setAdvancedOpen(true);
+          }}
+        >
+          编辑自定义规则
+        </Button>
+      </div>
       {resource.error !== undefined && (
         <ErrorState
           message={errorMessage(resource.error)}
@@ -87,6 +107,7 @@ export function ProxyPage() {
               {[
                 { id: "nodes", label: "节点" },
                 { id: "runtime", label: "运行管理" },
+                { id: "rules", label: "自定义规则" },
                 { id: "capture", label: "设备诊断" },
                 { id: "analysis", label: "连接分析" },
                 { id: "diagnostics", label: "诊断" },
@@ -98,7 +119,10 @@ export function ProxyPage() {
                   disabled={busy}
                   key={item.id}
                   aria-selected={tab === item.id}
-                  onClick={() => setTab(item.id)}
+                  onClick={() => {
+                    if (item.id === "rules") setRulesVisited(true);
+                    setTab(item.id);
+                  }}
                 >
                   {item.label}
                 </button>
@@ -149,8 +173,16 @@ export function ProxyPage() {
                 diagnostics={nodes?.diagnostics}
                 policySummary={nodes?.policySummary}
               />
-            ) : (
+            ) : tab === "preview" ? (
               <ProxyPlanPreview />
+            ) : null}
+            {rulesVisited && (
+              <div hidden={tab !== "rules"}>
+                <LocalRulesEditor
+                  runtime={runtime}
+                  onPending={setRulesPending}
+                />
+              </div>
             )}
           </fieldset>
         </div>
