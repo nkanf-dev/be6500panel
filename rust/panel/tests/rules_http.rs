@@ -395,7 +395,14 @@ fn authentication_origin_and_runtime_refusals_do_not_write() {
         403,
     );
     assert!(fixture.names().is_empty());
-    for path in ["/api/proxy/status", "/api/runtime", "/api/capture"] {
+    assert_eq!(
+        value(
+            &exchange(&service, &request("GET", "/api/runtime", "", &auth)),
+            503
+        )["error"]["code"],
+        "runtime_unavailable"
+    );
+    for path in ["/api/proxy/status", "/api/capture"] {
         value(&exchange(&service, &request("GET", path, "", &auth)), 404);
     }
 }

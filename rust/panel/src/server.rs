@@ -171,7 +171,24 @@ impl Service {
         read_budget: Duration,
         write_budget: Duration,
     ) -> io::Result<()> {
-        let result = self.respond(&mut stream, read_budget, write_budget);
+        let result = self.respond(&mut stream, read_budget, write_budget, None);
+        let _ = stream.shutdown(Shutdown::Both);
+        result
+    }
+
+    /// Borrows the one exclusive fixed-service owner for an explicit request.
+    /// Main does not activate this until production ownership is qualified.
+    pub fn handle_with_runtime(
+        &self,
+        mut stream: TcpStream,
+        runtime: &mut crate::runtime_http::RuntimeHttp,
+    ) -> io::Result<()> {
+        let result = self.respond(
+            &mut stream,
+            http::REQUEST_DEADLINE,
+            http::WRITE_DEADLINE,
+            Some(runtime),
+        );
         let _ = stream.shutdown(Shutdown::Both);
         result
     }
@@ -181,6 +198,7 @@ impl Service {
         stream: &mut TcpStream,
         read_budget: Duration,
         write_budget: Duration,
+        runtime: Option<&mut crate::runtime_http::RuntimeHttp>,
     ) -> io::Result<()> {
         let deadline = Instant::now() + read_budget;
         let mut buffer = [0_u8; MAX_HEADER_BYTES + 1];
@@ -242,7 +260,14 @@ impl Service {
                 Err(error) => return write_http_error(stream, write_budget, error),
             };
         let peer = stream.peer_addr()?.ip();
-        let mut writer = DeadlineWriter::new(stream, write_budget);
+        let response_budget = if crate::runtime_http::is_runtime_path(request.path())
+            && request.method == Method::Post
+        {
+            write_budget.max(Duration::from_secs(90))
+        } else {
+            write_budget
+        };
+        let mut writer = DeadlineWriter::new(stream, response_budget);
         let api = request.path() == "/api" || request.path().starts_with("/api/");
         let public = matches!(
             request.path(),
@@ -263,6 +288,13 @@ impl Service {
                 head_only,
                 &[],
             );
+        }
+        if crate::runtime_http::is_runtime_path(request.path()) {
+            drop(auth);
+            let Some(runtime) = runtime else {
+                return crate::runtime_http::unavailable(&mut writer, head_only);
+            };
+            return runtime.respond(&mut writer, request.target, request.method, &body);
         }
         if rules_http::is_rules_path(request.path()) {
             // Session lock never covers draft filesystem I/O or streaming.

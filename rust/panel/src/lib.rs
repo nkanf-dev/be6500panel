@@ -22,6 +22,8 @@ pub mod readiness_tun;
 #[cfg(unix)]
 pub mod rules_http;
 #[cfg(unix)]
+pub mod runtime_http;
+#[cfg(unix)]
 pub mod runtime_manager;
 #[cfg(unix)]
 pub mod runtime_process;

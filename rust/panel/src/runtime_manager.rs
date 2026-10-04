@@ -19,7 +19,7 @@ use crate::runtime_store::{
     self as store, Candidate, ConfigRecord, ReadinessProof, RuntimeStore, StoreError,
     VerificationProof,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs;
@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ServiceId {
     #[serde(rename = "sing-box")]
     SingBox,

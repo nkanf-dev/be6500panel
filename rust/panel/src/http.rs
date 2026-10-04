@@ -7,6 +7,7 @@ pub const MAX_HEADER_BYTES: usize = 16 * 1024;
 pub const MAX_HEADERS: usize = 64;
 pub const MAX_TARGET_BYTES: usize = 2048;
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
+pub const MAX_RUNTIME_BODY_BYTES: usize = 2 << 20;
 pub const MAX_LOGIN_BODY_BYTES: usize = 4 * 1024;
 pub const MAX_RULES_BODY_BYTES: usize = 256 * 1024;
 pub const MAX_HOST_BYTES: usize = 512;
@@ -214,6 +215,12 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
                 | "/api/proxy/local-rules/preview"
                 | "/api/proxy/local-rules/apply"
                 | "/api/proxy/select"
+                | "/api/runtime/configure"
+                | "/api/runtime/start"
+                | "/api/runtime/stop"
+                | "/api/runtime/restart"
+                | "/api/runtime/restore"
+                | "/api/runtime/acquire"
         )
     {
         return Err(error(ErrorKind::MethodNotAllowed, bytes));
@@ -229,6 +236,7 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
     let limit = match request.path() {
         "/api/session/login" => MAX_LOGIN_BODY_BYTES,
         "/api/proxy/local-rules" | "/api/proxy/local-rules/preview" => MAX_RULES_BODY_BYTES,
+        "/api/runtime/configure" => MAX_RUNTIME_BODY_BYTES,
         _ => MAX_BODY_BYTES,
     };
     if request.content_length > limit {
