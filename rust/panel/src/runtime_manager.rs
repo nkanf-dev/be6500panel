@@ -714,6 +714,10 @@ impl Manager {
             })
             .transpose()
     }
+    /// Stored bounded request only. Does not adopt/hash any boot executable.
+    pub(crate) fn saved_artifact_request(&self, service: ServiceId) -> Option<store::Artifact> {
+        self.store.service_state(service.into()).artifact.clone()
+    }
     pub(crate) fn artifact_root(&self, service: ServiceId) -> Option<&Path> {
         self.services[service.index()]
             .binding

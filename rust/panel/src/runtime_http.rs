@@ -25,6 +25,12 @@ struct Retry {
     attempts: u32,
     next: Option<Instant>,
     exhausted: bool,
+    failure: Option<&'static str>,
+}
+impl Retry {
+    fn defer_after(&mut self, entered: Instant, completed: Instant, delay: Duration) {
+        self.next = Some(entered.max(completed) + delay);
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryResult {
@@ -32,6 +38,43 @@ pub enum RecoveryResult {
     Started,
     Deferred,
     Exhausted,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestoreError {
+    Runtime(ManagerError),
+    Source(SourceError),
+    SourceUnavailable,
+}
+impl std::fmt::Display for RestoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.code())
+    }
+}
+impl std::error::Error for RestoreError {}
+impl RestoreError {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Runtime(error) => match error.failure {
+                Failure::OperationDeadline
+                | Failure::Store(StoreError::OperationDeadline)
+                | Failure::Process(ProcessError::OperationDeadline)
+                | Failure::Process(ProcessError::CheckDeadline)
+                | Failure::Process(ProcessError::StopDeadline) => "operation_timeout",
+                Failure::Cancelled
+                | Failure::Store(StoreError::Cancelled)
+                | Failure::Process(ProcessError::Cancelled) => "operation_cancelled",
+                _ => error.failure.code(),
+            },
+            Self::SourceUnavailable => "artifact_acquisition_unavailable",
+            Self::Source(SourceError::Deadline | SourceError::Stage(StageError::Deadline)) => {
+                "operation_timeout"
+            }
+            Self::Source(SourceError::Cancelled | SourceError::Stage(StageError::Cancelled)) => {
+                "operation_cancelled"
+            }
+            Self::Source(_) => "artifact_acquire_failed",
+        }
+    }
 }
 struct ArtifactRoot {
     path: PathBuf,
@@ -147,80 +190,103 @@ impl RuntimeHttp {
         Ok(())
     }
     fn acquire(&mut self, writer: &mut impl Write, input: Acquire) -> io::Result<()> {
-        let operation_deadline = Instant::now() + Duration::from_secs(90);
-        let Some(acquisition) = self.acquisition.as_ref() else {
-            return error(
+        match self.acquire_artifact(
+            input.service,
+            input.artifact.into_artifact(),
+            input.generation,
+        ) {
+            Ok(status) => write_json(writer, 200, "OK", &self.wire(status), false),
+            Err(RestoreError::Runtime(error)) => failure(writer, self, error, false),
+            Err(RestoreError::Source(error)) => source_failure(writer, self, input.service, error),
+            Err(RestoreError::SourceUnavailable) => error(
                 writer,
                 503,
                 "Service Unavailable",
                 "artifact_acquisition_unavailable",
                 "Artifact acquisition is not configured.",
                 false,
-            );
-        };
-        let artifact = input.artifact.into_artifact();
-        if acquisition.source.validate_artifact(&artifact).is_err() {
-            return source_failure(writer, self, input.service, SourceError::Input);
+            ),
         }
-        let root = &acquisition.roots[index(input.service)];
-        if let Err(error) = root.checked() {
-            return source_failure(writer, self, input.service, error);
-        }
-        let status = match self.manager.status(input.service) {
-            Ok(status) => status,
-            Err(error) => return failure(writer, self, error, false),
-        };
-        let expected = input.generation.unwrap_or(status.generation);
-        let admitted =
-            match self
-                .manager
-                .admit_artifact_acquisition(input.service, expected, &root.path)
-            {
-                Ok(status) => status,
-                Err(error) => return failure(writer, self, error, false),
-            };
-        // Configured finite checker/withdrawal/readiness/rollback budgets are
-        // reserved before network; too-large combinations refuse acquisition.
-        let fetch_budget = match self.manager.acquisition_fetch_budget() {
-            Ok(duration) => duration,
-            Err(failed) => {
-                return failure(
-                    writer,
-                    self,
-                    ManagerError {
-                        service: Some(input.service),
-                        failure: failed,
-                        recovery_failure: None,
-                        generation: expected,
-                        owned_pid: admitted.pid,
-                    },
-                    false,
-                );
-            }
-        };
+    }
+    /// Ordinary in-process acquisition used by explicit HTTP and startup. The
+    /// saved request remains intent; only this actual fetch creates Stage trust.
+    fn acquire_artifact(
+        &mut self,
+        service: ServiceId,
+        artifact: crate::runtime_store::Artifact,
+        generation: Option<u64>,
+    ) -> Result<Status, RestoreError> {
+        let operation_deadline = Instant::now() + Duration::from_secs(90);
+        let acquisition = self
+            .acquisition
+            .as_ref()
+            .ok_or(RestoreError::SourceUnavailable)?;
+        acquisition
+            .source
+            .validate_artifact(&artifact)
+            .map_err(RestoreError::Source)?;
+        let root = &acquisition.roots[index(service)];
+        root.checked().map_err(RestoreError::Source)?;
+        let status = self
+            .manager
+            .status(service)
+            .map_err(RestoreError::Runtime)?;
+        let expected = generation.unwrap_or(status.generation);
+        let admitted = self
+            .manager
+            .admit_artifact_acquisition(service, expected, &root.path)
+            .map_err(RestoreError::Runtime)?;
+        let fetch_budget = self.manager.acquisition_fetch_budget().map_err(|failure| {
+            RestoreError::Runtime(ManagerError {
+                service: Some(service),
+                failure,
+                recovery_failure: None,
+                generation: expected,
+                owned_pid: admitted.pid,
+            })
+        })?;
         let cancel = Arc::new(AtomicBool::new(false));
         let budget = crate::readiness_tun::Budget {
             deadline: operation_deadline.min(Instant::now() + fetch_budget),
             cancel: &cancel,
         };
-        let stage = match acquisition.source.fetch(&root.path, &artifact, &budget) {
-            Ok(stage) => stage,
-            Err(error) => return source_failure(writer, self, input.service, error),
-        };
-        if let Err(error) = root.checked() {
-            return source_failure(writer, self, input.service, error);
+        let stage = acquisition
+            .source
+            .fetch(&root.path, &artifact, &budget)
+            .map_err(RestoreError::Source)?;
+        root.checked().map_err(RestoreError::Source)?;
+        self.manager
+            .acquire_verified_stage(service, expected, stage, operation_deadline, cancel)
+            .map_err(RestoreError::Runtime)
+    }
+    fn restore_service(&mut self, service: ServiceId) -> Result<Status, RestoreError> {
+        let status = self
+            .manager
+            .status(service)
+            .map_err(RestoreError::Runtime)?;
+        if !status.configured {
+            return Err(RestoreError::Runtime(ManagerError {
+                service: Some(service),
+                failure: Failure::NotConfigured,
+                recovery_failure: None,
+                generation: status.generation,
+                owned_pid: status.pid,
+            }));
         }
-        let result = self.manager.acquire_verified_stage(
-            input.service,
-            expected,
-            stage,
-            operation_deadline,
-            cancel,
-        );
-        match result {
-            Ok(status) => write_json(writer, 200, "OK", &self.wire(status), false),
-            Err(error) => failure(writer, self, error, false),
+        if !status.artifact_available {
+            let metadata =
+                self.manager
+                    .saved_artifact_request(service)
+                    .ok_or(RestoreError::Runtime(ManagerError {
+                        service: Some(service),
+                        failure: Failure::ArtifactUnavailable,
+                        recovery_failure: None,
+                        generation: status.generation,
+                        owned_pid: status.pid,
+                    }))?;
+            self.acquire_artifact(service, metadata, Some(status.generation))?;
         }
+        self.manager.start(service).map_err(RestoreError::Runtime)
     }
     /// Load only. Even saved true intent executes no child/check/hook until
     /// the owner explicitly calls restore_saved or poll_recovery.
@@ -264,7 +330,7 @@ impl RuntimeHttp {
         Ok(())
     }
     /// Explicit startup integration call, not a constructor or GET side effect.
-    pub fn restore_saved(&mut self) -> Vec<(ServiceId, Result<Status, ManagerError>)> {
+    pub fn restore_saved(&mut self) -> Vec<(ServiceId, Result<Status, RestoreError>)> {
         let mut outcomes = Vec::with_capacity(2);
         if self.closing {
             return outcomes;
@@ -273,8 +339,16 @@ impl RuntimeHttp {
         for service in SERVICES {
             if self.desired[index(service)] {
                 self.retry[index(service)] = Retry::default();
-                let result = self.manager.start(service);
-                if result.is_err() {
+                if self
+                    .manager
+                    .status(service)
+                    .is_ok_and(|status| !status.configured)
+                {
+                    continue;
+                }
+                let result = self.restore_service(service);
+                if let Err(error) = &result {
+                    self.retry[index(service)].failure = Some(error.code());
                     self.retry[index(service)].attempts = 1;
                     self.retry[index(service)].next = Some(Instant::now() + Duration::from_secs(2));
                 }
@@ -300,6 +374,9 @@ impl RuntimeHttp {
             if !exited && !off_cleanup && (!self.desired[slot] || status.pid.is_some()) {
                 continue;
             }
+            if !status.configured && self.desired[slot] && !exited && !off_cleanup {
+                continue;
+            }
             let retry = &mut self.retry[slot];
             if retry.exhausted {
                 continue;
@@ -322,7 +399,7 @@ impl RuntimeHttp {
                         }
                         Err(_) => {
                             retry.attempts += 1;
-                            retry.next = Some(now + Duration::from_secs(2));
+                            retry.defer_after(now, Instant::now(), Duration::from_secs(2));
                             results.push((service, RecoveryResult::Deferred));
                             continue;
                         }
@@ -336,7 +413,7 @@ impl RuntimeHttp {
                     results.push((service, RecoveryResult::Exhausted));
                     continue;
                 }
-                retry.next = Some(now + Duration::from_secs(2));
+                retry.defer_after(now, Instant::now(), Duration::from_secs(2));
                 continue;
             }
             if retry.attempts >= MAX_RECOVERY_ATTEMPTS {
@@ -347,7 +424,6 @@ impl RuntimeHttp {
             }
             retry.attempts += 1;
             let seconds = (2u64 << retry.attempts.saturating_sub(1).min(5)).min(60);
-            retry.next = Some(now + Duration::from_secs(seconds));
             let cleaned = if exited {
                 self.manager.handle_exit(service)
             } else if off_cleanup {
@@ -356,6 +432,7 @@ impl RuntimeHttp {
                 Ok(status)
             };
             let Ok(cleaned) = cleaned else {
+                retry.defer_after(now, Instant::now(), Duration::from_secs(seconds));
                 results.push((service, RecoveryResult::Deferred));
                 continue;
             };
@@ -367,16 +444,22 @@ impl RuntimeHttp {
                 continue;
             }
             if cleaned.pid.is_some() {
+                retry.defer_after(now, Instant::now(), Duration::from_secs(seconds));
                 results.push((service, RecoveryResult::Deferred));
                 continue;
             }
-            match self.manager.start(service) {
+            let restored = self.restore_service(service);
+            let retry = &mut self.retry[slot];
+            match restored {
                 Ok(_) => {
                     retry.next = None;
+                    retry.failure = None;
                     self.restarts[slot] = self.restarts[slot].saturating_add(1);
                     results.push((service, RecoveryResult::Started));
                 }
-                Err(_) => {
+                Err(error) => {
+                    retry.defer_after(now, Instant::now(), Duration::from_secs(seconds));
+                    retry.failure = Some(error.code());
                     results.push((service, RecoveryResult::Deferred));
                 }
             }
@@ -396,6 +479,9 @@ impl RuntimeHttp {
         wire.restarts = self.restarts[slot];
         wire.recovery_attempts = self.retry[slot].attempts;
         wire.recovery_exhausted = self.retry[slot].exhausted;
+        if self.retry[slot].failure.is_some() {
+            wire.error_code = self.retry[slot].failure;
+        }
         wire.intent_durability_uncertain = self.intent_uncertain;
         wire.needs_recovery |=
             self.retry[slot].exhausted || self.retry[slot].next.is_some() || self.intent_uncertain;
@@ -1006,4 +1092,67 @@ fn write_json(
         output.write_all(b"\n")?;
     }
     output.flush()
+}
+
+#[cfg(test)]
+mod startup_retry_tests {
+    use super::*;
+    #[test]
+    fn slow_failure_gets_full_backoff_from_completion_not_entry() {
+        let entered = Instant::now();
+        let completed = entered + Duration::from_secs(45);
+        let mut retry = Retry::default();
+        retry.defer_after(entered, completed, Duration::from_secs(4));
+        assert_eq!(retry.next, Some(completed + Duration::from_secs(4)));
+        assert!(retry.next.unwrap() > completed);
+        // Synthetic caller time can be later than the real clock in fixed
+        // recovery fixtures. Never make that caller's next attempt immediate.
+        retry.defer_after(completed, entered, Duration::from_secs(8));
+        assert_eq!(retry.next, Some(completed + Duration::from_secs(8)));
+    }
+    #[test]
+    fn saved_restore_error_keeps_nested_stage_timeout_and_cancellation() {
+        for (error, code) in [
+            (SourceError::Deadline, "operation_timeout"),
+            (
+                SourceError::Stage(StageError::Deadline),
+                "operation_timeout",
+            ),
+            (SourceError::Cancelled, "operation_cancelled"),
+            (
+                SourceError::Stage(StageError::Cancelled),
+                "operation_cancelled",
+            ),
+        ] {
+            assert_eq!(RestoreError::Source(error).code(), code);
+        }
+        for failure in [
+            Failure::OperationDeadline,
+            Failure::Store(StoreError::OperationDeadline),
+            Failure::Process(ProcessError::OperationDeadline),
+        ] {
+            let error = ManagerError {
+                service: Some(ServiceId::SingBox),
+                failure,
+                recovery_failure: None,
+                generation: 1,
+                owned_pid: None,
+            };
+            assert_eq!(RestoreError::Runtime(error).code(), "operation_timeout");
+        }
+        for failure in [
+            Failure::Cancelled,
+            Failure::Store(StoreError::Cancelled),
+            Failure::Process(ProcessError::Cancelled),
+        ] {
+            let error = ManagerError {
+                service: Some(ServiceId::SingBox),
+                failure,
+                recovery_failure: None,
+                generation: 1,
+                owned_pid: None,
+            };
+            assert_eq!(RestoreError::Runtime(error).code(), "operation_cancelled");
+        }
+    }
 }

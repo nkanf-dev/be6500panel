@@ -839,8 +839,7 @@ fn exit_cleanup_precedes_relaunch_and_eight_attempts_bound_crash_loop() {
         &service,
         &mut owner.runtime,
         "/api/runtime/configure",
-        Some(&json!({"service":"sing-box","config":"good
-","generation":0})),
+        Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
         &cookie,
         200,
     );
@@ -895,7 +894,7 @@ fn exit_cleanup_precedes_relaunch_and_eight_attempts_bound_crash_loop() {
                     .poll_recovery(now + Duration::from_secs(1))
                     .is_empty()
             );
-            now += Duration::from_secs(2);
+            now = now.max(Instant::now()) + Duration::from_secs(2);
             let results = owner.runtime.poll_recovery(now);
             assert_eq!(
                 results,
@@ -926,7 +925,7 @@ fn exit_cleanup_precedes_relaunch_and_eight_attempts_bound_crash_loop() {
                     .poll_recovery(now + Duration::from_secs(1))
                     .is_empty()
             );
-            now += Duration::from_secs(2);
+            now = now.max(Instant::now()) + Duration::from_secs(2);
             assert_eq!(
                 owner.runtime.poll_recovery(now),
                 vec![(ServiceId::SingBox, RecoveryResult::Started)]
@@ -1843,4 +1842,383 @@ fn pinned_artifact_directory_replacement_and_bad_dtos_refuse_before_download() {
         std::io::ErrorKind::WouldBlock
     );
     assert!(!fixture.root.join("services/sing-box/state.json").exists());
+}
+
+#[test]
+fn saved_on_missing_artifact_rebuilds_only_from_explicit_startup_call() {
+    use be6500_panel::artifact_source::SourcePolicy;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let count = requests.clone();
+    let peer = thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = listener.accept().unwrap().0;
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut bytes = [0u8; 1024];
+            let _ = stream.read(&mut bytes).unwrap();
+            count.fetch_add(1, Ordering::Relaxed);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+                HELPER.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(HELPER.as_bytes()).unwrap();
+        }
+    });
+    {
+        let mut owner = fixture.saved_runtime();
+        owner
+            .runtime
+            .load_artifact_source(
+                SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+                &fixture.root.join("artifacts"),
+                &fixture.root.join("artifacts"),
+            )
+            .unwrap();
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/configure",
+            Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+            &cookie,
+            200,
+        );
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/acquire",
+            Some(&acquire_payload(
+                &format!("http://{address}/core"),
+                HELPER.as_bytes(),
+                "restore-fixture",
+            )),
+            &cookie,
+            200,
+        );
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/start",
+            Some(&json!({"service":"sing-box"})),
+            &cookie,
+            200,
+        );
+    }
+    assert_eq!(
+        fs::read_dir(fixture.root.join("artifacts"))
+            .unwrap()
+            .count(),
+        1,
+        "managed stage removed on closed owner, local fake fixture not adopted"
+    );
+    fs::remove_file(fixture.root.join("run/sing-box/started")).unwrap();
+    let mut owner = fixture.unbound_runtime();
+    owner.runtime.load_saved_intent(&fixture.root).unwrap();
+    owner
+        .runtime
+        .load_artifact_source(
+            SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+            &fixture.root.join("artifacts"),
+            &fixture.root.join("artifacts"),
+        )
+        .unwrap();
+    let status = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(status["services"][0]["artifactAvailable"], false);
+    assert_eq!(status["services"][0]["desired"], true);
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(Instant::now() + Duration::from_secs(600))
+            .is_empty()
+    );
+    assert_eq!(requests.load(Ordering::Relaxed), 1);
+    assert!(!fixture.root.join("run/sing-box/started").exists());
+    let restored = owner.runtime.restore_saved();
+    assert_eq!(restored.len(), 1);
+    assert!(restored[0].1.as_ref().unwrap().active);
+    assert_eq!(requests.load(Ordering::Relaxed), 2);
+    peer.join().unwrap();
+    let status = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(status["services"][0]["version"], "restore-fixture");
+    assert_eq!(status["services"][0]["generation"], 1);
+    assert_eq!(status["services"][0]["state"], "running");
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+}
+#[test]
+fn saved_off_missing_artifact_never_fetches_and_saved_on_failures_retry_finitely() {
+    use be6500_panel::artifact_source::SourcePolicy;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let missing = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    {
+        let mut owner = fixture.saved_runtime();
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/configure",
+            Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+            &cookie,
+            200,
+        );
+    }
+    let path = fixture.root.join("services/sing-box/state.json");
+    let mut metadata: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    metadata["artifact"] = json!({"url":format!("http://{missing}/core"),"sha256":format!("{:x}",Sha256::digest(HELPER.as_bytes())),"compression":"none","version":"retained"});
+    fs::write(&path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+    let desired_path = fixture.root.join("desired-services.json");
+    fs::write(&desired_path, b"{\"sing-box\":false,\"frpc\":false}").unwrap();
+    fs::set_permissions(&desired_path, fs::Permissions::from_mode(0o600)).unwrap();
+    {
+        let mut owner = fixture.unbound_runtime();
+        owner.runtime.load_saved_intent(&fixture.root).unwrap();
+        owner
+            .runtime
+            .load_artifact_source(
+                SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+                &fixture.root.join("artifacts"),
+                &fixture.root.join("artifacts"),
+            )
+            .unwrap();
+        assert!(owner.runtime.restore_saved().is_empty());
+        assert!(
+            owner
+                .runtime
+                .poll_recovery(Instant::now() + Duration::from_secs(600))
+                .is_empty()
+        );
+    }
+    fs::write(&desired_path, b"{\"sing-box\":true,\"frpc\":false}").unwrap();
+    let manifest = fs::read(&path).unwrap();
+    let mut owner = fixture.unbound_runtime();
+    owner.runtime.load_saved_intent(&fixture.root).unwrap();
+    owner
+        .runtime
+        .load_artifact_source(
+            SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+            &fixture.root.join("artifacts"),
+            &fixture.root.join("artifacts"),
+        )
+        .unwrap();
+    let result = owner.runtime.restore_saved();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].1.is_err());
+    let base = Instant::now();
+    for attempt in 1..=8 {
+        let _ = owner
+            .runtime
+            .poll_recovery(base + Duration::from_secs(attempt * 61));
+    }
+    let status = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(status["services"][0]["recoveryAttempts"], 8);
+    assert_eq!(status["services"][0]["recoveryExhausted"], true);
+    assert_eq!(
+        status["services"][0]["errorCode"],
+        "artifact_acquire_failed"
+    );
+    assert_eq!(status["services"][0]["desired"], true);
+    assert_eq!(fs::read(&path).unwrap(), manifest);
+    assert!(!fixture.root.join("run/sing-box/started").exists());
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    assert!(owner.runtime.restore_saved().is_empty());
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(base + Duration::from_secs(10000))
+            .is_empty()
+    );
+}
+
+#[test]
+fn saved_on_unconfigured_or_missing_source_returns_truthfully_without_download_or_config_reset() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let desired = fixture.root.join("desired-services.json");
+    fs::write(&desired, b"{\"sing-box\":true,\"frpc\":false}").unwrap();
+    fs::set_permissions(&desired, fs::Permissions::from_mode(0o600)).unwrap();
+    {
+        let mut owner = fixture.unbound_runtime();
+        owner.runtime.load_saved_intent(&fixture.root).unwrap();
+        assert!(owner.runtime.restore_saved().is_empty());
+        assert!(
+            owner
+                .runtime
+                .poll_recovery(Instant::now() + Duration::from_secs(600))
+                .is_empty()
+        );
+        assert!(!fixture.root.join("services/sing-box/state.json").exists());
+    }
+    {
+        let mut owner = fixture.runtime();
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/configure",
+            Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+            &cookie,
+            200,
+        );
+    }
+    let metadata_path = fixture.root.join("services/sing-box/state.json");
+    let mut metadata: Value = serde_json::from_slice(&fs::read(&metadata_path).unwrap()).unwrap();
+    metadata["artifact"] = json!({"url":"https://example.invalid/unavailable-source","sha256":"ab".repeat(32),"compression":"none","version":"saved"});
+    fs::write(&metadata_path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+    let previous = fs::read(&metadata_path).unwrap();
+    let mut owner = fixture.unbound_runtime();
+    owner.runtime.load_saved_intent(&fixture.root).unwrap();
+    let failed = owner.runtime.restore_saved();
+    assert_eq!(failed.len(), 1);
+    assert_eq!(
+        failed[0].1,
+        Err(be6500_panel::runtime_http::RestoreError::SourceUnavailable)
+    );
+    let status = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(
+        status["services"][0]["errorCode"],
+        "artifact_acquisition_unavailable"
+    );
+    assert_eq!(status["services"][0]["configured"], true);
+    assert_eq!(status["services"][0]["desired"], true);
+    assert_eq!(status["services"][0]["needsRecovery"], true);
+    assert_eq!(fs::read(&metadata_path).unwrap(), previous);
+    assert!(!fixture.root.join("run/sing-box/started").exists());
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+}
+#[test]
+fn startup_rebuild_bad_digest_keeps_saved_metadata_and_accepted_bytes_then_off_cancels_retry() {
+    use be6500_panel::artifact_source::{SourceError, SourcePolicy};
+    use be6500_panel::artifact_stage::StageError;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    {
+        let mut owner = fixture.runtime();
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime/configure",
+            Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+            &cookie,
+            200,
+        );
+    }
+    let (url, peer) = artifact_download_fixture(HELPER.as_bytes().to_vec());
+    let path = fixture.root.join("services/sing-box/state.json");
+    let mut metadata: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    metadata["artifact"] =
+        json!({"url":url,"sha256":"00".repeat(32),"compression":"none","version":"corrupt-source"});
+    fs::write(&path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+    let previous = fs::read(&path).unwrap();
+    let desired = fixture.root.join("desired-services.json");
+    fs::write(&desired, b"{\"sing-box\":true,\"frpc\":false}").unwrap();
+    fs::set_permissions(&desired, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut owner = fixture.unbound_runtime();
+    owner.runtime.load_saved_intent(&fixture.root).unwrap();
+    owner
+        .runtime
+        .load_artifact_source(
+            SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+            &fixture.root.join("artifacts"),
+            &fixture.root.join("artifacts"),
+        )
+        .unwrap();
+    let failure = owner.runtime.restore_saved();
+    peer.join().unwrap();
+    assert_eq!(failure.len(), 1);
+    assert_eq!(
+        failure[0].1,
+        Err(be6500_panel::runtime_http::RestoreError::Source(
+            SourceError::Stage(StageError::Digest)
+        ))
+    );
+    assert_eq!(fs::read(&path).unwrap(), previous);
+    assert_eq!(
+        fs::read(fixture.root.join("services/sing-box/config-1.json")).unwrap(),
+        b"good\n"
+    );
+    assert_eq!(
+        fs::read_dir(fixture.root.join("artifacts"))
+            .unwrap()
+            .count(),
+        1
+    );
+    assert!(!fixture.root.join("run/sing-box/started").exists());
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(Instant::now() + Duration::from_secs(1000))
+            .is_empty()
+    );
+    assert!(owner.runtime.restore_saved().is_empty());
 }
