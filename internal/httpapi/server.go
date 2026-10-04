@@ -39,7 +39,7 @@ type Config struct {
 	Runtime           *managedruntime.Manager
 	Control           *control.Manager
 	DataDir           string
-	Capture           *capture.Controller
+	Capture           capture.Backend
 	Traffic           *traffic.Collector
 	TrafficError      string
 	Telemetry         *telemetry.Collector
@@ -70,7 +70,7 @@ type Server struct {
 	control               *control.Manager
 	dataDir               string
 	proxyState            *proxyState
-	capture               *capture.Controller
+	capture               capture.Backend
 	traffic               *traffic.Collector
 	trafficError          string
 	telemetry             *telemetry.Collector

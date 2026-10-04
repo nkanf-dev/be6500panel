@@ -13,7 +13,7 @@ import (
 // refreshDesiredCapture follows already explicitly authorized MAC selection.
 // Deployment must disable desired capture before restarting the panel if rule
 // activation has not been authorized. Disabled/retained checkboxes never apply.
-func refreshDesiredCapture(ctx context.Context, manager *managedruntime.Manager, controller *capture.Controller, configuration *control.Manager, logger *slog.Logger) {
+func refreshDesiredCapture(ctx context.Context, manager *managedruntime.Manager, controller capture.Backend, configuration *control.Manager, logger *slog.Logger) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
