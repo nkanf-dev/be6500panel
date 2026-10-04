@@ -8,6 +8,7 @@ pub const MAX_HEADERS: usize = 64;
 pub const MAX_TARGET_BYTES: usize = 2048;
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 pub const MAX_LOGIN_BODY_BYTES: usize = 4 * 1024;
+pub const MAX_RULES_BODY_BYTES: usize = 256 * 1024;
 pub const MAX_HOST_BYTES: usize = 512;
 pub const MAX_ORIGIN_BYTES: usize = 1024;
 pub const MAX_COOKIE_BYTES: usize = 4 * 1024;
@@ -205,7 +206,15 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
         return Err(bad());
     }
     if method == Method::Post
-        && !matches!(request.path(), "/api/session/login" | "/api/session/logout")
+        && !matches!(
+            request.path(),
+            "/api/session/login"
+                | "/api/session/logout"
+                | "/api/proxy/local-rules"
+                | "/api/proxy/local-rules/preview"
+                | "/api/proxy/local-rules/apply"
+                | "/api/proxy/select"
+        )
     {
         return Err(error(ErrorKind::MethodNotAllowed, bytes));
     }
@@ -217,10 +226,10 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
     if method != Method::Post && request.content_length != 0 {
         return Err(bad());
     }
-    let limit = if request.path() == "/api/session/login" {
-        MAX_LOGIN_BODY_BYTES
-    } else {
-        MAX_BODY_BYTES
+    let limit = match request.path() {
+        "/api/session/login" => MAX_LOGIN_BODY_BYTES,
+        "/api/proxy/local-rules" | "/api/proxy/local-rules/preview" => MAX_RULES_BODY_BYTES,
+        _ => MAX_BODY_BYTES,
     };
     if request.content_length > limit {
         return Err(error(ErrorKind::BodyTooLarge, bytes));

@@ -2,10 +2,11 @@
 use crate::auth::Auth;
 use crate::http::{self, DeadlineWriter, MAX_HEADER_BYTES, Method};
 use crate::memory::read_memory;
+use crate::rules_http::{self, RulesState};
 use crate::static_files::StaticFiles;
 use std::io;
 use std::net::{Shutdown, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,8 @@ pub struct Service {
     pub proc_root: PathBuf,
     static_files: Option<StaticFiles>,
     auth: Mutex<Auth>,
+    // None means no data directory; Err isolates a failed rule feature.
+    rules: Option<Mutex<Result<RulesState, rules_http::RulesError>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -130,6 +133,7 @@ impl Service {
             proc_root,
             static_files: None,
             auth: Mutex::new(Auth::new("")),
+            rules: None,
         }
     }
 
@@ -141,6 +145,19 @@ impl Service {
     pub fn with_static_files(mut self, files: StaticFiles) -> Self {
         self.static_files = Some(files);
         self
+    }
+
+    /// Opens the draft feature once. A bad draft/source does not stop health,
+    /// sessions or static files, and cannot be mistaken for an empty draft.
+    pub fn with_data_dir(mut self, path: impl AsRef<Path>) -> Self {
+        self.rules = Some(Mutex::new(RulesState::open(path)));
+        self
+    }
+
+    fn draft_writes_available(&self) -> bool {
+        self.rules
+            .as_ref()
+            .is_some_and(|rules| rules.lock().is_ok_and(|state| state.is_ok()))
     }
 
     pub fn handle(&self, stream: TcpStream) -> io::Result<()> {
@@ -187,8 +204,10 @@ impl Service {
                 &[],
             );
         }
-        if request.path() == "/api/session/login"
-            && request.method == Method::Post
+        if matches!(
+            request.path(),
+            "/api/session/login" | "/api/proxy/local-rules" | "/api/proxy/local-rules/preview"
+        ) && request.method == Method::Post
             && !http::json_content_type(request.content_type)
         {
             return api_error(
@@ -234,6 +253,7 @@ impl Service {
             .lock()
             .map_err(|_| io::Error::other("session state unavailable"))?;
         if api && !public && !auth.authenticated(request.cookie) {
+            drop(auth);
             return api_error(
                 &mut writer,
                 401,
@@ -243,6 +263,34 @@ impl Service {
                 head_only,
                 &[],
             );
+        }
+        if rules_http::is_rules_path(request.path()) {
+            // Session lock never covers draft filesystem I/O or streaming.
+            drop(auth);
+            if matches!(
+                request.path(),
+                "/api/proxy/local-rules/apply" | "/api/proxy/select"
+            ) {
+                return if request.method == Method::Post {
+                    rules_http::runtime_unavailable(&mut writer, head_only)
+                } else {
+                    rules_http::method_not_allowed(&mut writer, head_only, "POST")
+                };
+            }
+            if request.path() == "/api/proxy/local-rules/preview" && request.method != Method::Post
+            {
+                return rules_http::method_not_allowed(&mut writer, head_only, "POST");
+            }
+            let Some(rules) = &self.rules else {
+                return rules_http::unavailable(&mut writer, head_only);
+            };
+            let Ok(mut state) = rules.lock() else {
+                return rules_http::unavailable(&mut writer, head_only);
+            };
+            return match state.as_mut() {
+                Ok(state) => state.respond(&mut writer, request.path(), request.method, &body),
+                Err(_) => rules_http::unavailable(&mut writer, head_only),
+            };
         }
         match request.path() {
             "/api/session" if request.method != Method::Post => {
@@ -340,7 +388,13 @@ impl Service {
                 )
             }
             "/api/health" if request.method != Method::Post => {
-                http::write_response(&mut writer, 200, "OK", HEALTH_BODY, head_only)
+                drop(auth);
+                let body = if self.draft_writes_available() {
+                    b"{\"status\":\"ok\",\"mode\":\"host\",\"readOnly\":false}".as_slice()
+                } else {
+                    HEALTH_BODY
+                };
+                http::write_response(&mut writer, 200, "OK", body, head_only)
             }
             "/api/system/memory" if request.method != Method::Post => {
                 match read_memory(&self.proc_root) {

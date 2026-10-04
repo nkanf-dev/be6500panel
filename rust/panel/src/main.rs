@@ -7,16 +7,18 @@ use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const HELP: &str = "be6500-panel: loopback-only read-only diagnostic slice\n\
-Usage: be6500-panel [--listen 127.0.0.1:8790] [--proc-root /proc] [--web-dir PATH]\n\
-Only GET/HEAD /api/health and /api/system/memory are implemented.\n\
-Session login/logout are implemented; set BE6500PANEL_PASSWORD at startup.\n\
-Empty password means unauthenticated loopback diagnostics, not management.\n";
+const HELP: &str = "be6500-panel: loopback-only diagnostic and rule-draft slice\n\
+Usage: be6500-panel [--listen 127.0.0.1:8790] [--proc-root /proc] [--web-dir PATH] [--data-dir PATH]\n\
+GET/HEAD health and memory, session login/logout, and optional rule drafts.\n\
+--data-dir loads private subscription/draft only; save and preview never Apply.\n\
+Runtime Apply/select are unavailable. Set BE6500PANEL_PASSWORD at startup.\n\
+Empty password disables session authentication on this loopback-only listener.\n";
 
 struct Options {
     listen: SocketAddr,
     proc_root: PathBuf,
     web_dir: Option<PathBuf>,
+    data_dir: Option<PathBuf>,
 }
 
 enum Invocation {
@@ -30,6 +32,7 @@ fn parse_options() -> Result<Invocation, &'static str> {
         listen: "127.0.0.1:8790".parse().expect("constant address"),
         proc_root: PathBuf::from("/proc"),
         web_dir: None,
+        data_dir: None,
     };
     let mut seen = 0_u8;
     while let Some(flag) = args.next() {
@@ -43,6 +46,7 @@ fn parse_options() -> Result<Invocation, &'static str> {
             Some("--listen") => 1,
             Some("--proc-root") => 2,
             Some("--web-dir") => 4,
+            Some("--data-dir") => 8,
             _ => return Err("unknown argument"),
         };
         if seen & bit != 0 {
@@ -66,6 +70,7 @@ fn parse_options() -> Result<Invocation, &'static str> {
             }
             2 => options.proc_root = PathBuf::from(value),
             4 => options.web_dir = Some(PathBuf::from(value)),
+            8 => options.data_dir = Some(PathBuf::from(value)),
             _ => unreachable!(),
         }
     }
@@ -82,6 +87,9 @@ fn run(options: Options) -> Result<(), &'static str> {
     let auth = Auth::new(&password);
     drop(password);
     let mut service = Service::new(options.proc_root).with_auth(auth);
+    if let Some(data_dir) = options.data_dir {
+        service = service.with_data_dir(data_dir);
+    }
     if let Some(root) = options.web_dir {
         let files = StaticFiles::new(&root).map_err(|_| "static root unavailable")?;
         service = service.with_static_files(files);

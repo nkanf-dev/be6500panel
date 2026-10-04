@@ -96,7 +96,7 @@ fn http_header_size_and_count_limits() {
 
 #[test]
 fn http_post_framing_bounds_and_needed_headers() {
-    use be6500_panel::http::{MAX_BODY_BYTES, MAX_LOGIN_BODY_BYTES};
+    use be6500_panel::http::{MAX_BODY_BYTES, MAX_LOGIN_BODY_BYTES, MAX_RULES_BODY_BYTES};
     let req = parse_request(b"POST /api/session/login HTTP/1.1\r\nHost: panel.example:18890\r\nOrigin: http://panel.example:18890\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: 24\r\nCookie: other=x\r\n\r\n").unwrap();
     assert_eq!(req.method, Method::Post);
     assert_eq!(req.content_length, 24);
@@ -108,6 +108,18 @@ fn http_post_framing_bounds_and_needed_headers() {
         ("/api/session/login", MAX_LOGIN_BODY_BYTES + 1, false),
         ("/api/session/logout", MAX_BODY_BYTES, true),
         ("/api/session/logout", MAX_BODY_BYTES + 1, false),
+        ("/api/proxy/local-rules", MAX_RULES_BODY_BYTES, true),
+        ("/api/proxy/local-rules", MAX_RULES_BODY_BYTES + 1, false),
+        ("/api/proxy/local-rules/preview", MAX_RULES_BODY_BYTES, true),
+        (
+            "/api/proxy/local-rules/preview",
+            MAX_RULES_BODY_BYTES + 1,
+            false,
+        ),
+        ("/api/proxy/local-rules/apply", MAX_BODY_BYTES, true),
+        ("/api/proxy/select", MAX_BODY_BYTES, true),
+        ("/api/proxy/nodes", 0, false),
+        ("/api/proxy/subscription", 0, false),
     ] {
         let bytes =
             format!("POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {length}\r\n\r\n");
