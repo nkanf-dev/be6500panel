@@ -100,12 +100,18 @@ fn cli_data_dir_opens_drafts_without_startup_save_or_runtime_owner() {
         ])
         .env_remove("BE6500PANEL_PASSWORD")
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
-    // This is a finite native host test, not production polling or an agent loop.
+    // Finite test readiness uses actual child exit information, not a marker
+    // that silently treats early failure and a slow native spawn as identical.
+    let mut early_exit = None;
     let connection = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            early_exit = Some(status);
+            break None;
+        }
         match TcpStream::connect(address) {
             Ok(client) => break Some(client),
             Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
@@ -123,8 +129,17 @@ fn cli_data_dir_opens_drafts_without_startup_save_or_runtime_owner() {
         client.shutdown(Shutdown::Write).unwrap();
         client.read_to_end(&mut response).unwrap();
     }
-    child.kill().unwrap();
-    child.wait().unwrap();
+    if early_exit.is_none() {
+        child.kill().unwrap();
+    }
+    let exit = child.wait().unwrap();
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
     let names: Vec<_> = fs::read_dir(&path)
         .unwrap()
         .map(|e| e.unwrap().file_name())
@@ -132,7 +147,8 @@ fn cli_data_dir_opens_drafts_without_startup_save_or_runtime_owner() {
     fs::remove_dir_all(&path).unwrap();
     assert!(
         response.starts_with(b"HTTP/1.1 200 "),
-        "CLI did not serve drafts"
+        "CLI did not serve drafts: early_exit={early_exit:?}, exit={exit:?}, response={} bytes, fixed stderr={stderr}",
+        response.len()
     );
     assert!(
         names.is_empty(),
