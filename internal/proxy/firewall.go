@@ -193,6 +193,19 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	slices.Sort(bypass)
 	bypass = slices.Compact(bypass)
 
+	// Keep the default backend's ownership and argv byte shape unchanged.
+	// Routed TUN is an explicit opt-in, never a migration inferred from fields.
+	switch input.Datapath {
+	case "", DatapathTPROXY:
+		if input.TUNInterface != "" || input.TUNAddress != "" {
+			return OwnedRulesPlan{}, fmt.Errorf("TUNInterface/TUNAddress require the routed-tun datapath")
+		}
+	case DatapathRoutedTUN:
+		return planOwnedRoutedTUN(input, v4, v6, bypass, management, endpoints, routerDNS)
+	default:
+		return OwnedRulesPlan{}, fmt.Errorf("invalid datapath")
+	}
+
 	plan := OwnedRulesPlan{
 		Ownership: RulesOwnership{
 			Mark: CaptureMark, Mask: CaptureMask, RouteTable: CaptureTable, RulePriority: CapturePriority,
