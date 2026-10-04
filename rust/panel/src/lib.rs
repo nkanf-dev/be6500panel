@@ -1,3 +1,5 @@
+#[cfg(unix)]
+pub mod artifact_stage;
 pub mod auth;
 #[cfg(unix)]
 pub mod capture_executor;

@@ -12,6 +12,7 @@
 //! Explicit `close` can fail and must be retried on the same manager. Drop never
 //! bypasses withdrawal: ProcessOwner retains an unclosed child rather than killing
 //! it. Config snapshots and uncertain durable state are never pruned here.
+use crate::artifact_stage::{RetainedStage, Stage, StageError};
 use crate::runtime_process::{
     self as process, LaunchSpec, ProcessError, ProcessOwner, TrustedRoots,
 };
@@ -159,6 +160,7 @@ pub enum Failure {
     InvalidInput,
     Closed,
     ArtifactUnavailable,
+    ArtifactStage(StageError),
     NotConfigured,
     NotReady,
     Generation,
@@ -174,6 +176,7 @@ impl Failure {
             Self::InvalidInput => "invalid_input",
             Self::Closed => "closed",
             Self::ArtifactUnavailable => "artifact_unavailable",
+            Self::ArtifactStage(_) => "artifact_stage_failed",
             Self::NotConfigured => "not_configured",
             Self::NotReady => "not_ready",
             Self::Generation => "generation_conflict",
@@ -354,6 +357,11 @@ struct Run {
     record: ConfigRecord,
     ready: bool,
 }
+struct PendingArtifact {
+    stage: RetainedStage,
+    generation: u64,
+    checked: bool,
+}
 struct Service {
     binding: Option<ArtifactBinding>,
     artifact_file: Option<crate::readiness_tun::FileIdentity>,
@@ -362,6 +370,7 @@ struct Service {
     owner: Option<ProcessOwner>,
     run: Option<Run>,
     pending_check: Option<Candidate>,
+    pending_artifact: Option<PendingArtifact>,
     desired: bool,
     restored: bool,
     needs_recovery: bool,
@@ -496,6 +505,7 @@ impl Manager {
             owner,
             run: None,
             pending_check: None,
+            pending_artifact: None,
             desired: false,
             restored: false,
             needs_recovery: false,
@@ -525,7 +535,9 @@ impl Manager {
         if self.closed {
             return Err(Failure::Closed);
         }
-        if self.services[service.index()].pending_check.is_some() {
+        if self.services[service.index()].pending_check.is_some()
+            || self.services[service.index()].pending_artifact.is_some()
+        {
             return Err(Failure::CheckPending);
         }
         Ok(())
@@ -669,6 +681,117 @@ impl Manager {
         }
         Ok(candidate)
     }
+    /// Check typed verified stage with the SAME fixed service owner while its
+    /// old Run remains live. No metadata/binding/Run activation is performed.
+    /// A finite checker or cleanup failure retains the stage in this manager;
+    /// the caller must abort it before another mutation.
+    pub fn check_staged_artifact(
+        &mut self,
+        service: ServiceId,
+        expected_generation: u64,
+        stage: Stage,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<Status, ManagerError> {
+        self.generation(service, expected_generation)
+            .map_err(|failure| self.error(service, failure, None))?;
+        let admitted = stage
+            .admitted()
+            .map_err(|error| self.error(service, Failure::ArtifactStage(error), None))?;
+        let binding = self.services[service.index()]
+            .binding
+            .as_ref()
+            .ok_or_else(|| self.error(service, Failure::ArtifactUnavailable, None))?;
+        if admitted.root != binding.root || admitted.path.parent() != Some(binding.root.as_path()) {
+            return Err(self.error(service, Failure::InvalidInput, None));
+        }
+        let record = self
+            .store
+            .service_state(service.into())
+            .current
+            .as_ref()
+            .ok_or_else(|| self.error(service, Failure::NotConfigured, None))?
+            .clone();
+        let bytes = self
+            .store
+            .read_config(service.into(), &record)
+            .map_err(|error| self.error(service, Failure::Store(error), None))?;
+        let spec = LaunchSpec::new(
+            admitted.path,
+            admitted.extracted_sha256,
+            self.services[service.index()]
+                .config_root
+                .join(&record.file),
+            Sha256::digest(&bytes).into(),
+            bytes.len() as u64,
+        );
+        let retained = stage
+            .into_retained()
+            .map_err(|error| self.error(service, Failure::ArtifactStage(error), None))?;
+        self.services[service.index()].pending_artifact = Some(PendingArtifact {
+            stage: retained,
+            generation: expected_generation,
+            checked: false,
+        });
+        let checked = self.services[service.index()]
+            .owner
+            .as_mut()
+            .ok_or(ProcessError::Closed)
+            .and_then(|owner| owner.verify(spec, cancel));
+        if let Err(error) = checked {
+            let recovery = self
+                .abort_staged_artifact(service)
+                .err()
+                .map(|error| error.failure);
+            return Err(self.error(service, Failure::Process(error), recovery));
+        }
+        // Native checker success is not enough if accepted config or exact
+        // staged inode changed during check. Never create a readiness proof.
+        let verified = (|| {
+            if self.store.service_state(service.into()).generation != expected_generation {
+                return Err(Failure::Generation);
+            }
+            let pending = self.services[service.index()]
+                .pending_artifact
+                .as_ref()
+                .ok_or(Failure::CheckPending)?;
+            pending.stage.admitted().map_err(Failure::ArtifactStage)?;
+            if self
+                .store
+                .read_config(service.into(), &record)
+                .map_err(Failure::Store)?
+                != bytes
+            {
+                return Err(Failure::Store(StoreError::Verification));
+            }
+            Ok(())
+        })();
+        if let Err(failure) = verified {
+            let recovery = self
+                .abort_staged_artifact(service)
+                .err()
+                .map(|error| error.failure);
+            return Err(self.error(service, failure, recovery));
+        }
+        let Some(pending) = self.services[service.index()].pending_artifact.as_mut() else {
+            return Err(self.error(service, Failure::CheckPending, None));
+        };
+        pending.checked = true;
+        self.status(service)
+    }
+    /// In-process staging observation, not accepted metadata or active runtime.
+    pub fn staged_artifact_checked(&self, service: ServiceId) -> bool {
+        self.services[service.index()]
+            .pending_artifact
+            .as_ref()
+            .is_some_and(|pending| {
+                pending.checked
+                    && pending.generation == self.store.service_state(service.into()).generation
+                    && pending.stage.admitted().is_ok()
+            })
+    }
+    pub fn abort_staged_artifact(&mut self, service: ServiceId) -> Result<(), ManagerError> {
+        self.abort_check(service)
+    }
     pub fn abort_check(&mut self, service: ServiceId) -> Result<(), ManagerError> {
         if self.closed {
             return Err(self.error(service, Failure::Closed, None));
@@ -680,6 +803,13 @@ impl Manager {
                 .map_err(|error| self.error(service, Failure::Process(error), None))?;
         }
         self.services[service.index()].pending_check.take();
+        if let Some(pending) = self.services[service.index()].pending_artifact.as_mut() {
+            pending
+                .stage
+                .cleanup()
+                .map_err(|error| self.error(service, Failure::ArtifactStage(error), None))?;
+        }
+        self.services[service.index()].pending_artifact.take();
         Ok(())
     }
     fn hook(
@@ -1128,21 +1258,27 @@ impl Manager {
         }
     }
     pub fn stop(&mut self, service: ServiceId) -> Result<Status, ManagerError> {
-        // Off intent is latched before even an error or cleanup attempt.
+        // Off intent is latched even when checker/staged-file abort fails. A
+        // retained checker must not block withdrawal of the old Run.
         self.services[service.index()].desired = false;
-        self.ensure(service)
-            .map_err(|failure| self.error(service, failure, None))?;
+        if self.closed {
+            return Err(self.error(service, Failure::Closed, None));
+        }
+        let abort_failure = self.abort_check(service).err();
         match self.withdraw_stop(service) {
             Ok(()) => {
                 let slot = &mut self.services[service.index()];
                 slot.resource_suspended = true;
-                slot.needs_recovery = slot.durability_uncertain;
-                slot.failure = None;
+                slot.needs_recovery = slot.durability_uncertain || abort_failure.is_some();
+                slot.failure = abort_failure.map(|error| error.failure);
+                if let Some(error) = abort_failure {
+                    return Err(error);
+                }
                 self.status(service)
             }
             Err(failure) => {
                 self.services[service.index()].failure = Some(failure);
-                Err(self.error(service, failure, None))
+                Err(self.error(service, failure, abort_failure.map(|error| error.failure)))
             }
         }
     }
@@ -1284,20 +1420,29 @@ impl Manager {
     /// Required explicit exit handling. Status alone observes but never reaps or
     /// withdraws. This method does not schedule or automatically restart.
     pub fn handle_exit(&mut self, service: ServiceId) -> Result<Status, ManagerError> {
-        self.ensure(service)
-            .map_err(|failure| self.error(service, failure, None))?;
+        if self.closed {
+            return Err(self.error(service, Failure::Closed, None));
+        }
         let observed = self
             .observe(service)
             .map_err(|failure| self.error(service, failure, None))?;
         if observed.is_some_and(|status| {
             status.phase == process::Phase::Exited && status.mode == Some(process::LaunchMode::Run)
         }) {
-            self.withdraw_stop(service)
-                .map_err(|failure| self.error(service, failure, None))?;
+            // Staged checker/file cleanup must not leave dead-core hooks active.
+            // Attempt both and retain any unresolved exact handle for retry.
+            let abort_failure = self.abort_check(service).err();
+            let withdrawn = self.withdraw_stop(service);
             let slot = &mut self.services[service.index()];
             slot.needs_recovery = true;
             slot.resource_suspended = true;
             slot.failure = Some(Failure::Exited);
+            if let Err(failure) = withdrawn {
+                return Err(self.error(service, failure, abort_failure.map(|error| error.failure)));
+            }
+            if let Some(error) = abort_failure {
+                return Err(error);
+            }
         }
         self.status(service)
     }

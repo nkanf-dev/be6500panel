@@ -14,14 +14,18 @@
 
 Files:create `rust/panel/src/artifact_stage.rs`,tests `rust/panel/tests/artifact_stage.rs`; rootmod/dependencyexport.
 
-- [ ] `Stage::from_reader(root:&Path, artifact:&runtime_store::Artifact, source:impl Read, budget:&readiness_tun::Budget)->Result<Stage,StageError>`. Source must honor provided absolutebudget; check before/after everyread/write, neither systemresolver nor timeoutthread hides unbounded callback. Readerfixture tests use no realnetwork.
-- [ ] `Artifact` URL4096/version128/sha64hex/compressionnone|gzip bounds. URLmetadata neverusedaspathorcommand; fulltransportvalidation reservedforHTTPSlane.
-- [ ] Compressed bytes16MiB/uncompressed40MiB. Exactlimitaccepted/probeoneextra; gzipallmembers/CRC/trailer/trailinggarbage validated, sourcehash covers wholeencodedstream. OSrandomunique `.artifact-32lowerhex`, nofollow regularfile0700/private0700directory/pinnedidentity, file+dirsync. Deadline/cancelerrorsfixedprivate.
-- [ ] Admission accessor returns path, extractedbinarySHA256/length and requestmetadata onlyafter verifiedwholefetchdigest. StageDrop removes onlysameownedinode/name, neverreplacement/symlink; commit transferspreservation explicitly and no cleanup before realownedprocesswithdrawal.
-- [ ] Measuredavailablememory/backingfilesystemspace before fulltemporarygrowth, no consuming1MiBpersistentheadroom/emergencyreserve. Stage defaultsuseexistinglimits; maxsourceReaderwork/capfixtures don'tallocate40MiBwholebuffer.
+- [x] `Stage::from_reader(root:&Path, artifact:&runtime_store::Artifact, source:impl Read, budget:&readiness_tun::Budget)->Result<Stage,StageError>`. Source must honor provided absolutebudget; check before/after everyread/write, neither systemresolver nor timeoutthread hides unbounded callback. Readerfixture tests use no realnetwork.
+- [x] `Artifact` URL4096/version128/sha64hex/compressionnone|gzip bounds. URLmetadata neverusedaspathorcommand; fulltransportvalidation reservedforHTTPSlane.
+- [x] Compressed bytes16MiB/uncompressed40MiB. Exactlimitaccepted/probeoneextra; gzipallmembers/CRC/trailer/trailinggarbage validated, sourcehash covers wholeencodedstream. OSrandomunique `.artifact-32lowerhex`, nofollow regularfile0700/private0700directory/pinnedidentity, file+dirsync. Deadline/cancelerrorsfixedprivate.
+- [x] Admission accessor returns path, extractedbinarySHA256/length and requestmetadata onlyafter verifiedwholefetchdigest. StageDrop removes onlysameownedinode/name, neverreplacement/symlink; commit transferspreservation explicitly and no cleanup before realownedprocesswithdrawal.
+- [x] Measuredavailablememory/backingfilesystemspace before fulltemporarygrowth, no consuming1MiBpersistentheadroom/emergencyreserve. Stage defaultsuseexistinglimits; maxsourceReaderwork/capfixtures don'tallocate40MiBwholebuffer.
 
 ## Task2: Native checks
 
-- [ ] Syntheticraw/gzipmulti/CRC/truncated/trailing/mismatch/exactcaps/cancel/deadline/privatepaths/changedinode/cleanupfixtures. Frozen Go artifactsemantics reference only, noGocommands.
-- [ ] Rootcrateexport+pureRustflate2feature, onefulltest/fmt/clippy/diff insharedtree; ARMv7aftersettledhost. Source qualification not HTTPSfetch/manageractivation orproductionmigration.
-- [ ] Commitexactfiles/logevidence, retirecleansourceworktree preservingbranch. Next manager acquisition must checkactualacceptedconfigwithnewartifactwhileoldRunlives, persistmetadataauthoritatively, withdrawbeforestop, retainoldartifactforqualifiedrollback. ThisstageAPI alone mustnot enableHTTPAcquire.
+- [x] Syntheticraw/gzipmulti/CRC/truncated/trailing/mismatch/exactcaps/cancel/deadline/privatepaths/changedinode/cleanupfixtures. Frozen Go artifactsemantics reference only, noGocommands.
+- [x] Rootcrateexport+pureRustflate2feature, onefulltest/fmt/clippy/diff insharedtree; ARMv7aftersettledhost. Source qualification not HTTPSfetch/manageractivation orproductionmigration.
+- [x] Commitexactfiles/logevidence, retirecleansourceworktree preservingbranch. Next manager acquisition must checkactualacceptedconfigwithnewartifactwhileoldRunlives, persistmetadataauthoritatively, withdrawbeforestop, retainoldartifactforqualifiedrollback. ThisstageAPI alone mustnot enableHTTPAcquire.
+
+## Result
+
+321 full host tests, fmt, strict all-target Clippy, diff check and current-source ARMv7 crossbuild passed, including same existing owner stagedchecker and off/exit cleanup regression. HTTPS/HTTPAcquire/activation remains unavailable. No live router/core/capture action or targetRSSgain.
