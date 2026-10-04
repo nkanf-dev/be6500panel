@@ -172,10 +172,12 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		NodeID               string              `json:"nodeId"`
-		IPv6                 proxy.IPv6Mode      `json:"ipv6"`
-		Failure              proxy.FailurePolicy `json:"failure"`
-		AcknowledgedRevision string              `json:"acknowledgedRevision"`
+		NodeID               string                 `json:"nodeId"`
+		Datapath             *proxy.DatapathMode    `json:"datapath"`
+		RoutedTUN            *proxy.RoutedTUNConfig `json:"routedTUN"`
+		IPv6                 proxy.IPv6Mode         `json:"ipv6"`
+		Failure              proxy.FailurePolicy    `json:"failure"`
+		AcknowledgedRevision string                 `json:"acknowledgedRevision"`
 		Ports                struct {
 			Mixed  uint16 `json:"mixed"`
 			TProxy uint16 `json:"tproxy"`
@@ -234,22 +236,30 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 	if input.IPv6 == proxy.IPv6Follow {
 		dnsBind, tproxyBind = "::", "::"
 	}
-	out, err := proxy.CompileNative(proxy.CompileInput{Node: node, Rules: sub.Rules, Diagnostics: sub.Diagnostics, AcceptUnsupportedRules: input.AcknowledgedRevision == summary.Revision, RuleSets: refs, Endpoints: endpoints, ManagementIPs: []string{"192.168.31.1"}, IPv6: input.IPv6, Failure: input.Failure, Ports: proxy.Ports{Mixed: input.Ports.Mixed, TProxy: input.Ports.TProxy, DNS: input.Ports.DNS}, MixedListenAddress: "192.168.31.1", TProxyListenAddress: tproxyBind, DNSListenAddress: dnsBind})
-	if err != nil {
-		fail(w, 422, "proxy_configuration_invalid", "代理策略生成失败")
-		return
-	}
 	state, err := s.runtime.Status(managedruntime.SingBox)
 	if err != nil {
 		s.runtimeError(w, err)
 		return
 	}
+	var accepted []byte
 	if state.Configured {
-		accepted, _, readErr := s.runtime.Config(managedruntime.SingBox)
-		if readErr != nil {
-			s.runtimeError(w, readErr)
+		accepted, _, err = s.runtime.Config(managedruntime.SingBox)
+		if err != nil {
+			s.runtimeError(w, err)
 			return
 		}
+	}
+	datapath, tunConfig, err := proxyDatapathSelection(input.Datapath, input.RoutedTUN, accepted)
+	if err != nil {
+		fail(w, 422, "proxy_datapath_invalid", "代理接管后端与已接受配置不一致")
+		return
+	}
+	out, err := proxy.CompileNative(proxy.CompileInput{Datapath: datapath, RoutedTUN: tunConfig, Node: node, Rules: sub.Rules, Diagnostics: sub.Diagnostics, AcceptUnsupportedRules: input.AcknowledgedRevision == summary.Revision, RuleSets: refs, Endpoints: endpoints, ManagementIPs: []string{"192.168.31.1"}, IPv6: input.IPv6, Failure: input.Failure, Ports: proxy.Ports{Mixed: input.Ports.Mixed, TProxy: input.Ports.TProxy, DNS: input.Ports.DNS}, MixedListenAddress: "192.168.31.1", TProxyListenAddress: tproxyBind, DNSListenAddress: dnsBind})
+	if err != nil {
+		fail(w, 422, "proxy_configuration_invalid", "代理策略生成失败")
+		return
+	}
+	if state.Configured {
 		out.Config, err = preserveLocalTelemetry(out.Config, accepted)
 		if err != nil {
 			fail(w, 409, "telemetry_configuration_invalid", "本机观测配置无效，请检查高级设置")
