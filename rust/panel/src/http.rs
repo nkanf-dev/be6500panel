@@ -21,6 +21,7 @@ pub enum Method {
     Get,
     Head,
     Post,
+    Delete,
 }
 
 #[derive(PartialEq, Eq)]
@@ -142,6 +143,7 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
         "GET" => Method::Get,
         "HEAD" => Method::Head,
         "POST" => Method::Post,
+        "DELETE" => Method::Delete,
         _ if !method_text.is_empty() && method_text.bytes().all(token) => {
             return Err(error(ErrorKind::MethodNotAllowed, bytes));
         }
@@ -215,6 +217,7 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
                 | "/api/proxy/local-rules/preview"
                 | "/api/proxy/local-rules/apply"
                 | "/api/proxy/select"
+                | "/api/proxy/capture"
                 | "/api/runtime/configure"
                 | "/api/runtime/start"
                 | "/api/runtime/stop"
@@ -223,6 +226,11 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
                 | "/api/runtime/acquire"
         )
     {
+        return Err(error(ErrorKind::MethodNotAllowed, bytes));
+    }
+    // DELETE is a fixed empty-body capture action, not general API support.
+    // Query metadata stays intact for the authenticated endpoint to validate.
+    if method == Method::Delete && request.path() != "/api/proxy/capture" {
         return Err(error(ErrorKind::MethodNotAllowed, bytes));
     }
     request.content_length = match (method, content_length) {
