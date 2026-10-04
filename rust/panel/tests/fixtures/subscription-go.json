@@ -1,0 +1,1588 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "supported-ordered",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nproxy-groups:\n  - name: selected\n    type: select\n    proxies: [synthetic-node]\ndns:\n  enhanced-mode: fake-ip\nrules:\n  - DOMAIN,first.example.test,DIRECT\n  - DOMAIN-SUFFIX,second.example.test,selected\n  - IP-CIDR,203.0.113.0/24,DIRECT,no-resolve\n  - PROCESS-NAME,synthetic-process,DIRECT\n  - DOMAIN-KEYWORD,third,REJECT\n  - GEOIP,CN,DIRECT\n  - MATCH,selected\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "first.example.test",
+            "target": "direct",
+            "index": 0
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "second.example.test",
+            "target": "proxy",
+            "index": 1
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "203.0.113.0/24",
+            "target": "direct",
+            "noResolve": true,
+            "index": 2
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "third",
+            "target": "block",
+            "index": 4
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct",
+            "index": 5
+          },
+          {
+            "kind": "match",
+            "target": "proxy",
+            "index": 6
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "subscription",
+            "index": -1,
+            "code": "selected-node-policy",
+            "message": "proxy selectors use the selected node; unambiguous direct or reject groups retain their routing intent"
+          },
+          {
+            "scope": "rule",
+            "index": 3,
+            "code": "unsupported-process-rule",
+            "message": "process rules cannot classify forwarded LAN clients"
+          }
+        ],
+        "groupCount": 1,
+        "fakeIP": true
+      },
+      "policySummary": {
+        "total": 7,
+        "supported": 6,
+        "omitted": 1,
+        "reasons": [
+          {
+            "code": "unsupported-process-rule",
+            "count": 1,
+            "message": "路由器网关不能识别 LAN 客户端的应用进程；进程规则不会参与分流"
+          }
+        ],
+        "omittedRules": [
+          {
+            "index": 3,
+            "code": "unsupported-process-rule",
+            "message": "路由器网关不能识别 LAN 客户端的应用进程；进程规则不会参与分流"
+          }
+        ],
+        "revision": "5e724a15eb5c867e77fdae838a3b757ea12780a4f0ea72b9d552c5fbbb46c17a"
+      }
+    },
+    {
+      "name": "nil-rules-and-diagnostics",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": null,
+        "diagnostics": null,
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 0,
+        "supported": 0,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "589f61688c47d7ee6146e18fedeefc43582d39e3e9be23ca40ec4855e27414c7"
+      }
+    },
+    {
+      "name": "empty-rules-retain-nil",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nrules: []\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": null,
+        "diagnostics": null,
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 0,
+        "supported": 0,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "589f61688c47d7ee6146e18fedeefc43582d39e3e9be23ca40ec4855e27414c7"
+      }
+    },
+    {
+      "name": "unicode-labels-id-and-json-escaping",
+      "yaml": "proxies:\n  - name: '🇨🇳 合成\u003c\u0026\u003e节点\"'\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: '第二合成节点 é'\n    type: vless\n    server: 2001:db8::7\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nproxy-groups:\n  - name: 合成选择组\n    type: select\n    proxies: ['🇨🇳 合成\u003c\u0026\u003e节点\"', '第二合成节点 é']\nrules:\n  - DOMAIN,example.test,合成选择组\n  - 'DOMAIN-KEYWORD,\u003c\u0026\u003e合成,DIRECT'\n  - \"DOMAIN-KEYWORD,line\\u2028separator\\u2029end,REJECT\"\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "55b33804183b0f75",
+            "name": "🇨🇳 合成\u003c\u0026\u003e节点\"",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          },
+          {
+            "id": "cba02dd08ce142bc",
+            "name": "第二合成节点 é",
+            "server": "2001:db8::7",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "55b33804183b0f75",
+            "label": "🇨🇳 合成\u003c\u0026\u003e节点\"",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          },
+          {
+            "id": "cba02dd08ce142bc",
+            "label": "第二合成节点 é",
+            "server": "2001:db8::7",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "example.test",
+            "target": "proxy",
+            "index": 0
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "\u003c\u0026\u003e合成",
+            "target": "direct",
+            "index": 1
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "line\u2028separator\u2029end",
+            "target": "block",
+            "index": 2
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "subscription",
+            "index": -1,
+            "code": "selected-node-policy",
+            "message": "proxy selectors use the selected node; unambiguous direct or reject groups retain their routing intent"
+          }
+        ],
+        "groupCount": 1,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 3,
+        "supported": 3,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "3f75121afd97310c9b9eb73d9731413431d1d588d2e013fbc0e7eb00d9b53436"
+      }
+    },
+    {
+      "name": "duplicate-valid-node-index",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 8443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nrules:\n  - MATCH,synthetic-node\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "match",
+            "target": "proxy",
+            "index": 0
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "node",
+            "index": 1,
+            "code": "duplicate-node",
+            "message": "duplicate node name"
+          }
+        ],
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 1,
+        "supported": 1,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "416a2517c54168fe74d681e2ee9f0ab6e025b3690a8bafcc233e5154fc12b561"
+      }
+    },
+    {
+      "name": "unsupported-nodes-indexed",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-0\n    type: shadowsocks\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-1\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: ws\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-2\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: false\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-3\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: \"true\"\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-4\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: True\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-5\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    skip-cert-verify: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-6\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: false\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-7\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: \"true\"\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-8\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    ws-opts: {}\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-9\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    grpc-opts: {}\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-10\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    http-opts: {}\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-11\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    h2-opts: {}\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-12\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    smux: false\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: unsupported-13\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    dialer-proxy: synthetic-selector\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": null,
+        "diagnostics": [
+          {
+            "scope": "node",
+            "index": 1,
+            "code": "unsupported-node",
+            "message": "only VLESS is supported"
+          },
+          {
+            "scope": "node",
+            "index": 2,
+            "code": "unsupported-node",
+            "message": "only native TCP transport is supported"
+          },
+          {
+            "scope": "node",
+            "index": 3,
+            "code": "unsupported-node",
+            "message": "TLS is required"
+          },
+          {
+            "scope": "node",
+            "index": 4,
+            "code": "unsupported-node",
+            "message": "TLS is required"
+          },
+          {
+            "scope": "node",
+            "index": 5,
+            "code": "unsupported-node",
+            "message": "TLS is required"
+          },
+          {
+            "scope": "node",
+            "index": 6,
+            "code": "unsupported-node",
+            "message": "insecure TLS is not supported"
+          },
+          {
+            "scope": "node",
+            "index": 7,
+            "code": "unsupported-node",
+            "message": "VLESS UDP/XUDP must be enabled"
+          },
+          {
+            "scope": "node",
+            "index": 8,
+            "code": "unsupported-node",
+            "message": "VLESS UDP/XUDP must be enabled"
+          },
+          {
+            "scope": "node",
+            "index": 9,
+            "code": "unsupported-node",
+            "message": "unsupported transport or multiplex option"
+          },
+          {
+            "scope": "node",
+            "index": 10,
+            "code": "unsupported-node",
+            "message": "unsupported transport or multiplex option"
+          },
+          {
+            "scope": "node",
+            "index": 11,
+            "code": "unsupported-node",
+            "message": "unsupported transport or multiplex option"
+          },
+          {
+            "scope": "node",
+            "index": 12,
+            "code": "unsupported-node",
+            "message": "unsupported transport or multiplex option"
+          },
+          {
+            "scope": "node",
+            "index": 13,
+            "code": "unsupported-node",
+            "message": "unsupported transport or multiplex option"
+          },
+          {
+            "scope": "node",
+            "index": 14,
+            "code": "unsupported-node",
+            "message": "unsupported transport or multiplex option"
+          }
+        ],
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 0,
+        "supported": 0,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "589f61688c47d7ee6146e18fedeefc43582d39e3e9be23ca40ec4855e27414c7"
+      }
+    },
+    {
+      "name": "invalid-node-parameters-indexed",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-0\n    type: vless\n    server: 0.0.0.0\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-1\n    type: vless\n    server: node.example.test/path\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-2\n    type: vless\n    server: node.example.test\n    port: 0\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-3\n    type: vless\n    server: node.example.test\n    port: 65536\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-4\n    type: vless\n    server: node.example.test\n    port: 443.0\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-5\n    type: vless\n    server: node.example.test\n    port: 0x1bb\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-6\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: synthetic-invalid-uuid\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-7\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test.\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-8\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: synthetic-flow\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-9\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: firefox\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - name: invalid-10\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: synthetic-invalid-key\n      short-id: aabbccdd\n  - name: invalid-11\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: abc\n  - name: invalid-12\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccddeeff001122\n  - name: nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n  - synthetic-non-mapping-node\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": null,
+        "diagnostics": [
+          {
+            "scope": "node",
+            "index": 1,
+            "code": "unsupported-node",
+            "message": "invalid server endpoint"
+          },
+          {
+            "scope": "node",
+            "index": 2,
+            "code": "unsupported-node",
+            "message": "invalid server endpoint"
+          },
+          {
+            "scope": "node",
+            "index": 3,
+            "code": "unsupported-node",
+            "message": "invalid server port"
+          },
+          {
+            "scope": "node",
+            "index": 4,
+            "code": "unsupported-node",
+            "message": "invalid server port"
+          },
+          {
+            "scope": "node",
+            "index": 5,
+            "code": "unsupported-node",
+            "message": "invalid server port"
+          },
+          {
+            "scope": "node",
+            "index": 6,
+            "code": "unsupported-node",
+            "message": "invalid server port"
+          },
+          {
+            "scope": "node",
+            "index": 7,
+            "code": "unsupported-node",
+            "message": "invalid VLESS UUID"
+          },
+          {
+            "scope": "node",
+            "index": 8,
+            "code": "unsupported-node",
+            "message": "REALITY certificate DNS identity is required"
+          },
+          {
+            "scope": "node",
+            "index": 9,
+            "code": "unsupported-node",
+            "message": "only xtls-rprx-vision flow is supported"
+          },
+          {
+            "scope": "node",
+            "index": 10,
+            "code": "unsupported-node",
+            "message": "only Chrome uTLS fingerprint is supported"
+          },
+          {
+            "scope": "node",
+            "index": 11,
+            "code": "unsupported-node",
+            "message": "invalid REALITY public key"
+          },
+          {
+            "scope": "node",
+            "index": 12,
+            "code": "unsupported-node",
+            "message": "invalid REALITY short ID"
+          },
+          {
+            "scope": "node",
+            "index": 13,
+            "code": "unsupported-node",
+            "message": "invalid REALITY short ID"
+          },
+          {
+            "scope": "node",
+            "index": 14,
+            "code": "unsupported-node",
+            "message": "node name is required and bounded"
+          },
+          {
+            "scope": "node",
+            "index": 15,
+            "code": "unsupported-node",
+            "message": "node must be a mapping"
+          }
+        ],
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 0,
+        "supported": 0,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "589f61688c47d7ee6146e18fedeefc43582d39e3e9be23ca40ec4855e27414c7"
+      }
+    },
+    {
+      "name": "direct-uniform-nested-groups",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nproxy-groups:\n  - name: direct-leaf\n    type: select\n    proxies: [DIRECT, direct]\n  - name: direct-parent\n    type: fallback\n    proxies: [direct-leaf, DIRECT]\nrules:\n  - DOMAIN,one.example.test,direct-leaf\n  - MATCH,direct-parent\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "one.example.test",
+            "target": "direct",
+            "index": 0
+          },
+          {
+            "kind": "match",
+            "target": "direct",
+            "index": 1
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "subscription",
+            "index": -1,
+            "code": "selected-node-policy",
+            "message": "proxy selectors use the selected node; unambiguous direct or reject groups retain their routing intent"
+          }
+        ],
+        "groupCount": 2,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 2,
+        "supported": 2,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "af0d18f2425c2721c15ae25ba205642585b5ae5355c26953840d2dadc730098d"
+      }
+    },
+    {
+      "name": "reject-uniform-nested-groups",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nproxy-groups:\n  - name: reject-leaf\n    type: url-test\n    proxies: [REJECT, REJECT-DROP]\n  - name: reject-parent\n    type: load-balance\n    proxies: [reject-leaf, reject]\nrules:\n  - DOMAIN,one.example.test,reject-leaf\n  - MATCH,reject-parent\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "one.example.test",
+            "target": "block",
+            "index": 0
+          },
+          {
+            "kind": "match",
+            "target": "block",
+            "index": 1
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "subscription",
+            "index": -1,
+            "code": "selected-node-policy",
+            "message": "proxy selectors use the selected node; unambiguous direct or reject groups retain their routing intent"
+          }
+        ],
+        "groupCount": 2,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 2,
+        "supported": 2,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "fe3270600d4489042eac6c024afec1b9748b96636046140571acc4a8395d4ae2"
+      }
+    },
+    {
+      "name": "mixed-cyclic-unknown-empty-groups",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nproxy-groups:\n  - name: mixed\n    type: select\n    proxies: [DIRECT, REJECT]\n  - name: cycle-a\n    type: select\n    proxies: [cycle-b]\n  - name: cycle-b\n    type: select\n    proxies: [cycle-a]\n  - name: unknown-member\n    type: select\n    proxies: [synthetic-missing]\n  - name: empty\n    type: select\n    proxies: []\nrules:\n  - DOMAIN,mixed.example.test,mixed\n  - DOMAIN,cycle.example.test,cycle-a\n  - DOMAIN,unknown.example.test,unknown-member\n  - DOMAIN,empty.example.test,empty\n  - MATCH,PROXY\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "mixed.example.test",
+            "target": "proxy",
+            "index": 0
+          },
+          {
+            "kind": "domain",
+            "value": "cycle.example.test",
+            "target": "proxy",
+            "index": 1
+          },
+          {
+            "kind": "domain",
+            "value": "unknown.example.test",
+            "target": "proxy",
+            "index": 2
+          },
+          {
+            "kind": "domain",
+            "value": "empty.example.test",
+            "target": "proxy",
+            "index": 3
+          },
+          {
+            "kind": "match",
+            "target": "proxy",
+            "index": 4
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "subscription",
+            "index": -1,
+            "code": "selected-node-policy",
+            "message": "proxy selectors use the selected node; unambiguous direct or reject groups retain their routing intent"
+          }
+        ],
+        "groupCount": 5,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 5,
+        "supported": 5,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "d026d725c1340d87819dfa910bbfe460f29aa214c156e64a81e4cba63e553ef1"
+      }
+    },
+    {
+      "name": "unsupported-group-code-and-unknown-target",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nproxy-groups:\n  - name: unsupported\n    type: synthetic-selector-type\n    proxies: [DIRECT]\nrules:\n  - DOMAIN,one.example.test,unsupported\n  - DOMAIN,two.example.test,synthetic-absent-selector\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "one.example.test",
+            "target": "direct",
+            "index": 0
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "group",
+            "index": 0,
+            "code": "unsupported-group",
+            "message": "group is not a known selector"
+          },
+          {
+            "scope": "subscription",
+            "index": -1,
+            "code": "selected-node-policy",
+            "message": "proxy selectors use the selected node; unambiguous direct or reject groups retain their routing intent"
+          },
+          {
+            "scope": "rule",
+            "index": 1,
+            "code": "unknown-rule-target",
+            "message": "rule target is not a known node or selector"
+          }
+        ],
+        "groupCount": 1,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 2,
+        "supported": 1,
+        "omitted": 1,
+        "reasons": [
+          {
+            "code": "unknown-rule-target",
+            "count": 1,
+            "message": "规则目标不在当前节点或选择组中"
+          }
+        ],
+        "omittedRules": [
+          {
+            "index": 1,
+            "code": "unknown-rule-target",
+            "message": "规则目标不在当前节点或选择组中"
+          }
+        ],
+        "revision": "f1b9654193ccc7a2e248e9f62e554ff177ff7d2adc85197b0faa8544152cb751"
+      }
+    },
+    {
+      "name": "omissions-terminal-and-reason-order",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nrules:\n  - PROCESS-NAME,synthetic-process,DIRECT\n  - PROCESS-PATH,/synthetic/process,DIRECT\n  - RULE-SET,synthetic-rules,DIRECT\n  - GEOIP,US,DIRECT\n  - GEOSITE,synthetic-region,DIRECT\n  - DOMAIN,invalid/domain,DIRECT\n  - IP-CIDR,synthetic-prefix,DIRECT\n  - DOMAIN,known.example.test,synthetic-unknown\n  - DOMAIN,option.example.test,DIRECT,no-resolve\n  - DOMAIN,excess.example.test,DIRECT,synthetic-option,synthetic-extra\n  - DOMAIN\n  - MATCH,DIRECT\n  - DOMAIN,unreachable.example.test,PROXY\n  - PROCESS-NAME,synthetic-unreachable-process,DIRECT\n  - FINAL,REJECT\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "match",
+            "target": "direct",
+            "index": 11
+          },
+          {
+            "kind": "domain",
+            "value": "unreachable.example.test",
+            "target": "proxy",
+            "index": 12
+          },
+          {
+            "kind": "match",
+            "target": "block",
+            "index": 14
+          }
+        ],
+        "diagnostics": [
+          {
+            "scope": "rule",
+            "index": 0,
+            "code": "unsupported-process-rule",
+            "message": "process rules cannot classify forwarded LAN clients"
+          },
+          {
+            "scope": "rule",
+            "index": 1,
+            "code": "unsupported-process-rule",
+            "message": "process rules cannot classify forwarded LAN clients"
+          },
+          {
+            "scope": "rule",
+            "index": 2,
+            "code": "unsupported-rule",
+            "message": "unsupported rule type"
+          },
+          {
+            "scope": "rule",
+            "index": 3,
+            "code": "unsupported-rule",
+            "message": "only CN GEOIP has a controlled SRS mapping"
+          },
+          {
+            "scope": "rule",
+            "index": 4,
+            "code": "unsupported-rule",
+            "message": "only CN GEOSITE has a controlled SRS mapping"
+          },
+          {
+            "scope": "rule",
+            "index": 5,
+            "code": "invalid-rule",
+            "message": "invalid rule domain"
+          },
+          {
+            "scope": "rule",
+            "index": 6,
+            "code": "invalid-rule",
+            "message": "invalid rule IP prefix"
+          },
+          {
+            "scope": "rule",
+            "index": 7,
+            "code": "unknown-rule-target",
+            "message": "rule target is not a known node or selector"
+          },
+          {
+            "scope": "rule",
+            "index": 8,
+            "code": "invalid-rule",
+            "message": "unsupported rule option"
+          },
+          {
+            "scope": "rule",
+            "index": 9,
+            "code": "invalid-rule",
+            "message": "invalid rule fields"
+          },
+          {
+            "scope": "rule",
+            "index": 10,
+            "code": "invalid-rule",
+            "message": "invalid rule fields"
+          },
+          {
+            "scope": "rule",
+            "index": 13,
+            "code": "unsupported-process-rule",
+            "message": "process rules cannot classify forwarded LAN clients"
+          }
+        ],
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 15,
+        "supported": 1,
+        "omitted": 14,
+        "reasons": [
+          {
+            "code": "invalid-rule",
+            "count": 5,
+            "message": "规则参数无效，无法生成原生路由规则"
+          },
+          {
+            "code": "unknown-rule-target",
+            "count": 1,
+            "message": "规则目标不在当前节点或选择组中"
+          },
+          {
+            "code": "unreachable-rule",
+            "count": 2,
+            "message": "规则位于终止 MATCH 规则之后，不会参与分流"
+          },
+          {
+            "code": "unsupported-process-rule",
+            "count": 3,
+            "message": "路由器网关不能识别 LAN 客户端的应用进程；进程规则不会参与分流"
+          },
+          {
+            "code": "unsupported-rule",
+            "count": 3,
+            "message": "规则类型或地区规则集不受当前原生编译器支持"
+          }
+        ],
+        "omittedRules": [
+          {
+            "index": 0,
+            "code": "unsupported-process-rule",
+            "message": "路由器网关不能识别 LAN 客户端的应用进程；进程规则不会参与分流"
+          },
+          {
+            "index": 1,
+            "code": "unsupported-process-rule",
+            "message": "路由器网关不能识别 LAN 客户端的应用进程；进程规则不会参与分流"
+          },
+          {
+            "index": 2,
+            "code": "unsupported-rule",
+            "message": "规则类型或地区规则集不受当前原生编译器支持"
+          },
+          {
+            "index": 3,
+            "code": "unsupported-rule",
+            "message": "规则类型或地区规则集不受当前原生编译器支持"
+          },
+          {
+            "index": 4,
+            "code": "unsupported-rule",
+            "message": "规则类型或地区规则集不受当前原生编译器支持"
+          },
+          {
+            "index": 5,
+            "code": "invalid-rule",
+            "message": "规则参数无效，无法生成原生路由规则"
+          },
+          {
+            "index": 6,
+            "code": "invalid-rule",
+            "message": "规则参数无效，无法生成原生路由规则"
+          },
+          {
+            "index": 7,
+            "code": "unknown-rule-target",
+            "message": "规则目标不在当前节点或选择组中"
+          },
+          {
+            "index": 8,
+            "code": "invalid-rule",
+            "message": "规则参数无效，无法生成原生路由规则"
+          },
+          {
+            "index": 9,
+            "code": "invalid-rule",
+            "message": "规则参数无效，无法生成原生路由规则"
+          },
+          {
+            "index": 10,
+            "code": "invalid-rule",
+            "message": "规则参数无效，无法生成原生路由规则"
+          },
+          {
+            "index": 12,
+            "code": "unreachable-rule",
+            "message": "规则位于终止 MATCH 规则之后，不会参与分流"
+          },
+          {
+            "index": 13,
+            "code": "unsupported-process-rule",
+            "message": "路由器网关不能识别 LAN 客户端的应用进程；进程规则不会参与分流"
+          },
+          {
+            "index": 14,
+            "code": "unreachable-rule",
+            "message": "规则位于终止 MATCH 规则之后，不会参与分流"
+          }
+        ],
+        "revision": "a0792c77320e75153a143476630b6a3794ce121acf2a8c22c801ab42b5374194"
+      }
+    },
+    {
+      "name": "known-rules-normalization-and-no-resolve",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nrules:\n  - ' domain , exact.example.test , direct '\n  - DOMAIN-SUFFIX,suffix.example.test,PROXY\n  - DOMAIN-KEYWORD,keyword,REJECT-DROP\n  - IP-CIDR,203.0.113.5/24,DIRECT,no-resolve\n  - IP-CIDR6,2001:db8::7/32,DIRECT,no-resolve\n  - GEOIP,cn,DIRECT,no-resolve\n  - GEOSITE,cN,PROXY\n  - FINAL,synthetic-node\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "domain",
+            "value": "exact.example.test",
+            "target": "direct",
+            "index": 0
+          },
+          {
+            "kind": "domain-suffix",
+            "value": "suffix.example.test",
+            "target": "proxy",
+            "index": 1
+          },
+          {
+            "kind": "domain-keyword",
+            "value": "keyword",
+            "target": "block",
+            "index": 2
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "203.0.113.5/24",
+            "target": "direct",
+            "noResolve": true,
+            "index": 3
+          },
+          {
+            "kind": "ip-cidr",
+            "value": "2001:db8::7/32",
+            "target": "direct",
+            "noResolve": true,
+            "index": 4
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-ip",
+            "target": "direct",
+            "noResolve": true,
+            "index": 5
+          },
+          {
+            "kind": "rule-set",
+            "value": "cn-domain",
+            "target": "proxy",
+            "index": 6
+          },
+          {
+            "kind": "match",
+            "target": "proxy",
+            "index": 7
+          }
+        ],
+        "diagnostics": null,
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 8,
+        "supported": 8,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "0408a041dbdeb14747ef08bc2eb1fbbf28147e9991d2ab46f977d770ef73264d"
+      }
+    },
+    {
+      "name": "fake-ip-without-rules",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\ndns:\n  enhanced-mode: fake-ip\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": null,
+        "diagnostics": null,
+        "groupCount": 0,
+        "fakeIP": true
+      },
+      "policySummary": {
+        "total": 0,
+        "supported": 0,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "e27882faa1dd1be9072783cf7a1e413efaf409b62644cd072ad1e1f751ee2324"
+      }
+    },
+    {
+      "name": "unsupported-dns-and-ignored-options-bounded",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\ndns:\n  enhanced-mode: synthetic-dns-mode\n  nameserver: [https://dns.example.test/query, tls://203.0.113.53]\n  fake-ip-filter: ['*.example.test']\n  nested-ignored: {enabled: true, number: 7, values: [null, false, 'scalar']}\nprofile:\n  store-selected: true\nunrecognized-option: {quoted: 'synthetic-only', list: [a, b, c]}\nrules:\n  - MATCH,DIRECT\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccdd",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "match",
+            "target": "direct",
+            "index": 0
+          }
+        ],
+        "diagnostics": null,
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 1,
+        "supported": 1,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "726715ba025986ac3b2a6810884f59cd5310bb539a05d9fc340c07d31bdc5e6a"
+      }
+    },
+    {
+      "name": "quoted-scalars-port-and-sni-fallback",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: 'vless'\n    server: node.example.test\n    port: '00443'\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    sni: 'cert.example.test'\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: ''\nrules:\n  - 'MATCH,PROXY'\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "name": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "a83ecdaa46a9f4fc",
+            "label": "synthetic-node",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "match",
+            "target": "proxy",
+            "index": 0
+          }
+        ],
+        "diagnostics": null,
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 1,
+        "supported": 1,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "416a2517c54168fe74d681e2ee9f0ab6e025b3690a8bafcc233e5154fc12b561"
+      }
+    },
+    {
+      "name": "maximum-label-and-short-id",
+      "yaml": "proxies:\n  - name: nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccddeeff0011\n",
+      "valid": true,
+      "subscription": {
+        "nodes": [
+          {
+            "id": "ed95a6c3a011299f",
+            "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+            "server": "node.example.test",
+            "port": 443,
+            "uuid": "00000000-1111-4222-8333-444444444444",
+            "serverName": "cert.example.test",
+            "realityPublicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "realityShortID": "aabbccddeeff0011",
+            "fingerprint": "chrome",
+            "flow": "xtls-rprx-vision",
+            "udp": true
+          }
+        ],
+        "publicNodes": [
+          {
+            "id": "ed95a6c3a011299f",
+            "label": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+            "server": "node.example.test",
+            "port": 443,
+            "protocol": "vless",
+            "transport": "tcp",
+            "reality": true,
+            "vision": true,
+            "utls": true,
+            "udp": true
+          }
+        ],
+        "rules": null,
+        "diagnostics": null,
+        "groupCount": 0,
+        "fakeIP": false
+      },
+      "policySummary": {
+        "total": 0,
+        "supported": 0,
+        "omitted": 0,
+        "reasons": [],
+        "omittedRules": [],
+        "revision": "589f61688c47d7ee6146e18fedeefc43582d39e3e9be23ca40ec4855e27414c7"
+      }
+    },
+    {
+      "name": "no-supported-nodes",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: false\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n",
+      "valid": false,
+      "error": "subscription contains no supported VLESS nodes"
+    },
+    {
+      "name": "empty-proxies",
+      "yaml": "proxies: []\n",
+      "valid": false,
+      "error": "subscription contains no supported VLESS nodes"
+    },
+    {
+      "name": "missing-proxies",
+      "yaml": "rules: []\n",
+      "valid": false,
+      "error": "subscription proxies must be a sequence"
+    },
+    {
+      "name": "nonsequence-proxies",
+      "yaml": "proxies: {name: synthetic-node}\n",
+      "valid": false,
+      "error": "subscription proxies must be a sequence"
+    },
+    {
+      "name": "scalar-integer-rule",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nrules: [123]\n",
+      "valid": false,
+      "error": "rule 0 must be a string"
+    },
+    {
+      "name": "nonsequence-rules",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nrules: {type: MATCH}\n",
+      "valid": false,
+      "error": "invalid or excessive subscription rules"
+    },
+    {
+      "name": "anchor-rejected",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nextra: \u0026synthetic-anchor [value]\n",
+      "valid": false,
+      "error": "subscription YAML aliases and anchors are not supported"
+    },
+    {
+      "name": "alias-rejected",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nextra: \u0026synthetic-anchor value\nother: *synthetic-anchor\n",
+      "valid": false,
+      "error": "subscription YAML aliases and anchors are not supported"
+    },
+    {
+      "name": "duplicate-key-rejected",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nrules: []\nrules: []\n",
+      "valid": false,
+      "error": "subscription YAML keys must be unique strings"
+    },
+    {
+      "name": "merge-key-rejected",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nextra: {'\u003c\u003c': {synthetic: value}}\n",
+      "valid": false,
+      "error": "subscription YAML keys must be unique strings"
+    },
+    {
+      "name": "nonstring-key-rejected",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nextra: {123: synthetic-value}\n",
+      "valid": false,
+      "error": "subscription YAML keys must be unique strings"
+    },
+    {
+      "name": "multiple-documents-rejected",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\n---\nproxies: []\n",
+      "valid": false,
+      "error": "subscription must contain one YAML document"
+    },
+    {
+      "name": "malformed-yaml-rejected",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nextra: [synthetic-value\n",
+      "valid": false,
+      "error": "invalid subscription YAML"
+    },
+    {
+      "name": "malformed-unicode-escape-rejected",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nextra: \"\\uD800\"\n",
+      "valid": false,
+      "error": "invalid subscription YAML"
+    },
+    {
+      "name": "nonmapping-document",
+      "yaml": "[synthetic-value]\n",
+      "valid": false,
+      "error": "subscription must be a mapping"
+    },
+    {
+      "name": "invalid-group-name",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nproxy-groups:\n  - type: select\n    proxies: [DIRECT]\n",
+      "valid": false,
+      "error": "invalid selector group name"
+    },
+    {
+      "name": "nonsequence-groups",
+      "yaml": "proxies:\n  - name: synthetic-node\n    type: vless\n    server: node.example.test\n    port: 443\n    uuid: 00000000-1111-4222-8333-444444444444\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    client-fingerprint: chrome\n    servername: cert.example.test\n    reality-opts:\n      public-key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\n      short-id: aabbccdd\nproxy-groups: {}\n",
+      "valid": false,
+      "error": "invalid or excessive selector groups"
+    }
+  ]
+}
