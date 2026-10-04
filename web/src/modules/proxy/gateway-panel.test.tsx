@@ -253,7 +253,7 @@ describe("explicit gateway control", () => {
     expect(view.controller.run).not.toHaveBeenCalled();
   });
 
-  it("shows current and installed exact ranges separately and retries withdrawal on a mismatch", async () => {
+  it("shows a scope mismatch for review and retries reads without withdrawing", async () => {
     const fetch = fakeAPI({
       ...active,
       lanIPv4Prefixes: ["192.168.31.0/24", "10.42.0.0/24"],
@@ -267,23 +267,52 @@ describe("explicit gateway control", () => {
     expect(screen.getByText("192.168.31.20/32")).toBeInTheDocument();
     expect(document.querySelector(".badge-success")).toBeNull();
     expect(screen.queryByText(/全网段/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "重试撤回" }));
-    await screen.findByText("已停用");
-    expect(writes(fetch).map(([, init]) => init?.method)).toEqual(["DELETE"]);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "当前声明与已安装范围不一致",
+    );
+    expect(screen.queryByRole("button", { name: "重试撤回" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    await waitFor(() =>
+      expect(
+        fetch.mock.calls.filter(([url]) => url === "/api/proxy/capture").length,
+      ).toBeGreaterThan(1),
+    );
+    expect(writes(fetch)).toEqual([]);
+    expect(screen.getByRole("button", { name: "关闭" })).toHaveClass(
+      "button-secondary",
+    );
+    expect(document.querySelector(".badge-success")).toBeNull();
   });
 
   it.each([
-    { ...active, cleanupPending: true },
+    { ...active, desired: false, cleanupPending: true },
+    { ...active, cleanupPending: true, error: "capture_cleanup_failed" },
+    {
+      ...active,
+      desired: false,
+      cleanupPending: true,
+      error: "capture_cleanup_failed: resource remains\ncontext canceled",
+    },
+    {
+      ...off,
+      error: "capture_disable_not_persisted: write failed\ncontext canceled",
+    },
     { ...active, error: "capture_withdraw_failed" },
-  ])("shows actionable cleanup/error and never green", async (capture) => {
-    const fetch = fakeAPI(capture);
-    mount();
-    await screen.findByRole("alert");
-    expect(document.querySelector(".badge-success")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await screen.findByText("已停用");
-    expect(writes(fetch).map(([, init]) => init?.method)).toEqual(["DELETE"]);
-  });
+  ])(
+    "keeps genuine cleanup failures actionable only on user click",
+    async (capture) => {
+      const fetch = fakeAPI(capture);
+      mount();
+      await screen.findByRole("alert");
+      expect(document.querySelector(".badge-success")).toBeNull();
+      expect(screen.getByRole("button", { name: "重试撤回" })).toBeEnabled();
+      expect(screen.queryByText(/context canceled/)).toBeNull();
+      expect(writes(fetch)).toEqual([]);
+      fireEvent.click(screen.getByRole("button", { name: "重试" }));
+      await screen.findByText("已停用");
+      expect(writes(fetch).map(([, init]) => init?.method)).toEqual(["DELETE"]);
+    },
+  );
 
   it("keeps failed or unknown capture observations non-green and does not enable", async () => {
     const fetch = fakeAPI();
@@ -297,11 +326,264 @@ describe("explicit gateway control", () => {
         : normal(url, init),
     );
     mount();
-    await screen.findByText("状态未知");
+    await screen.findByText("状态暂未确认");
     expect(screen.getByRole("button", { name: "开启网关代理" })).toBeDisabled();
-    expect(screen.getByRole("alert")).toHaveTextContent("读取失败");
+    expect(screen.getByRole("alert")).toHaveTextContent("请重新读取");
+    expect(screen.getByRole("button", { name: "重新读取" })).toBeEnabled();
     expect(document.querySelector(".badge-success")).toBeNull();
     expect(writes(fetch)).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      active: false,
+      cleanupPending: true,
+      state: "cleanup-pending",
+      error: "capture_observation_busy",
+      commands: 0,
+    },
+    {
+      ...active,
+      active: false,
+      cleanupPending: true,
+      state: "cleanup-pending",
+      error: "capture_observation_failed: missing resource",
+    },
+    {
+      ...active,
+      active: false,
+      scopeState: "unresolved" as const,
+      state: "scope-changed",
+      error: "capture_backend_not_ready\ncontext canceled",
+    },
+    { ...active, error: "context canceled" },
+    { ...active, error: "context deadline exceeded" },
+    { ...active, cleanupPending: true },
+    { ...off, cleanupPending: true, error: "capture_observation_busy" },
+    { ...active, error: "capture_cleanup_failed_other" },
+  ])("retries uncertain observations with GET only", async (capture) => {
+    const fetch = fakeAPI(capture);
+    const view = mount();
+    await screen.findByRole("alert");
+    expect(document.querySelector(".badge-success")).toBeNull();
+    expect(screen.queryByText(/规则尚未撤回/)).toBeNull();
+    expect(
+      screen.queryByText(/context canceled|context deadline exceeded/),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "重试撤回" })).toBeNull();
+    expect(view.controller.run).not.toHaveBeenCalled();
+    const readsBefore = fetch.mock.calls.filter(
+      ([url]) => url === "/api/proxy/capture",
+    ).length;
+    fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    await waitFor(() =>
+      expect(
+        fetch.mock.calls.filter(([url]) => url === "/api/proxy/capture").length,
+      ).toBeGreaterThan(readsBefore),
+    );
+    expect(writes(fetch)).toEqual([]);
+    const enable = screen.queryByRole("button", { name: "开启网关代理" });
+    if (enable) expect(enable).toBeDisabled();
+  });
+
+  it.each([
+    "busy response",
+    "canceled response",
+    "HTTP read failure",
+    "network read failure",
+  ])(
+    "retains the last confirmed active scope after a %s without fresh success or destructive retry",
+    async (failure) => {
+      const fetch = fakeAPI(active);
+      const normal = fetch.getMockImplementation()!;
+      const view = mount();
+      await screen.findByText("运行中");
+      let uncertain = true;
+      fetch.mockImplementation(async (url, init) => {
+        if (url !== "/api/proxy/capture" || !uncertain)
+          return normal(url, init);
+        if (failure === "HTTP read failure")
+          return jsonResponse(
+            {
+              error: {
+                code: "observation_unavailable",
+                message: "context canceled",
+              },
+            },
+            503,
+          );
+        if (failure === "network read failure")
+          throw new TypeError("Failed to fetch");
+        return jsonResponse(
+          failure === "busy response"
+            ? {
+                active: false,
+                cleanupPending: true,
+                state: "cleanup-pending",
+                error: "capture_observation_busy",
+                commands: 0,
+              }
+            : {
+                ...active,
+                active: false,
+                state: "scope-changed",
+                scopeState: "unresolved",
+                error: "capture_backend_not_ready\ncontext canceled",
+              },
+        );
+      });
+      view.rerender(
+        <GatewayPanel
+          runtime={view.controller}
+          nodes={nodes}
+          refreshVersion={1}
+          onPending={view.onPending}
+          onSetup={view.onSetup}
+        />,
+      );
+      await screen.findByText("状态暂未确认");
+      expect(screen.getByText("上次确认已安装：")).toHaveTextContent(
+        "192.168.31.0/24",
+      );
+      expect(screen.queryByText("范围未知")).toBeNull();
+      expect(screen.queryByText("运行中")).toBeNull();
+      expect(document.querySelector(".badge-success")).toBeNull();
+      expect(screen.queryByText(/规则尚未撤回|context canceled/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "重试撤回" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "开启网关代理" })).toBeNull();
+      expect(screen.getByRole("button", { name: "关闭" })).toHaveClass(
+        "button-secondary",
+      );
+      expect(screen.getByRole("button", { name: "重新读取" })).toHaveClass(
+        "button-primary",
+      );
+      expect(writes(fetch)).toEqual([]);
+      uncertain = false;
+      fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
+      await screen.findByText("运行中");
+      expect(screen.queryByText("上次确认已安装：")).toBeNull();
+      expect(screen.queryByRole("button", { name: "重新读取" })).toBeNull();
+      expect(writes(fetch)).toEqual([]);
+    },
+  );
+
+  it("clears the prior active sample after confirmed withdrawal", async () => {
+    const fetch = fakeAPI(active);
+    const normal = fetch.getMockImplementation()!;
+    const view = mount();
+    await screen.findByText("运行中");
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    await screen.findByText("已停用");
+    fetch.mockImplementation(async (url, init) =>
+      url === "/api/proxy/capture"
+        ? jsonResponse({
+            active: false,
+            cleanupPending: true,
+            state: "cleanup-pending",
+            error: "capture_observation_busy",
+            commands: 0,
+          })
+        : normal(url, init),
+    );
+    view.rerender(
+      <GatewayPanel
+        runtime={view.controller}
+        nodes={nodes}
+        refreshVersion={1}
+        onPending={view.onPending}
+        onSetup={view.onSetup}
+      />,
+    );
+    await screen.findByText("状态暂未确认");
+    expect(screen.queryByText("上次确认已安装：")).toBeNull();
+    expect(screen.getByText("范围未知")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();
+    expect(screen.getByRole("button", { name: "开启网关代理" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    expect(writes(fetch).map(([, init]) => init?.method)).toEqual(["DELETE"]);
+  });
+
+  it("labels uncertain ranges as recorded rather than confirmed without a prior sample", async () => {
+    const fetch = fakeAPI({
+      ...active,
+      active: false,
+      cleanupPending: true,
+      state: "cleanup-pending",
+      error: "capture_observation_failed",
+    });
+    mount();
+    await screen.findByText("状态暂未确认");
+    expect(screen.getByText("已记录范围：")).toHaveTextContent(
+      "192.168.31.0/24",
+    );
+    expect(screen.queryByText("上次确认已安装：")).toBeNull();
+    expect(document.querySelector(".badge-success")).toBeNull();
+    expect(screen.getByRole("button", { name: "关闭" })).toHaveClass(
+      "button-secondary",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    expect(writes(fetch)).toEqual([]);
+  });
+
+  it("does not enable from a retained inactive sample after a failed read", async () => {
+    const fetch = fakeAPI(off);
+    const normal = fetch.getMockImplementation()!;
+    const view = mount();
+    await screen.findByText("已停用");
+    fetch.mockImplementation(async (url, init) =>
+      url === "/api/proxy/capture"
+        ? jsonResponse(
+            {
+              error: {
+                code: "observation_unavailable",
+                message: "unavailable",
+              },
+            },
+            503,
+          )
+        : normal(url, init),
+    );
+    view.rerender(
+      <GatewayPanel
+        runtime={view.controller}
+        nodes={nodes}
+        refreshVersion={1}
+        onPending={view.onPending}
+        onSetup={view.onSetup}
+      />,
+    );
+    await screen.findByText("状态暂未确认");
+    expect(screen.getByRole("button", { name: "开启网关代理" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "开启网关代理" }));
+    fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    expect(writes(fetch)).toEqual([]);
+    expect(view.controller.run).not.toHaveBeenCalled();
+  });
+
+  it("does not recommend withdrawal when an explicit enable fails", async () => {
+    const fetch = fakeAPI(off);
+    const normal = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (url, init) =>
+      url === "/api/proxy/capture" && init?.method === "POST"
+        ? jsonResponse(
+            {
+              error: {
+                code: "capture_backend_not_ready",
+                message: "context canceled",
+              },
+            },
+            409,
+          )
+        : normal(url, init),
+    );
+    mount();
+    await screen.findByText("已停用");
+    fireEvent.click(screen.getByRole("button", { name: "开启网关代理" }));
+    await screen.findByRole("alert");
+    expect(screen.queryByText(/context canceled/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "重试撤回" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+    expect(writes(fetch).map(([, init]) => init?.method)).toEqual(["POST"]);
   });
 
   it.each([

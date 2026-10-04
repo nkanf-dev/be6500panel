@@ -8,12 +8,34 @@ import {
   PanelHeader,
 } from "../../components/ui/primitives";
 import { api, errorMessage, runRequest } from "../../lib/api";
-import type { ProxyNodes } from "../../lib/contracts";
+import type { ProxyCapture, ProxyNodes } from "../../lib/contracts";
 import { useResource } from "../../lib/use-resource";
 import type { RuntimeController } from "../runtime/use-runtime";
 import { nodeProbeApi } from "./node-probe-api";
 
 export type GatewaySetup = "runtime" | "subscription" | "node";
+
+// Read replies can join a stable code and a lower-level cause with a newline.
+// Match only the bounded leading token, not similar names or arbitrary causes.
+function captureErrorCode(error?: string) {
+  return error?.slice(0, 80).match(/^([a-z][a-z0-9_]*)(?=$|[\s:])/)?.[1];
+}
+
+function canceledRead(message?: string) {
+  return /(?:^|[\s:])context (?:canceled|deadline exceeded)(?=$|[\s:])/.test(
+    message?.slice(0, 512) ?? "",
+  );
+}
+
+function observationFailure(capture?: ProxyCapture) {
+  const code = captureErrorCode(capture?.error);
+  return (
+    code === "capture_observation_busy" ||
+    code === "capture_observation_failed" ||
+    code === "capture_backend_not_ready" ||
+    canceledRead(capture?.error)
+  );
+}
 
 export function GatewayPanel({
   runtime,
@@ -36,41 +58,74 @@ export function GatewayPanel({
   // One read-only snapshot for the compact card; never starts a probe job.
   const probes = useResource(nodeProbeApi.snapshot);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<unknown>();
+  const [error, setError] = useState<{ cause: unknown; enable: boolean }>();
+  const [lastConfirmed, setLastConfirmed] = useState<ProxyCapture>();
   const submitting = useRef(false);
-  const capture =
-    observation.error === undefined ? observation.data : undefined;
+  // useResource retains the previous reply after an HTTP read failure.
+  const capture = observation.data;
   const status = runtime.status;
   const node = nodes?.nodes.find((item) => item.id === nodes.selectedNodeId);
   const busy = pending || otherPending || runtime.pending;
-  const declared = capture?.lanIPv4Prefixes;
-  const installed = capture?.installedLanIPv4Prefixes;
+  const code = captureErrorCode(capture?.error);
+  const cleanupCode =
+    code === "capture_cleanup_failed" ||
+    code === "capture_disable_not_persisted" ||
+    code === "capture_withdraw_failed";
+  const cleanupFailure =
+    error?.enable === false ||
+    cleanupCode ||
+    (capture?.desired === false &&
+      !!capture.cleanupPending &&
+      !observationFailure(capture));
+  const readFailure = !cleanupCode && observationFailure(capture);
   const scopeChanged =
-    capture?.scopeState === "changed" ||
-    capture?.scopeState === "unresolved" ||
-    capture?.state === "scope-changed" ||
-    (declared !== undefined &&
-      installed !== undefined &&
-      capture?.active &&
-      (declared.length !== installed.length ||
-        declared.some((prefix) => !installed.includes(prefix))));
+    observation.error === undefined &&
+    !readFailure &&
+    (capture?.scopeState === "changed" ||
+      (capture?.state === "scope-changed" &&
+        capture.scopeState !== "unresolved") ||
+      (capture?.active &&
+        capture.lanIPv4Prefixes !== undefined &&
+        capture.installedLanIPv4Prefixes !== undefined &&
+        (capture.lanIPv4Prefixes.length !==
+          capture.installedLanIPv4Prefixes.length ||
+          capture.lanIPv4Prefixes.some(
+            (prefix) => !capture.installedLanIPv4Prefixes!.includes(prefix),
+          ))));
+  const uncertain =
+    observation.error !== undefined ||
+    (!cleanupFailure &&
+      (readFailure ||
+        !!capture?.cleanupPending ||
+        capture?.scopeState === "unresolved" ||
+        capture?.state === "unknown" ||
+        (capture?.scope === "gateway" &&
+          capture.active &&
+          !capture.installedLanIPv4Prefixes?.length)));
+  const previousScope = uncertain ? lastConfirmed : undefined;
+  const installed =
+    previousScope?.installedLanIPv4Prefixes ??
+    capture?.installedLanIPv4Prefixes;
+  const declared = capture?.lanIPv4Prefixes ?? previousScope?.lanIPv4Prefixes;
   const suspendedGateway =
     capture?.scope === "gateway" &&
     !capture.active &&
     capture.state === "suspended" &&
-    !installed?.length;
+    !capture.installedLanIPv4Prefixes?.length;
   const withdrawing = !!(
+    cleanupFailure ||
     capture?.active ||
+    capture?.installedLanIPv4Prefixes?.length ||
     (capture?.desired && !suspendedGateway) ||
-    capture?.cleanupPending ||
-    capture?.error
+    previousScope?.active
   );
   const active =
+    !uncertain &&
+    !cleanupFailure &&
     capture?.scope === "gateway" &&
     capture.active &&
-    !!installed?.length &&
+    !!capture.installedLanIPv4Prefixes?.length &&
     !scopeChanged &&
-    !capture.cleanupPending &&
     !capture.error &&
     (capture.state === undefined || capture.state === "active") &&
     status?.state === "running" &&
@@ -78,23 +133,32 @@ export function GatewayPanel({
     error === undefined;
   const inactive =
     capture !== undefined &&
+    !uncertain &&
+    !capture.error &&
     !withdrawing &&
     (capture.state === undefined ||
       capture.state === "inactive" ||
       suspendedGateway);
-  const stateLabel = capture?.cleanupPending
+  const needsRead =
+    uncertain ||
+    scopeChanged ||
+    (!!capture?.error && !cleanupFailure) ||
+    error?.enable === true;
+  const stateLabel = cleanupFailure
     ? "待撤回"
-    : capture?.error || scopeChanged
-      ? "接管异常"
-      : active
-        ? "运行中"
-        : inactive
-          ? "已停用"
-          : capture?.active && capture.scope !== "gateway"
-            ? "设备接管中"
-            : observation.loading
-              ? "读取中"
-              : "状态未知";
+    : uncertain
+      ? "状态暂未确认"
+      : capture?.error || scopeChanged || error
+        ? "接管异常"
+        : active
+          ? "运行中"
+          : inactive
+            ? "已停用"
+            : capture?.active && capture.scope !== "gateway"
+              ? "设备接管中"
+              : observation.loading
+                ? "读取中"
+                : "状态未知";
   const currentProbe =
     probes.error === undefined && probes.data?.revision === nodes?.revision
       ? probes.data?.results.find((item) => item.nodeId === node?.id)
@@ -127,6 +191,7 @@ export function GatewayPanel({
       : undefined;
   const canEnable =
     !busy &&
+    error === undefined &&
     inactive &&
     !observation.loading &&
     !nodesLoading &&
@@ -136,6 +201,22 @@ export function GatewayPanel({
     !!status?.artifactAvailable &&
     status.configured &&
     (status.state === "running" || status.state === "stopped");
+
+  useEffect(() => {
+    if (observation.error !== undefined || uncertain || capture?.error) return;
+    if (
+      capture?.scope === "gateway" &&
+      capture.active &&
+      !!capture.installedLanIPv4Prefixes?.length &&
+      !scopeChanged &&
+      !capture.cleanupPending &&
+      (capture.state === undefined || capture.state === "active")
+    ) {
+      setLastConfirmed(capture);
+    } else if (inactive) {
+      setLastConfirmed(undefined);
+    }
+  }, [capture, observation.error, uncertain, scopeChanged, inactive]);
 
   useEffect(() => {
     observation.reload();
@@ -171,7 +252,10 @@ export function GatewayPanel({
           "核心已启动",
         );
         if (!started || !running) {
-          setError(new Error("核心未能运行，请检查运行管理后重试。"));
+          setError({
+            cause: new Error("核心未能运行，请检查运行管理后重试。"),
+            enable,
+          });
           return;
         }
       }
@@ -181,7 +265,7 @@ export function GatewayPanel({
           : api.proxyCaptureDisable(),
       );
     } catch (cause) {
-      setError(cause);
+      setError({ cause, enable });
     } finally {
       observation.reload();
       runtime.refresh();
@@ -200,9 +284,13 @@ export function GatewayPanel({
             tone={
               active
                 ? "success"
-                : capture?.error || capture?.cleanupPending || scopeChanged
+                : cleanupFailure || scopeChanged || error
                   ? "danger"
-                  : "neutral"
+                  : uncertain
+                    ? "warning"
+                    : capture?.error
+                      ? "danger"
+                      : "neutral"
             }
           >
             {stateLabel}
@@ -234,14 +322,23 @@ export function GatewayPanel({
             <dd>
               {installed?.length ? (
                 <div>
-                  已安装：<span className="mono">{installed.join("、")}</span>
+                  {previousScope
+                    ? "上次确认已安装："
+                    : uncertain
+                      ? "已记录范围："
+                      : "已安装："}
+                  <span className="mono">{installed.join("、")}</span>
                 </div>
               ) : (
                 <div>{inactive ? "未接管" : "范围未知"}</div>
               )}
               {declared !== undefined && (
                 <div>
-                  当前声明：
+                  {uncertain && previousScope && !capture?.lanIPv4Prefixes
+                    ? "上次确认声明："
+                    : observation.error !== undefined
+                      ? "上次读取声明："
+                      : "当前声明："}
                   <span className="mono">
                     {declared.length ? declared.join("、") : "无"}
                   </span>
@@ -286,36 +383,33 @@ export function GatewayPanel({
             onRetry={busy ? undefined : runtime.refresh}
           />
         )}
-        {observation.error !== undefined && (
+        {needsRead && (
           <ErrorState
-            message={errorMessage(observation.error)}
-            onRetry={busy ? undefined : observation.reload}
-          />
-        )}
-        {capture?.cleanupPending && (
-          <ErrorState
-            message="接管规则尚未撤回，请重试撤回。"
-            onRetry={busy ? undefined : () => void change(false)}
-          />
-        )}
-        {capture?.error && (
-          <ErrorState
-            message={capture.error}
-            onRetry={busy ? undefined : () => void change(false)}
-          />
-        )}
-        {scopeChanged && !capture?.error && (
-          <ErrorState
-            message="当前声明与已安装范围不一致，请先撤回接管。"
-            onRetry={busy ? undefined : () => void change(false)}
-          />
-        )}
-        {error !== undefined && (
-          <ErrorState
-            message={errorMessage(error)}
-            onRetry={
-              withdrawing && !busy ? () => void change(false) : undefined
+            message={
+              error?.enable === true
+                ? canceledRead(errorMessage(error.cause))
+                  ? "开启未完成，请重新读取状态后重试。"
+                  : errorMessage(error.cause)
+                : uncertain
+                  ? "接管状态暂未确认，请重新读取。"
+                  : scopeChanged
+                    ? "当前声明与已安装范围不一致，请重新读取后检查并重新应用。"
+                    : "接管状态需要检查，请重新读取。"
             }
+          />
+        )}
+        {cleanupFailure && (
+          <ErrorState
+            message={
+              error?.enable === false
+                ? canceledRead(errorMessage(error.cause))
+                  ? "撤回未完成，请重试撤回。"
+                  : errorMessage(error.cause)
+                : code === "capture_disable_not_persisted"
+                  ? "关闭状态尚未保存，请重试撤回。"
+                  : "接管规则尚未撤回，请重试撤回。"
+            }
+            onRetry={busy ? undefined : () => void change(false)}
           />
         )}
         <div className="form-actions">
@@ -326,6 +420,18 @@ export function GatewayPanel({
           >
             更换节点
           </Button>
+          {needsRead && (
+            <Button
+              variant="primary"
+              disabled={busy}
+              onClick={() => {
+                if (error?.enable) setError(undefined);
+                observation.reload();
+              }}
+            >
+              重新读取
+            </Button>
+          )}
           <Button
             variant={withdrawing ? "secondary" : "primary"}
             disabled={busy || (!withdrawing && !canEnable)}
@@ -334,7 +440,7 @@ export function GatewayPanel({
             {pending
               ? "处理中…"
               : withdrawing
-                ? capture?.cleanupPending || capture?.error || scopeChanged
+                ? cleanupFailure
                   ? "重试撤回"
                   : "关闭"
                 : "开启网关代理"}
