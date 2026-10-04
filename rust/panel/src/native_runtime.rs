@@ -115,6 +115,74 @@ impl<O: Observer + 'static> NativeReadiness<O> {
         }
         self.check(context)
     }
+    /// One caller-invoked current proof. Never starts, waits for readiness or
+    /// repairs resources. Artifact/process identity brackets real listener/DNS
+    /// probes; accepted bytes must still match the same retained configuration.
+    pub fn observe_current(&mut self, context: &HookContext<'_>) -> Result<(), HookError> {
+        self.check(context)?;
+        let initial = owned_status(context)?;
+        self.check(context)?;
+        let root = context.artifact_root.ok_or(HookError::Failed)?.to_path_buf();
+        let path = context.artifact_path.ok_or(HookError::Failed)?.to_path_buf();
+        let file = context.artifact_file.ok_or(HookError::Failed)?;
+        let directory = context.artifact_directory.ok_or(HookError::Failed)?;
+        let identity = OwnedIdentity::bind(
+            initial, root, path, file, directory, &mut self.observer,
+            context.deadline, &self.cancel,
+        ).map_err(tun_error)?;
+        let budget = readiness_tun::Budget { deadline: context.deadline, cancel: &self.cancel };
+        let mut status = || {
+            owned_status(context).map_err(|error| match error {
+                HookError::Deadline => TunError::Deadline,
+                HookError::Cancelled => TunError::Cancelled,
+                _ => TunError::IdentityChanged,
+            })
+        };
+        identity.unchanged(&mut self.observer, &budget, &mut status).map_err(tun_error)?;
+        if context.service == ServiceId::Frpc {
+            // Identity/liveness only: no accepted listener or tunnel-health claim.
+            return self.check(context);
+        }
+        let raw = read_accepted_until(context, Some(&self.cancel))?;
+        let tun = readiness_tun::native_target(&raw).map_err(tun_error)?.is_some();
+        let targets = readiness_dns::native_readiness_targets(&raw).map_err(dns_error)?;
+        if tun && !targets.iter().any(|target| target.domain.is_some()) {
+            return Err(HookError::Failed);
+        }
+        if tun {
+            readiness_tun::observe_owned_once(
+                &raw, &identity, &mut self.observer, context.deadline,
+                &self.cancel, &mut status,
+            ).map_err(tun_error)?;
+        }
+        let listeners = (|| {
+            for target in &targets {
+                budget.check().map_err(tun_error)?;
+                readiness_dns::probe_once(target, context.deadline, Some(&self.cancel))
+                    .map_err(dns_error)?;
+            }
+            Ok(())
+        })();
+        // Reuse the ORIGINAL start-time stamp. Rebinding after DNS would accept
+        // replacement identity and silently discard the proof's time interval.
+        identity.unchanged(&mut self.observer, &budget, &mut status).map_err(tun_error)?;
+        if tun {
+            readiness_tun::observe_owned_once(
+                &raw, &identity, &mut self.observer, context.deadline,
+                &self.cancel, &mut status,
+            ).map_err(tun_error)?;
+        }
+        listeners?;
+        // Release the first bounded config before its second disk/hash read.
+        // Current observation must not retain two maximum-size config buffers.
+        drop(raw);
+        read_accepted_until(context, Some(&self.cancel))?;
+        identity.unchanged(&mut self.observer, &budget, &mut status).map_err(tun_error)?;
+        if owned_status(context)? != initial {
+            return Err(HookError::Failed);
+        }
+        self.check(context)
+    }
     fn check(&self, context: &HookContext<'_>) -> Result<(), HookError> {
         if self.cancel.load(Ordering::Relaxed) {
             return Err(HookError::Cancelled);
@@ -173,16 +241,35 @@ fn owned_status(context: &HookContext<'_>) -> Result<OwnedStatus, HookError> {
     })
 }
 pub(crate) fn read_accepted(context: &HookContext<'_>) -> Result<Vec<u8>, HookError> {
+    read_accepted_until(context, None)
+}
+fn read_accepted_until(
+    context: &HookContext<'_>,
+    cancel: Option<&AtomicBool>,
+) -> Result<Vec<u8>, HookError> {
     use std::os::unix::fs::MetadataExt;
+    let check = || {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err(HookError::Cancelled);
+        }
+        if std::time::Instant::now() >= context.deadline {
+            return Err(HookError::Deadline);
+        }
+        Ok(())
+    };
+    check()?;
     if !context.config_path.is_absolute() {
         return Err(HookError::Failed);
     }
-    let mut file = OpenOptions::new()
+    let opened = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
-        .open(context.config_path)
-        .map_err(|_| HookError::Failed)?;
-    let before = file.metadata().map_err(|_| HookError::Failed)?;
+        .open(context.config_path);
+    check()?;
+    let mut file = opened.map_err(|_| HookError::Failed)?;
+    let metadata = file.metadata();
+    check()?;
+    let before = metadata.map_err(|_| HookError::Failed)?;
     if !before.is_file()
         || before.mode() & 0o7777 != 0o600
         || before.nlink() != 1
@@ -197,10 +284,13 @@ pub(crate) fn read_accepted(context: &HookContext<'_>) -> Result<Vec<u8>, HookEr
         .map_err(|_| HookError::Failed)?;
     let mut buffer = [0u8; 8192];
     loop {
-        if std::time::Instant::now() >= context.deadline {
-            return Err(HookError::Deadline);
-        }
-        let n = file.read(&mut buffer).map_err(|_| HookError::Failed)?;
+        check()?;
+        let result = file.read(&mut buffer);
+        check()?;
+        let n = match result {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => result.map_err(|_| HookError::Failed)?,
+        };
         if n == 0 {
             break;
         }
@@ -209,8 +299,13 @@ pub(crate) fn read_accepted(context: &HookContext<'_>) -> Result<Vec<u8>, HookEr
         }
         raw.extend_from_slice(&buffer[..n]);
     }
-    let after = file.metadata().map_err(|_| HookError::Failed)?;
-    let disk = fs::symlink_metadata(context.config_path).map_err(|_| HookError::Failed)?;
+    check()?;
+    let metadata = file.metadata();
+    check()?;
+    let after = metadata.map_err(|_| HookError::Failed)?;
+    let metadata = fs::symlink_metadata(context.config_path);
+    check()?;
+    let disk = metadata.map_err(|_| HookError::Failed)?;
     if before.dev() != after.dev()
         || before.ino() != after.ino()
         || before.len() != after.len()
@@ -224,7 +319,10 @@ pub(crate) fn read_accepted(context: &HookContext<'_>) -> Result<Vec<u8>, HookEr
     {
         return Err(HookError::Failed);
     }
-    if format!("{:x}", Sha256::digest(&raw)) != context.config.sha256 {
+    check()?;
+    let digest = format!("{:x}", Sha256::digest(&raw));
+    check()?;
+    if digest != context.config.sha256 {
         return Err(HookError::Failed);
     }
     Ok(raw)
