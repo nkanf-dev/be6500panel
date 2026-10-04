@@ -2,7 +2,7 @@
 
 A modular, professional control panel for the Xiaomi BE6500 (RN02).
 
-**Native control plane:** Go, typed APIs, bounded events/logs, private configuration generations and commit/rollback transactions. **Browser:** React, Effect, Motion, Tailwind CSS, accessible Radix/shadcn-style components and Apache ECharts. No Node.js runtime on the router.
+**Native control plane:** Rust. The replacement uses bounded requests, private configuration generations and explicit resource ownership. Production migration is not complete; the existing device manager remains in place until the safe handover is qualified. **Browser:** React, Effect, Motion, Tailwind CSS, accessible Radix/shadcn-style components and Apache ECharts. No Node.js runtime on the router.
 
 ## Modules
 
@@ -27,7 +27,7 @@ Runtime configurations use explicit **Commit 配置**, followed by Start/Stop. S
 
 ## Development
 
-Go 1.26, Bun and Node.js 20.20+.
+Rust 1.93, Bun and Node.js 20.20+. Go is no longer a project build requirement.
 
 ```text
 make setup
@@ -39,15 +39,17 @@ make build
 make armv7
 ```
 
-The development API binds to127.0.0.1:8787 with explicit demo data. Omit `--demo` for actual Linux proc observations.
+The Rust development service binds to `127.0.0.1:8790`. It implements authenticated rule draft read/save/preview and memory diagnostics. Runtime Apply and unrelated management APIs remain unavailable until their migration is complete. This is not yet a production replacement.
 
-## Router run
+All Cargo commands use `.build/rust`, one build job and no incremental cache. Do not pass a per-worker `--target-dir`. Separate source worktrees must set `CARGO_TARGET_DIR` to the integration worktree's `.build/rust` and share the existing `web/node_modules` directory.
 
-```text
-BE6500PANEL_PASSWORD=<private-password> ./be6500panel   --listen 192.168.31.1:8787   --web-dir ./web   --data-dir /data/be6500panel   --run-dir /tmp/be6500panel/managed   --enable-control
-```
+For ARMv7 cross-builds, install the Rust `armv7-unknown-linux-musleabihf` target and provide a compatible linker. The current macOS validation uses Rust's bundled `rust-lld` with `linker-flavor=ld.lld`, `target-feature=+crt-static` and `link-self-contained=yes`; Linux CI uses `arm-linux-gnueabihf-gcc`.
 
-Password sessions protect the API. Native settings and journals stay in `/data`; verified external binaries can be reconstructed in `/tmp`. `scripts/bootstrap.sh` reconstructs a checksum-verified persistent panel archive. Factory Web and SSH remain independent recovery paths.
+## Production migration boundary
+
+Do not install the current Rust slice over the running device manager yet. The existing manager and native cores remain independent from source-side cleanup. Production activation requires actual readiness, resource budgets, exclusive ownership, remaining API parity and data migration checks.
+
+The obsolete extra Go management front has been retired. User rule drafts, accepted configurations, native routing data, history, rescue SSH and factory ACLs are preserved. External sing-box and FRPC are retained components, not project Go build targets.
 
 ## Architecture
 
@@ -73,3 +75,8 @@ The capability matrix tracks dedicated RN02 adapters for official Wi-Fi7/MLO/Mes
 ## Source boundary
 
 Only source, tests and synthetic examples belong in Git. Subscriptions, keys, Wi-Fi credentials, live snapshots and private configuration remain on the managed device/developer machine. The panel is MIT; external binaries and data retain their upstream licenses.
+
+Browser CI currently runs isolated fixture suites only. The old Go-demo-dependent
+`console.spec.ts` and `modern-layout.spec.ts` remain historical tests, not active
+Rust parity gates. They must be ported to actual Rust contracts before production
+migration is declared complete. No browser test starts a Go process.

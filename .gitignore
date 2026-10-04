@@ -12,3 +12,6 @@ test-results/
 /be6500panel
 *.tgz
 *.gz
+
+# Shared rebuildable Rust output
+.build/

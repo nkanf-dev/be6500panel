@@ -17,18 +17,18 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  webServer: [
-    {
-      command: "go run ../cmd/be6500panel --demo --listen 127.0.0.1:8787",
-      url: "http://127.0.0.1:8787/api/health",
-      reuseExistingServer: !process.env.CI,
-      timeout: 30_000,
-    },
-    {
-      command: "bun run dev -- --port 5173 --strictPort",
-      url: "http://127.0.0.1:5173",
-      reuseExistingServer: !process.env.CI,
-      timeout: 30_000,
-    },
+  // These suites install isolated API fixtures. They do not build or start
+  // the retired Go demo backend and do not claim full Rust runtime parity.
+  testMatch: [
+    "chart-stability.spec.ts",
+    "node-probes.spec.ts",
+    "maturity-scale.spec.ts",
+    "maturity-workflows.spec.ts",
   ],
+  webServer: {
+    command: "bun run dev -- --port 5173 --strictPort",
+    url: "http://127.0.0.1:5173",
+    reuseExistingServer: !process.env.CI,
+    timeout: 30_000,
+  },
 });

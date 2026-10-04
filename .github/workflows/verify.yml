@@ -8,21 +8,30 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/.build/rust
+  CARGO_BUILD_JOBS: 1
+  CARGO_INCREMENTAL: 0
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          go-version: '1.26.x'
-          cache: false
+          toolchain: 1.93.0
+          components: rustfmt, clippy
+          targets: armv7-unknown-linux-musleabihf
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: ARMv7 linker
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf
       - run: make setup
       - run: make test
-      - run: go test -race ./...
       - run: make build armv7
+        env:
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER: arm-linux-gnueabihf-gcc
       - run: cd web && bunx playwright install --with-deps chromium
       - run: cd web && bun run test:browser

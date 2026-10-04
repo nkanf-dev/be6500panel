@@ -1,0 +1,6 @@
+# One rebuildable output tree. Agent worktrees must share CARGO_TARGET_DIR
+# with the integration worktree rather than creating another target directory.
+[build]
+target-dir = ".build/rust"
+jobs = 1
+incremental = false

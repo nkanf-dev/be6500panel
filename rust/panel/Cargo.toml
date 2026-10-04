@@ -28,3 +28,12 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Keep validation artifacts small; no incremental cache per worktree.
+[profile.dev]
+debug = 1
+incremental = false
+
+[profile.test]
+debug = 1
+incremental = false
