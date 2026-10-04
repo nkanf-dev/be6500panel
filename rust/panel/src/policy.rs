@@ -118,7 +118,7 @@ impl From<Target> for String {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Rule {
     pub kind: RuleKind,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -134,7 +134,7 @@ fn is_false(value: &bool) -> bool {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct LocalRule {
     pub id: String,
     pub enabled: bool,
@@ -144,7 +144,7 @@ pub struct LocalRule {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct SubscriptionEdit {
     pub id: String,
     pub source_fingerprint: String,
