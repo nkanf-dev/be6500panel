@@ -120,6 +120,16 @@ impl TrustedBinary {
             identity: identity(&before),
         })
     }
+    fn retained_copy(&self) -> Result<Self, AdmissionError> {
+        if !self.unchanged() {
+            return Err(AdmissionError::Binary);
+        }
+        Ok(Self {
+            path: self.path.clone(),
+            file: self.file.try_clone().map_err(|_| AdmissionError::Binary)?,
+            identity: self.identity,
+        })
+    }
     fn unchanged(&self) -> bool {
         self.file
             .metadata()
@@ -133,6 +143,15 @@ impl TrustedBinary {
 pub struct Binaries {
     pub ip: TrustedBinary,
     pub iptables: TrustedBinary,
+}
+impl Binaries {
+    /// Reuses retained admitted inode handles, without rereading binary bytes.
+    pub(crate) fn retained_copy(&self) -> Result<Self, AdmissionError> {
+        Ok(Self {
+            ip: self.ip.retained_copy()?,
+            iptables: self.iptables.retained_copy()?,
+        })
+    }
 }
 impl fmt::Debug for Binaries {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -213,6 +232,9 @@ impl Executor {
         }
         let mut command = Command::new(&binary.path);
         command
+            // Preserve BusyBox/xtables applet dispatch after admitting the
+            // resolved executable inode. The logical name is fixed ip/iptables.
+            .arg0(&argv[0])
             .args(&argv[1..])
             .env_clear()
             .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
@@ -335,6 +357,11 @@ impl Executor {
         }
         let _ = child.wait();
         Err(error)
+    }
+    /// A failed one-shot termination must retain this executor for explicit
+    /// retry, rather than replacing its exact child handle.
+    pub(crate) fn has_pending_child(&self) -> bool {
+        self.pending.is_some()
     }
     pub fn retry_abort(&mut self) -> Result<(), CommandError> {
         let Some(mut child) = self.pending.take() else {

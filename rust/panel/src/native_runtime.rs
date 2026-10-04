@@ -172,7 +172,7 @@ fn owned_status(context: &HookContext<'_>) -> Result<OwnedStatus, HookError> {
         running: true,
     })
 }
-fn read_accepted(context: &HookContext<'_>) -> Result<Vec<u8>, HookError> {
+pub(crate) fn read_accepted(context: &HookContext<'_>) -> Result<Vec<u8>, HookError> {
     use std::os::unix::fs::MetadataExt;
     if !context.config_path.is_absolute() {
         return Err(HookError::Failed);

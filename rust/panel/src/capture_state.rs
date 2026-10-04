@@ -328,6 +328,19 @@ impl Controller {
             input: self.owned.as_ref().and_then(|o| o.input.clone()),
         }
     }
+    /// Internal cleanup admission from the validated journal only. It does not
+    /// authorize restoration; that always needs fresh accepted configuration
+    /// and LAN intent from the runtime integration owner.
+    pub(crate) fn cleanup_input(&self) -> Option<RulesPlanInput> {
+        let owned = self.owned.as_ref()?;
+        Some(
+            owned
+                .input
+                .clone()
+                .unwrap_or_else(|| recovery_input(&owned.plan.ownership)),
+        )
+    }
+
     /// Saves user intent only. No automatic Apply/cleanup; no saved listener,
     /// interface, last-IP device observation, or command authority.
     pub fn set_desired(&mut self, desired: Desired) -> Result<(), Error> {
@@ -716,13 +729,8 @@ fn desired_matches(d: &Desired, o: &RulesOwnership) -> Result<(), Error> {
         Err(Error::IntentMismatch)
     }
 }
-fn recover(raw: Vec<u8>) -> Result<OwnedState, Error> {
-    let stored: StoredJournal = parse_strict(&raw).map_err(|_| Error::InvalidJournal)?;
-    if stored.ownership.datapath != "routed-tun" {
-        return Err(Error::LegacyJournal);
-    }
-    let o = &stored.ownership;
-    let input = stored.input.clone().unwrap_or_else(|| RulesPlanInput {
+fn recovery_input(o: &RulesOwnership) -> RulesPlanInput {
+    RulesPlanInput {
         scope: o.scope.clone(),
         lan_ipv4_prefixes: o.lan_ipv4_prefixes.clone(),
         datapath: o.datapath.clone(),
@@ -742,7 +750,16 @@ fn recover(raw: Vec<u8>) -> Result<OwnedState, Error> {
             dns: 1053,
         },
         ..RulesPlanInput::default()
-    });
+    }
+}
+
+fn recover(raw: Vec<u8>) -> Result<OwnedState, Error> {
+    let stored: StoredJournal = parse_strict(&raw).map_err(|_| Error::InvalidJournal)?;
+    if stored.ownership.datapath != "routed-tun" {
+        return Err(Error::LegacyJournal);
+    }
+    let o = &stored.ownership;
+    let input = stored.input.clone().unwrap_or_else(|| recovery_input(o));
     let plan = capture_plan::plan_owned_rules(&input).map_err(|_| Error::InvalidJournal)?;
     if plan.ownership != stored.ownership || plan.cleanup != stored.cleanup {
         return Err(Error::InvalidJournal);
