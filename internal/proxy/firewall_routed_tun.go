@@ -22,16 +22,17 @@ const (
 	ownedTUNOutput  = "B6P_V4_TUN_OUTPUT"
 )
 
-// planOwnedRoutedTUN receives only canonical, bounded legacy inputs. It owns
-// packet routing/firewall intent, never interface or main-core lifecycle.
+// planOwnedRoutedTUN receives canonical, bounded device or gateway inputs. Both
+// scopes use the same proven packet chains and main-core-owned system TUN. It
+// owns packet routing/firewall intent, never interface or main-core lifecycle.
 func planOwnedRoutedTUN(input RulesPlanInput, v4, v6 []netip.Addr, bypass, management, endpoints, routerDNS []string) (OwnedRulesPlan, error) {
 	if input.IPv6 != IPv6Direct {
 		return OwnedRulesPlan{}, fmt.Errorf("routed-tun requires IPv6 direct in the initial qualified phase")
 	}
-	if input.ClientMACs == nil {
+	if input.Scope != CaptureScopeGateway && input.ClientMACs == nil {
 		return OwnedRulesPlan{}, fmt.Errorf("routed-tun requires exact ClientMACs for every selected client")
 	}
-	if input.Ports.TProxy != 7893 {
+	if input.Scope != CaptureScopeGateway && input.Ports.TProxy != 7893 {
 		return OwnedRulesPlan{}, fmt.Errorf("routed-tun requires the unused compatibility TProxy port 7893")
 	}
 	local, peer, err := ownedRoutedTUNAddresses(input, v4, management, endpoints)
@@ -56,16 +57,28 @@ func planOwnedRoutedTUN(input RulesPlanInput, v4, v6 []netip.Addr, bypass, manag
 			"Fail-direct cleanup removes owned hooks, chains, policy rules and the ordinary TUN route, not core-created interfaces or existing DNS REDIRECT conntrack bindings. Coordinate scoped flow drain/expiry on stop or failure; no global conntrack flush is planned.",
 		},
 	}
-	// Retain the established exact-client singular/plural ownership convention.
-	if len(input.ClientIPv4s) == 0 {
-		plan.Ownership.ClientIPv4 = v4[0].String()
+	sources := make([]string, 0, len(v4))
+	if input.Scope == CaptureScopeGateway {
+		plan.Ownership.Scope = CaptureScopeGateway
+		plan.Ownership.LANIPv4Prefixes = slices.Clone(input.LANIPv4Prefixes)
+		sources = input.LANIPv4Prefixes
+		plan.Warnings[1] = "Declared-prefix and incoming-LAN-interface TCP/UDP capture only. New sources within these prefixes follow automatically; no device inventory or router OUTPUT capture. Guest/IoT/WAN interfaces remain outside this scope."
 	} else {
-		plan.Ownership.ClientIPv4s = ownedClientStrings(v4)
-	}
-	if len(input.ClientIPv6s) != 0 {
-		plan.Ownership.ClientIPv6s = ownedClientStrings(v6)
-	} else if len(v6) != 0 {
-		plan.Ownership.ClientIPv6 = v6[0].String()
+		// Retain the established exact-client singular/plural ownership and
+		// byte shape for device intent and old-journal withdrawal.
+		if len(input.ClientIPv4s) == 0 {
+			plan.Ownership.ClientIPv4 = v4[0].String()
+		} else {
+			plan.Ownership.ClientIPv4s = ownedClientStrings(v4)
+		}
+		if len(input.ClientIPv6s) != 0 {
+			plan.Ownership.ClientIPv6s = ownedClientStrings(v6)
+		} else if len(v6) != 0 {
+			plan.Ownership.ClientIPv6 = v6[0].String()
+		}
+		for _, client := range v4 {
+			sources = append(sources, ownedHostPrefix(client))
+		}
 	}
 	if input.FakeIP {
 		plan.Warnings = append(plan.Warnings,
@@ -74,8 +87,8 @@ func planOwnedRoutedTUN(input RulesPlanInput, v4, v6 []netip.Addr, bypass, manag
 	}
 	b := ownedRulesBuilder{plan: &plan, input: input, bypass: bypass, management: management, endpoints: endpoints, routerDNS: routerDNS}
 	plan.Apply = append(plan.Apply, ownedRoutedTUNRoute(input.TUNInterface, "add"))
-	for _, client := range v4 {
-		plan.Apply = append(plan.Apply, b.rule(4, client, "add"))
+	for _, source := range sources {
+		plan.Apply = append(plan.Apply, b.sourceRule(4, source, "add"))
 	}
 	b.chain(4, "mangle", ownedTUNMark, "PREROUTING")
 	b.chain(4, "nat", ownedTUNDNS, "PREROUTING")
@@ -85,6 +98,11 @@ func planOwnedRoutedTUN(input RulesPlanInput, v4, v6 []netip.Addr, bypass, manag
 	b.chain(4, "filter", ownedTUNOutput, "OUTPUT")
 	ownedRoutedTUNPacketChains(&b)
 	for _, chain := range []string{ownedTUNForward, ownedTUNReturn} {
+		if input.Scope == CaptureScopeGateway && chain == ownedTUNReturn {
+			// Management addresses can be inside the declaration. Keep their
+			// factory forwarding path before the shared TCP/UDP acceptance.
+			b.addressBypass(4, "filter", chain, management)
+		}
 		for _, protocol := range []string{"tcp", "udp"} {
 			b.appendRule(4, "filter", chain, "-p", protocol, "-j", "ACCEPT")
 		}
@@ -96,22 +114,22 @@ func planOwnedRoutedTUN(input RulesPlanInput, v4, v6 []netip.Addr, bypass, manag
 	}
 	// Forward/return/private-stack permissions are exact hooks, not blanket TUN
 	// ACCEPT. Prepare them and DNS before the MARK hooks admit original packets.
-	for _, client := range v4 {
+	for _, source := range sources {
 		for _, protocol := range []string{"tcp", "udp"} {
-			args := ownedRoutedTUNClientMatch(input, client)
+			args := ownedRoutedTUNSourceMatch(input, source)
 			args = append(args, "-o", input.TUNInterface, "-m", "mark", "--mark", ownedMarkMask(), "-p", protocol, "-j", ownedTUNForward)
 			b.hooks = append(b.hooks, ownedRoutedTUNHook("filter", "FORWARD", args...))
-			b.hooks = append(b.hooks, ownedRoutedTUNHook("filter", "FORWARD", "-i", input.TUNInterface, "-o", input.LANInterface, "-d", ownedHostPrefix(client), "-p", protocol, "-j", ownedTUNReturn))
+			b.hooks = append(b.hooks, ownedRoutedTUNHook("filter", "FORWARD", "-i", input.TUNInterface, "-o", input.LANInterface, "-d", source, "-p", protocol, "-j", ownedTUNReturn))
 		}
 	}
 	b.hooks = append(b.hooks,
 		ownedRoutedTUNHook("filter", "INPUT", "-i", input.TUNInterface, "-s", ownedHostPrefix(peer), "-d", ownedHostPrefix(local), "-p", "tcp", "-j", ownedTUNInput),
 		ownedRoutedTUNHook("filter", "OUTPUT", "-o", input.TUNInterface, "-s", ownedHostPrefix(local), "-d", ownedHostPrefix(peer), "-p", "tcp", "-j", ownedTUNOutput))
-	for _, client := range v4 {
-		b.hook(4, "nat", ownedTUNDNS, "PREROUTING", client)
-	}
-	for _, client := range v4 {
-		b.hook(4, "mangle", ownedTUNMark, "PREROUTING", client)
+	for _, entry := range []struct{ table, chain string }{{"nat", ownedTUNDNS}, {"mangle", ownedTUNMark}} {
+		for _, source := range sources {
+			args := append(ownedRoutedTUNSourceMatch(input, source), "-j", entry.chain)
+			b.hooks = append(b.hooks, ownedRoutedTUNHook(entry.table, "PREROUTING", args...))
+		}
 	}
 	plan.Apply = append(plan.Apply, b.hooks...)
 	// Reverse hook order removes MARK entry first, DNS next, then all scoped
@@ -127,8 +145,8 @@ func planOwnedRoutedTUN(input RulesPlanInput, v4, v6 []netip.Addr, bypass, manag
 		chain := plan.Ownership.Chains[i]
 		plan.Cleanup = append(plan.Cleanup, ownedIPTables(4, chain.Table, "-F", chain.Name), ownedIPTables(4, chain.Table, "-X", chain.Name))
 	}
-	for i := len(v4) - 1; i >= 0; i-- {
-		plan.Cleanup = append(plan.Cleanup, b.rule(4, v4[i], "del"))
+	for i := len(sources) - 1; i >= 0; i-- {
+		plan.Cleanup = append(plan.Cleanup, b.sourceRule(4, sources[i], "del"))
 	}
 	plan.Cleanup = append(plan.Cleanup, ownedRoutedTUNRoute(input.TUNInterface, "del"))
 	plan.OnFailure = ownedCloneCommands(plan.Cleanup)
@@ -146,6 +164,11 @@ func ownedRoutedTUNAddresses(input RulesPlanInput, clients []netip.Addr, managem
 	local, network := prefix.Addr(), prefix.Masked()
 	if local != network.Addr().Next() {
 		return netip.Addr{}, netip.Addr{}, fmt.Errorf("TUNAddress must be the first usable /30 host so the next host is its usable peer")
+	}
+	for _, value := range input.LANIPv4Prefixes {
+		if network.Overlaps(netip.MustParsePrefix(value)) {
+			return netip.Addr{}, netip.Addr{}, fmt.Errorf("TUNAddress /30 overlaps a declared LAN prefix")
+		}
 	}
 	for _, client := range clients {
 		if network.Contains(client) {
@@ -204,8 +227,13 @@ func ownedRoutedTUNPacketChains(b *ownedRulesBuilder) {
 	b.appendRule(4, "nat", ownedTUNDNS, "-j", "RETURN")
 }
 
-func ownedRoutedTUNClientMatch(input RulesPlanInput, client netip.Addr) []string {
-	return []string{"-i", input.LANInterface, "-s", ownedHostPrefix(client), "-m", "mac", "--mac-source", input.ClientMACs[client.String()]}
+func ownedRoutedTUNSourceMatch(input RulesPlanInput, source string) []string {
+	args := []string{"-i", input.LANInterface, "-s", source}
+	if input.Scope != CaptureScopeGateway {
+		client := netip.MustParsePrefix(source).Addr().String()
+		args = append(args, "-m", "mac", "--mac-source", input.ClientMACs[client])
+	}
+	return args
 }
 
 func ownedRoutedTUNHook(table, hook string, args ...string) []string {

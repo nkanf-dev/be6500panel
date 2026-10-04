@@ -22,8 +22,12 @@ const (
 	MaxCaptureClientsPerFamily = 64
 )
 
-// RulesPlanInput selects a bounded set of exact IPv4 clients, and optionally
-// exact IPv6 clients. It is not a LAN-wide policy. Singular legacy fields remain
+// RulesPlanInput selects bounded exact-client or declared-LAN gateway capture.
+// Gateway requires routed-tun, IPv6Direct, FailureDirect and 1..8 canonical
+// disjoint RFC1918 LANIPv4Prefixes; no client literal, list or MAC map is valid.
+// Its actual Mixed/DNS ports must be nonzero and distinct; TProxy is unused.
+// Empty or devices scope selects exact IPv4 clients and optionally exact IPv6
+// clients, never LAN-wide policy. Singular legacy fields remain
 // valid and are merged with plural fields when both are supplied. All client
 // entries are literal addresses, never hostnames, prefixes, comma-separated
 // lists or interface-zone-qualified addresses.
@@ -67,7 +71,7 @@ type RulesPlanInput struct {
 }
 
 // OwnedChain identifies a dedicated chain, not an existing system chain.
-// Hook is the system chain containing the exact, client-scoped jump.
+// Hook is the system chain containing the exact, source/interface-scoped jump.
 type OwnedChain struct {
 	Family int
 	Table  string
@@ -114,8 +118,10 @@ type OwnedRulesPlan struct {
 
 var ownedLANInterface = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,14}$`)
 
-// PlanOwnedRules builds exact-client transparent TCP/UDP capture, DNS REDIRECT
-// and optional IPv6 intent. No command is run and no router state is inspected.
+// PlanOwnedRules builds source-scoped TCP/UDP capture and DNS REDIRECT intent.
+// Gateway uses the proven routed-TUN backend for declared LAN prefixes; exact
+// devices also support the legacy TPROXY backend and optional IPv6 intent.
+// No command is run and no router state is inspected. For the legacy backend,
 // TPROXY modifies only CaptureMask, preserving QoS/mwan/parent/UU mark bits.
 // Routes and complete dedicated chains are prepared before any hook is added.
 // DNS must use its own NAT REDIRECT: the native direct DNS listener cannot use
@@ -128,11 +134,50 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	if input.Failure == "" {
 		input.Failure = FailureDirect
 	}
-	if input.Ports == (Ports{}) {
+	if input.Ports == (Ports{}) && input.Scope != CaptureScopeGateway {
 		input.Ports = Ports{Mixed: 2080, TProxy: 7893, DNS: 1053}
 	}
 	if len(input.EndpointIPs) > 256 || len(input.ManagementIPs) > 128 || len(input.RouterDNSAddresses) > 16 {
 		return OwnedRulesPlan{}, fmt.Errorf("firewall input limit exceeded: at most 256 EndpointIPs, 128 ManagementIPs and 16 RouterDNSAddresses")
+	}
+	switch input.Scope {
+	case "", CaptureScopeDevices:
+		if len(input.LANIPv4Prefixes) != 0 {
+			return OwnedRulesPlan{}, fmt.Errorf("LANIPv4Prefixes require gateway scope")
+		}
+	case CaptureScopeGateway:
+	default:
+		return OwnedRulesPlan{}, fmt.Errorf("invalid capture scope")
+	}
+	if !ownedLANInterface.MatchString(input.LANInterface) {
+		return OwnedRulesPlan{}, fmt.Errorf("LANInterface must be a safe, exact interface name of 1 to 15 bytes (no wildcard)")
+	}
+	endpoints, err := ownedAddressList(input.EndpointIPs)
+	if err != nil {
+		return OwnedRulesPlan{}, fmt.Errorf("EndpointIPs: %w", err)
+	}
+	management, err := ownedAddressList(input.ManagementIPs)
+	if err != nil {
+		return OwnedRulesPlan{}, fmt.Errorf("ManagementIPs: %w", err)
+	}
+	routerDNS, err := ownedAddressList(input.RouterDNSAddresses)
+	if err != nil {
+		return OwnedRulesPlan{}, fmt.Errorf("RouterDNSAddresses: %w", err)
+	}
+	for _, destination := range routerDNS {
+		addr, _ := netip.ParseAddr(destination)
+		if addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || destination == "255.255.255.255" || !slices.Contains(management, destination) {
+			return OwnedRulesPlan{}, fmt.Errorf("RouterDNSAddresses must be unicast router LAN addresses also present in ManagementIPs")
+		}
+	}
+	bypass := append(slices.Clone(endpoints), management...)
+	slices.Sort(bypass)
+	bypass = slices.Compact(bypass)
+
+	// Gateway declarations are independent of exact-client inventory. Validate
+	// the bounded address lists first, then dispatch without requiring clients.
+	if input.Scope == CaptureScopeGateway {
+		return planOwnedGateway(input, bypass, management, endpoints, routerDNS)
 	}
 	v4, err := ownedClientAddresses(input.ClientIPv4, input.ClientIPv4s, 4)
 	if err != nil {
@@ -144,9 +189,6 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	v6, err := ownedClientAddresses(input.ClientIPv6, input.ClientIPv6s, 6)
 	if err != nil {
 		return OwnedRulesPlan{}, fmt.Errorf("ClientIPv6/ClientIPv6s: %w", err)
-	}
-	if !ownedLANInterface.MatchString(input.LANInterface) {
-		return OwnedRulesPlan{}, fmt.Errorf("LANInterface must be a safe, exact interface name of 1 to 15 bytes (no wildcard)")
 	}
 	if input.Ports.Mixed == 0 || input.Ports.TProxy == 0 || input.Ports.DNS == 0 || input.Ports.TProxy == input.Ports.DNS {
 		return OwnedRulesPlan{}, fmt.Errorf("listener ports must be nonzero and distinct")
@@ -175,27 +217,6 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	default:
 		return OwnedRulesPlan{}, fmt.Errorf("invalid failure policy")
 	}
-	endpoints, err := ownedAddressList(input.EndpointIPs)
-	if err != nil {
-		return OwnedRulesPlan{}, fmt.Errorf("EndpointIPs: %w", err)
-	}
-	management, err := ownedAddressList(input.ManagementIPs)
-	if err != nil {
-		return OwnedRulesPlan{}, fmt.Errorf("ManagementIPs: %w", err)
-	}
-	routerDNS, err := ownedAddressList(input.RouterDNSAddresses)
-	if err != nil {
-		return OwnedRulesPlan{}, fmt.Errorf("RouterDNSAddresses: %w", err)
-	}
-	for _, destination := range routerDNS {
-		addr, _ := netip.ParseAddr(destination)
-		if addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || destination == "255.255.255.255" || !slices.Contains(management, destination) {
-			return OwnedRulesPlan{}, fmt.Errorf("RouterDNSAddresses must be unicast router LAN addresses also present in ManagementIPs")
-		}
-	}
-	bypass := append(slices.Clone(endpoints), management...)
-	slices.Sort(bypass)
-	bypass = slices.Compact(bypass)
 
 	// Keep the default backend's ownership and argv byte shape unchanged.
 	// Routed TUN is an explicit opt-in, never a migration inferred from fields.
@@ -291,6 +312,68 @@ func PlanOwnedRules(input RulesPlanInput) (OwnedRulesPlan, error) {
 	}
 	plan.OnFailure = ownedCloneCommands(plan.Cleanup)
 	return plan, nil
+}
+
+// CanonicalGatewayPrefixes validates a declared LAN scope without consulting
+// device inventory. It returns an independent, sorted clone, never broadens a
+// host prefix to its network, and accepts synthetic /32 qualification canaries.
+func CanonicalGatewayPrefixes(raw []string) ([]string, error) {
+	if len(raw) == 0 || len(raw) > 8 {
+		return nil, fmt.Errorf("gateway requires 1 to 8 declared IPv4 LAN prefixes")
+	}
+	private := []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("172.16.0.0/12"),
+		netip.MustParsePrefix("192.168.0.0/16"),
+	}
+	prefixes := make([]netip.Prefix, 0, len(raw))
+	canonical := make([]string, 0, len(raw))
+	for i, value := range raw {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil || !prefix.Addr().Is4() || prefix.Bits() < 8 || prefix.Bits() > 32 || prefix != prefix.Masked() || value != prefix.String() {
+			return nil, fmt.Errorf("LANIPv4Prefixes entry %d requires a canonical IPv4 network prefix /8 through /32 without host bits", i)
+		}
+		isPrivate := false
+		for _, network := range private {
+			if prefix.Bits() >= network.Bits() && network.Contains(prefix.Addr()) {
+				isPrivate = true
+				break
+			}
+		}
+		if !isPrivate {
+			return nil, fmt.Errorf("LANIPv4Prefixes entry %d must be wholly inside RFC1918 space", i)
+		}
+		for _, existing := range prefixes {
+			if prefix.Overlaps(existing) {
+				return nil, fmt.Errorf("LANIPv4Prefixes must be disjoint without duplicate or overlapping prefixes")
+			}
+		}
+		prefixes = append(prefixes, prefix)
+		canonical = append(canonical, value)
+	}
+	slices.Sort(canonical)
+	return canonical, nil
+}
+
+func planOwnedGateway(input RulesPlanInput, bypass, management, endpoints, routerDNS []string) (OwnedRulesPlan, error) {
+	if input.Datapath != DatapathRoutedTUN || input.IPv6 != IPv6Direct || input.Failure != FailureDirect {
+		return OwnedRulesPlan{}, fmt.Errorf("gateway requires routed-tun, IPv6 direct and fail-direct")
+	}
+	if input.ClientIPv4 != "" || input.ClientIPv6 != "" || input.ClientIPv4s != nil || input.ClientIPv6s != nil || input.ClientMACs != nil {
+		return OwnedRulesPlan{}, fmt.Errorf("gateway forbids exact client addresses, client lists and MAC maps")
+	}
+	prefixes, err := CanonicalGatewayPrefixes(input.LANIPv4Prefixes)
+	if err != nil {
+		return OwnedRulesPlan{}, err
+	}
+	if input.Ports.Mixed == 0 || input.Ports.DNS == 0 || input.Ports.Mixed == input.Ports.DNS {
+		return OwnedRulesPlan{}, fmt.Errorf("gateway Mixed and DNS listener ports must be actual, nonzero and distinct")
+	}
+	// Routed TUN never uses TProxy. This is compiler normalization, not a
+	// listener reservation or a user-facing compatibility requirement.
+	input.Ports.TProxy = 7893
+	input.LANIPv4Prefixes = prefixes
+	return planOwnedRoutedTUN(input, nil, nil, bypass, management, endpoints, routerDNS)
 }
 
 func ownedClientAddresses(singular string, plural []string, family int) ([]netip.Addr, error) {
@@ -569,8 +652,12 @@ func (b *ownedRulesBuilder) tproxy(family int, chain, protocol, destination stri
 }
 
 func (b *ownedRulesBuilder) rule(family int, client netip.Addr, operation string) []string {
+	return b.sourceRule(family, ownedHostPrefix(client), operation)
+}
+
+func (b *ownedRulesBuilder) sourceRule(family int, source, operation string) []string {
 	return []string{"ip", "-" + strconv.Itoa(family), "rule", operation, "priority", strconv.Itoa(CapturePriority),
-		"from", ownedHostPrefix(client), "iif", b.input.LANInterface, "fwmark", ownedMarkMask(), "lookup", strconv.Itoa(CaptureTable)}
+		"from", source, "iif", b.input.LANInterface, "fwmark", ownedMarkMask(), "lookup", strconv.Itoa(CaptureTable)}
 }
 
 func ownedLocalRoute(family int, operation string) []string {
