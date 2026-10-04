@@ -125,6 +125,33 @@ beforeEach(() => {
 });
 
 describe("explicit local draft rules", () => {
+  it("places the GPT direct shortcut ahead of existing broad local rules", async () => {
+    vi.mocked(localRulesApi.state).mockReturnValue(
+      Effect.succeed(
+        state({
+          rules: [
+            { ...local, rule: { kind: "match", target: "proxy", index: 0 } },
+          ],
+          subscriptionEdits: [],
+        }),
+      ),
+    );
+    render(<LocalRulesEditor />);
+    await loaded();
+    fireEvent.click(
+      screen.getByRole("button", { name: "加入 gpt.kanglives.top 直连" }),
+    );
+    fireEvent.click(preview());
+    await waitFor(() => expect(localRulesApi.preview).toHaveBeenCalledTimes(1));
+    const policy = vi.mocked(localRulesApi.preview).mock.calls[0][0];
+    expect(policy.rules[0].rule).toMatchObject({
+      kind: "domain",
+      value: "gpt.kanglives.top",
+      target: "direct",
+    });
+    expect(policy.rules[1].id).toBe(local.id);
+  });
+
   it("creates stable IDs on local HTTP without randomUUID and clears invalid no-resolve options", async () => {
     const getRandomValues = globalThis.crypto.getRandomValues.bind(
       globalThis.crypto,
@@ -187,6 +214,7 @@ describe("explicit local draft rules", () => {
       { kind: "match", value: "" },
     ];
     for (const [index, item] of values.entries()) {
+      await waitFor(() => expect(preview()).toBeEnabled());
       fireEvent.change(within(row(local.id)).getByLabelText("匹配类型"), {
         target: { value: item.kind },
       });

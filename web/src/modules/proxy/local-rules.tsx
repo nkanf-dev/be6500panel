@@ -542,7 +542,12 @@ export function LocalRulesEditor({
   }
   function add(gpt = false) {
     if (policy && !busy && policy.rules.length < 512)
-      change({ ...policy, rules: [...policy.rules, newLocal(gpt)] });
+      change({
+        ...policy,
+        rules: gpt
+          ? [newLocal(true), ...policy.rules]
+          : [...policy.rules, newLocal()],
+      });
   }
   function restore(fingerprint: string) {
     if (!policy || busy) return;
@@ -852,7 +857,7 @@ export function LocalRulesEditor({
               </summary>
               <div className="page-stack">
                 <p className="text-muted text-xs">
-                  禁用或改写只编辑本地草稿；通过完整规则指纹匹配，不通过位置匹配。
+                  禁用或改写仅保存在本地草稿；订阅规则更新时，只要规则内容未变，禁用与改写依然有效。
                 </p>
                 <Field
                   label="搜索订阅规则"
@@ -1136,6 +1141,7 @@ export function LocalRulesEditor({
               </Button>
               <Button
                 type="button"
+                variant={!dirty && canApply ? "primary" : "secondary"}
                 disabled={!canApply}
                 onClick={() => {
                   if (canApply && observation)
