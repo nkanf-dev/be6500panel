@@ -667,6 +667,44 @@ pub fn subscription_fingerprints(subscription: &[Rule]) -> Result<Vec<String>, P
     Ok(fingerprints_validated(subscription))
 }
 
+/// Immutable, type-bound source for repeated internal previews. Construction
+/// validates the moved rules and computes their fingerprints exactly once.
+/// Private fields and shared-only access prevent rule/reference substitution.
+/// No caller-provided fingerprint slice is accepted by this type.
+pub(crate) struct PreparedSubscription {
+    rules: Vec<Rule>,
+    fingerprints: Vec<String>,
+}
+
+impl PreparedSubscription {
+    pub(crate) fn new(rules: Vec<Rule>) -> Result<Self, PolicyError> {
+        let fingerprints = subscription_fingerprints(&rules)?;
+        Ok(Self {
+            rules,
+            fingerprints,
+        })
+    }
+
+    pub(crate) fn rules(&self) -> &[Rule] {
+        &self.rules
+    }
+
+    pub(crate) fn fingerprints(&self) -> &[String] {
+        &self.fingerprints
+    }
+
+    pub(crate) fn merge(&self, policy: &Policy) -> Result<EffectivePolicy, PolicyError> {
+        // Drafts still require validation on every operation; only the immutable
+        // subscription's validation and fingerprint calculation are reused.
+        validate_policy(policy)?;
+        Ok(merge_validated_subscription(
+            &self.rules,
+            &self.fingerprints,
+            policy,
+        ))
+    }
+}
+
 /// Prepends enabled locals, then retains exact subscription order and content
 /// unless explicitly disabled/replaced. Missing references remain inactive.
 /// Rules after terminal MATCH remain visible with unreachable diagnostics.
@@ -680,6 +718,18 @@ pub fn merge_effective_policy(
         return Err(PolicyError { diagnostics });
     }
     let refs = fingerprints_validated(subscription);
+    Ok(merge_validated_subscription(subscription, &refs, policy))
+}
+
+// Both entry points validate their draft. The public path validates the source
+// for this call; PreparedSubscription binds an already validated immutable one.
+// Keep this helper private: unrelated rules/fingerprints cannot be paired by a
+// caller outside this module.
+fn merge_validated_subscription(
+    subscription: &[Rule],
+    refs: &[String],
+    policy: &Policy,
+) -> EffectivePolicy {
     let edits: HashMap<_, _> = policy
         .subscription_edits
         .iter()
@@ -806,5 +856,189 @@ pub fn merge_effective_policy(
             ));
         }
     }
-    Ok(out)
+    out
+}
+
+#[cfg(test)]
+mod prepared_tests {
+    use super::*;
+
+    fn domain(value: &str, index: i64) -> Rule {
+        Rule {
+            kind: RuleKind::Domain,
+            value: value.into(),
+            target: Target::Proxy,
+            index,
+            ..Rule::default()
+        }
+    }
+
+    #[test]
+    fn prepared_source_matches_standalone_merge_and_keeps_binding_across_drafts() {
+        let source = vec![
+            domain("DUP.example", 11),
+            domain("dup.example", 22),
+            Rule {
+                kind: RuleKind::Match,
+                target: Target::Direct,
+                index: 33,
+                ..Rule::default()
+            },
+            domain("after.example", 44),
+        ];
+        let prepared = PreparedSubscription::new(source.clone()).unwrap();
+        let rules_ptr = prepared.rules().as_ptr();
+        let refs_ptr = prepared.fingerprints().as_ptr();
+        let first_ref_ptr = prepared.fingerprints()[0].as_ptr();
+        assert!(prepared.fingerprints()[0].ends_with(":1"));
+        assert!(prepared.fingerprints()[1].ends_with(":2"));
+        assert_eq!(
+            &prepared.fingerprints()[0][..64],
+            &prepared.fingerprints()[1][..64]
+        );
+        let policy = Policy {
+            rules: vec![LocalRule {
+                id: "local-disabled".into(),
+                rule: domain("local.example", -1),
+                ..LocalRule::default()
+            }],
+            subscription_edits: vec![
+                SubscriptionEdit {
+                    id: "disable-first".into(),
+                    source_fingerprint: prepared.fingerprints()[0].clone(),
+                    disabled: true,
+                    ..SubscriptionEdit::default()
+                },
+                SubscriptionEdit {
+                    id: "replace-second".into(),
+                    source_fingerprint: prepared.fingerprints()[1].clone(),
+                    replacement: Some(domain("replacement.example", -1)),
+                    ..SubscriptionEdit::default()
+                },
+                SubscriptionEdit {
+                    id: "orphan".into(),
+                    source_fingerprint: format!("{}:1", "a".repeat(64)),
+                    disabled: true,
+                    ..SubscriptionEdit::default()
+                },
+            ],
+        };
+        let empty = Policy::default();
+        for draft in [&empty, &policy, &empty] {
+            let expected = merge_effective_policy(&source, draft).unwrap();
+            let actual = prepared.merge(draft).unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(
+                serde_json::to_vec(&actual).unwrap(),
+                serde_json::to_vec(&expected).unwrap()
+            );
+            assert_eq!(prepared.rules().as_ptr(), rules_ptr);
+            assert_eq!(prepared.fingerprints().as_ptr(), refs_ptr);
+            assert_eq!(prepared.fingerprints()[0].as_ptr(), first_ref_ptr);
+        }
+        assert_eq!(prepared.rules(), source.as_slice());
+        let mut invalid = policy;
+        invalid.rules[0].rule.value = "not a domain".into();
+        assert_eq!(
+            prepared.merge(&invalid),
+            merge_effective_policy(&source, &invalid)
+        );
+    }
+
+    #[test]
+    fn prepared_fingerprints_preserve_all_matcher_normalization_and_duplicate_order() {
+        let source: Vec<_> = [
+            (RuleKind::Domain, "Mixed.Example"),
+            (RuleKind::Domain, "mixed.example"),
+            (RuleKind::DomainSuffix, "Suffix.Example"),
+            (RuleKind::DomainKeyword, "KeyWord"),
+            (RuleKind::IpCidr, "192.0.2.129/24"),
+            (RuleKind::IpCidr, "192.0.2.0/24"),
+            (RuleKind::IpCidr, "2001:db8::1234/64"),
+            (RuleKind::RuleSet, "cn-ip"),
+            (RuleKind::Match, ""),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (kind, value))| Rule {
+            kind,
+            value: value.into(),
+            target: Target::Direct,
+            index: i as i64,
+            ..Rule::default()
+        })
+        .collect();
+        let expected_refs = subscription_fingerprints(&source).unwrap();
+        let expected = merge_effective_policy(&source, &Policy::default()).unwrap();
+        let prepared = PreparedSubscription::new(source).unwrap();
+        assert_eq!(prepared.fingerprints(), expected_refs.as_slice());
+        assert_eq!(prepared.merge(&Policy::default()).unwrap(), expected);
+        assert!(prepared.fingerprints()[1].ends_with(":2"));
+        assert!(prepared.fingerprints()[5].ends_with(":2"));
+    }
+
+    #[test]
+    fn prepared_source_rejects_invalid_and_over_limit_rules_before_binding() {
+        for source in [
+            vec![domain("not a domain", 0)],
+            vec![domain("valid.example", 0); MAX_RULES + 1],
+        ] {
+            let expected = subscription_fingerprints(&source).unwrap_err();
+            let actual = match PreparedSubscription::new(source) {
+                Ok(_) => panic!("invalid source was prepared"),
+                Err(error) => error,
+            };
+            assert_eq!(actual, expected);
+        }
+        let empty = PreparedSubscription::new(Vec::new()).unwrap();
+        assert_eq!(
+            empty.merge(&Policy::default()).unwrap(),
+            EffectivePolicy::default()
+        );
+    }
+
+    #[test]
+    fn prepared_maximum_source_moves_storage_and_preserves_eligible_capacity() {
+        let source: Vec<_> = (0..MAX_RULES)
+            .map(|i| domain(&format!("site-{i}.example"), i as i64))
+            .collect();
+        let source_ptr = source.as_ptr();
+        let source_value_ptr = source[0].value.as_ptr();
+        let prepared = PreparedSubscription::new(source).unwrap();
+        assert_eq!(prepared.rules().as_ptr(), source_ptr);
+        assert_eq!(prepared.rules()[0].value.as_ptr(), source_value_ptr);
+        let policy = Policy {
+            rules: (0..MAX_LOCAL_RULES)
+                .map(|i| LocalRule {
+                    id: format!("local-{i}"),
+                    enabled: true,
+                    rule: domain("local.example", -1),
+                    ..LocalRule::default()
+                })
+                .collect(),
+            subscription_edits: prepared
+                .fingerprints()
+                .iter()
+                .take(MAX_SUBSCRIPTION_EDITS)
+                .enumerate()
+                .map(|(i, reference)| SubscriptionEdit {
+                    id: format!("disable-{i}"),
+                    source_fingerprint: reference.clone(),
+                    disabled: true,
+                    ..SubscriptionEdit::default()
+                })
+                .collect(),
+        };
+        let expected = merge_effective_policy(prepared.rules(), &policy).unwrap();
+        for _ in 0..2 {
+            let actual = prepared.merge(&policy).unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(
+                actual.rules.len(),
+                MAX_RULES + MAX_LOCAL_RULES - MAX_SUBSCRIPTION_EDITS
+            );
+            assert_eq!(actual.rules.capacity(), actual.rules.len());
+            assert_eq!(actual.provenance.capacity(), actual.provenance.len());
+        }
+    }
 }

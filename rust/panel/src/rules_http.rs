@@ -4,9 +4,8 @@
 //! only the draft snapshot and one effective preview are owned per request.
 use crate::http::{self, Method};
 use crate::policy::{
-    Diagnostic, EffectivePolicy, LocalRule, MAX_LOCAL_RULES, MAX_SUBSCRIPTION_EDITS, Policy, Rule,
-    RuleKind, SubscriptionEdit, Target, merge_effective_policy, subscription_fingerprints,
-    validate_policy,
+    Diagnostic, EffectivePolicy, LocalRule, MAX_LOCAL_RULES, MAX_SUBSCRIPTION_EDITS, Policy,
+    PreparedSubscription, Rule, RuleKind, SubscriptionEdit, Target, validate_policy,
 };
 use crate::policy_store::{SaveOutcome, Snapshot, Store, StoreError};
 use crate::subscription::{PolicySummary, Subscription, parse_clash_yaml, summarize_policy};
@@ -33,9 +32,10 @@ impl std::error::Error for RulesError {}
 
 pub struct RulesState {
     store: Store,
-    subscription: Subscription,
+    subscription: PreparedSubscription,
+    nodes: Vec<crate::native::Node>,
+    diagnostics: Vec<Diagnostic>,
     summary: PolicySummary,
-    fingerprints: Vec<String>,
 }
 impl fmt::Debug for RulesState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -49,19 +49,18 @@ impl RulesState {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self, RulesError> {
         let subscription = read_subscription(data_dir.as_ref())?;
         let summary = summarize_policy(&subscription);
-        let fingerprints =
-            subscription_fingerprints(&subscription.rules).map_err(|_| RulesError)?;
+        let prepared = PreparedSubscription::new(subscription.rules).map_err(|_| RulesError)?;
         let store = Store::open(data_dir).map_err(|_| RulesError)?;
         Ok(Self {
             store,
-            subscription,
+            subscription: prepared,
+            nodes: subscription.nodes,
+            diagnostics: subscription.diagnostics,
             summary,
-            fingerprints,
         })
     }
     fn preview(&self, policy: &Policy) -> Result<EffectivePolicy, RulesError> {
-        let mut preview =
-            merge_effective_policy(&self.subscription.rules, policy).map_err(|_| RulesError)?;
+        let mut preview = self.subscription.merge(policy).map_err(|_| RulesError)?;
         preview.diagnostics.extend(
             self.summary
                 .omitted_rules
@@ -86,8 +85,8 @@ impl RulesState {
         match (path, method) {
             ("/api/proxy/nodes", Method::Get | Method::Head) => {
                 let response = NodesResponse {
-                    nodes: PublicNodes(&self.subscription.nodes),
-                    diagnostics: &self.subscription.diagnostics,
+                    nodes: PublicNodes(&self.nodes),
+                    diagnostics: &self.diagnostics,
                     selected_node_id: "",
                     revision: &self.summary.revision,
                     policy_summary: &self.summary,
@@ -161,8 +160,8 @@ impl RulesState {
             draft: Draft(draft),
             subscription_revision: &self.summary.revision,
             subscription_rules: SubscriptionRules {
-                rules: &self.subscription.rules,
-                fingerprints: &self.fingerprints,
+                rules: self.subscription.rules(),
+                fingerprints: self.subscription.fingerprints(),
             },
             preview,
             applied: Applied { state: "unknown" },

@@ -620,6 +620,106 @@ fn subscription_is_stable_for_service_lifetime_not_reloaded_or_cloned_per_get() 
     );
 }
 
+
+#[test]
+fn prepared_duplicate_source_preserves_preview_save_readback_and_omissions() {
+    use be6500_panel::policy::{Policy, merge_effective_policy, subscription_fingerprints};
+    use be6500_panel::subscription::{parse_clash_yaml, summarize_policy};
+
+    let fixture = Fixture::new();
+    let yaml = br#"rules:
+  - DOMAIN,DUP.example,PROXY
+  - DOMAIN,dup.example,PROXY
+  - PROCESS-NAME,synthetic-omission,DIRECT
+  - MATCH,DIRECT
+  - DOMAIN,after.example,PROXY
+"#;
+    fs::write(fixture.0.join("subscription.yaml"), yaml).unwrap();
+    let source = parse_clash_yaml(yaml).unwrap();
+    let refs = subscription_fingerprints(&source.rules).unwrap();
+    let draft = json!({
+        "rules": [{
+            "id": "disabled-local", "enabled": false, "label": "", "note": "",
+            "rule": {"kind": "domain", "value": "local.example", "target": "direct", "index": -1}
+        }],
+        "subscriptionEdits": [
+            {
+                "id": "disable-first", "sourceFingerprint": refs[0],
+                "disabled": true, "label": "", "note": ""
+            },
+            {
+                "id": "replace-second", "sourceFingerprint": refs[1],
+                "disabled": false, "label": "replacement", "note": "",
+                "replacement": {
+                    "kind": "domain", "value": "replacement.example", "target": "block", "index": -1
+                }
+            },
+            {
+                "id": "orphan", "sourceFingerprint": format!("{}:1", "a".repeat(64)),
+                "disabled": true, "label": "", "note": ""
+            }
+        ]
+    });
+    let policy: Policy = serde_json::from_value(draft.clone()).unwrap();
+    let mut expected =
+        serde_json::to_value(merge_effective_policy(&source.rules, &policy).unwrap()).unwrap();
+    let summary = summarize_policy(&source);
+    for omission in &summary.omitted_rules {
+        expected["diagnostics"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "scope": "subscription", "index": omission.index,
+                "code": omission.code, "message": omission.message
+            }));
+    }
+    let service = fixture.service();
+    let body = json!({"policy": draft}).to_string();
+    for _ in 0..2 {
+        let preview = value(
+            &exchange(
+                &service,
+                &request("POST", "/api/proxy/local-rules/preview", &body, ""),
+            ),
+            200,
+        );
+        assert_eq!(preview, expected);
+        assert!(!fixture.0.join(FILE_NAME).exists());
+    }
+    // Disk changes cannot substitute a different source into an existing binding.
+    fs::write(
+        fixture.0.join("subscription.yaml"),
+        b"rules: ['MATCH,BLOCK']",
+    )
+    .unwrap();
+    let saved_bytes = exchange(
+        &service,
+        &request("POST", "/api/proxy/local-rules", &body, ""),
+    );
+    let saved = value(&saved_bytes, 200);
+    assert_eq!(saved["preview"], expected);
+    assert_eq!(saved["draft"]["policy"], draft);
+    let expected_sources: Vec<_> = source
+        .rules
+        .iter()
+        .zip(&refs)
+        .map(|(rule, reference)| json!({"fingerprint": reference, "rule": rule}))
+        .collect();
+    assert_eq!(saved["subscriptionRules"], json!(expected_sources));
+    assert_eq!(saved["subscriptionRevision"], summary.revision);
+    let readback = exchange(&service, &request("GET", "/api/proxy/local-rules", "", ""));
+    assert_eq!(parts(&saved_bytes).1, parts(&readback).1);
+    assert_eq!(
+        saved["draft"]["revision"],
+        Store::open(&fixture.0).unwrap().snapshot().revision
+    );
+    let again = exchange(
+        &service,
+        &request("POST", "/api/proxy/local-rules", &body, ""),
+    );
+    assert_eq!(parts(&saved_bytes).1, parts(&again).1);
+}
+
 #[test]
 fn authenticated_nodes_match_actual_public_parser_projection_without_private_fields() {
     use be6500_panel::subscription::parse_clash_yaml;
