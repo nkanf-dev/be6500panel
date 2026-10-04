@@ -18,11 +18,13 @@ import (
 // Desired is saved separately from live ownership. It contains identity and
 // policy only: no commands, listener ports, endpoints or last-known device IPs.
 type Desired struct {
-	Enabled    bool              `json:"desired"`
-	Devices    []DeviceSelection `json:"devices,omitempty"`
-	ClientIPv4 string            `json:"clientIPv4,omitempty"`
-	ClientIPv6 string            `json:"clientIPv6,omitempty"`
-	IPv6       proxy.IPv6Mode    `json:"ipv6"`
+	Scope           proxy.CaptureScope `json:"scope,omitempty"`
+	LANIPv4Prefixes []string           `json:"lanIPv4Prefixes,omitempty"`
+	Enabled         bool               `json:"desired"`
+	Devices         []DeviceSelection  `json:"devices,omitempty"`
+	ClientIPv4      string             `json:"clientIPv4,omitempty"`
+	ClientIPv6      string             `json:"clientIPv6,omitempty"`
+	IPv6            proxy.IPv6Mode     `json:"ipv6"`
 }
 type DeviceSelection struct {
 	MAC string `json:"mac"`

@@ -46,6 +46,8 @@ const (
 // FakeIP must match the compiler; false preserves ordinary private destinations.
 // FailureBlockProxy is unsupported without a surviving flow classifier.
 type RulesPlanInput struct {
+	Scope              CaptureScope `json:",omitempty"`
+	LANIPv4Prefixes    []string     `json:",omitempty"`
 	Datapath           DatapathMode `json:",omitempty"`
 	TUNInterface       string       `json:",omitempty"`
 	TUNAddress         string       `json:",omitempty"`
@@ -77,21 +79,23 @@ type OwnedChain struct {
 // mark, chains, route table and rule priority are unused before applying a plan,
 // serialize generations, and retain this metadata until cleanup completes.
 type RulesOwnership struct {
-	Datapath      DatapathMode `json:",omitempty"`
-	TUNInterface  string       `json:",omitempty"`
-	TUNAddress    string       `json:",omitempty"`
-	Mark          uint32
-	Mask          uint32
-	RouteTable    int
-	RulePriority  int
-	LANInterface  string
-	ClientIPv4    string
-	ClientIPv6    string
-	ClientIPv4s   []string          `json:",omitempty"`
-	ClientIPv6s   []string          `json:",omitempty"`
-	ClientMACs    map[string]string `json:",omitempty"`
-	RouteFamilies []int
-	Chains        []OwnedChain
+	Scope           CaptureScope `json:",omitempty"`
+	LANIPv4Prefixes []string     `json:",omitempty"`
+	Datapath        DatapathMode `json:",omitempty"`
+	TUNInterface    string       `json:",omitempty"`
+	TUNAddress      string       `json:",omitempty"`
+	Mark            uint32
+	Mask            uint32
+	RouteTable      int
+	RulePriority    int
+	LANInterface    string
+	ClientIPv4      string
+	ClientIPv6      string
+	ClientIPv4s     []string          `json:",omitempty"`
+	ClientIPv6s     []string          `json:",omitempty"`
+	ClientMACs      map[string]string `json:",omitempty"`
+	RouteFamilies   []int
+	Chains          []OwnedChain
 }
 
 // OwnedRulesPlan is pure argv intent. Each command includes its executable and

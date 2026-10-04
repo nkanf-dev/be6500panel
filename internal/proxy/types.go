@@ -28,6 +28,13 @@ const (
 	FailureBlockProxy FailurePolicy = "block-proxy"
 )
 
+type CaptureScope string
+
+const (
+	CaptureScopeDevices CaptureScope = "devices"
+	CaptureScopeGateway CaptureScope = "gateway"
+)
+
 type DatapathMode string
 
 const (

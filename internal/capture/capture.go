@@ -27,18 +27,21 @@ import (
 // own synchronization.
 type Runner func(context.Context, []string) ([]byte, error)
 type Status struct {
-	Desired          bool           `json:"desired"`
-	Clients          []Client       `json:"clients"`                    // Fresh desired-device observations, not proof of installed scope.
-	InstalledClients []Client       `json:"installedClients,omitempty"` // Exact saved ownership; Active proves its resources.
-	ScopeState       string         `json:"scopeState,omitempty"`       // current, changed, or unresolved desired scope.
-	IPv6             proxy.IPv6Mode `json:"ipv6,omitempty"`
-	Error            string         `json:"error,omitempty"`
-	Active           bool           `json:"active"`
-	ClientIPv4       string         `json:"clientIPv4,omitempty"`
-	ClientIPv6       string         `json:"clientIPv6,omitempty"`
-	Commands         int            `json:"commands"`
-	CleanupPending   bool           `json:"cleanupPending"`
-	State            string         `json:"state"`
+	Scope                    proxy.CaptureScope `json:"scope,omitempty"`
+	LANIPv4Prefixes          []string           `json:"lanIPv4Prefixes,omitempty"`
+	InstalledLANIPv4Prefixes []string           `json:"installedLanIPv4Prefixes,omitempty"`
+	Desired                  bool               `json:"desired"`
+	Clients                  []Client           `json:"clients"`                    // Fresh desired-device observations, not proof of installed scope.
+	InstalledClients         []Client           `json:"installedClients,omitempty"` // Exact saved ownership; Active proves its resources.
+	ScopeState               string             `json:"scopeState,omitempty"`       // current, changed, or unresolved desired scope.
+	IPv6                     proxy.IPv6Mode     `json:"ipv6,omitempty"`
+	Error                    string             `json:"error,omitempty"`
+	Active                   bool               `json:"active"`
+	ClientIPv4               string             `json:"clientIPv4,omitempty"`
+	ClientIPv6               string             `json:"clientIPv6,omitempty"`
+	Commands                 int                `json:"commands"`
+	CleanupPending           bool               `json:"cleanupPending"`
+	State                    string             `json:"state"`
 }
 
 // CommandError contains only internally compiled network argv and bounded kernel
