@@ -80,6 +80,8 @@ func ParseClashYAML(r io.Reader) (Subscription, error) {
 		out.Nodes = append(out.Nodes, n)
 	}
 	groups := field(root, "proxy-groups")
+	groupMembers := map[string][]string{}
+	groupTargets := map[string]Target{}
 	if groups != nil {
 		if groups.Kind != yaml.SequenceNode || len(groups.Content) > 128 {
 			return out, fmt.Errorf("invalid or excessive selector groups")
@@ -91,13 +93,24 @@ func ParseClashYAML(r io.Reader) (Subscription, error) {
 				return out, fmt.Errorf("invalid selector group name")
 			}
 			names[name] = true
+			members := field(group, "proxies")
+			if members != nil && members.Kind == yaml.SequenceNode {
+				for _, member := range members.Content {
+					groupMembers[name] = append(groupMembers[name], scalar(member))
+				}
+			}
 			out.GroupCount++
 			if typ != "select" && typ != "url-test" && typ != "fallback" && typ != "load-balance" {
 				out.Diagnostics = append(out.Diagnostics, Diagnostic{"group", out.GroupCount - 1, "unsupported-group", "group is not a known selector"})
 			}
 		}
 		if out.GroupCount > 0 {
-			out.Diagnostics = append(out.Diagnostics, Diagnostic{"subscription", -1, "selected-node-policy", "named selectors collapse to the explicitly selected node; no concurrent node probes"})
+			out.Diagnostics = append(out.Diagnostics, Diagnostic{"subscription", -1, "selected-node-policy", "proxy selectors use the selected node; unambiguous direct or reject groups retain their routing intent"})
+		}
+	}
+	for name := range groupMembers {
+		if target, okay := uniformGroupTarget(name, groupMembers, map[string]bool{}); okay {
+			groupTargets[name] = target
 		}
 	}
 	rules := field(root, "rules")
@@ -109,7 +122,7 @@ func ParseClashYAML(r io.Reader) (Subscription, error) {
 			if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
 				return out, fmt.Errorf("rule %d must be a string", i)
 			}
-			rule, code, message := parseRule(item.Value, names)
+			rule, code, message := parseRuleWithGroups(item.Value, names, groupTargets)
 			rule.Index = i
 			if code != "" {
 				out.Diagnostics = append(out.Diagnostics, Diagnostic{"rule", i, code, message})
@@ -363,6 +376,10 @@ func validDomain(domain string) bool {
 	return true
 }
 func parseRule(text string, names map[string]bool) (Rule, string, string) {
+	return parseRuleWithGroups(text, names, nil)
+}
+
+func parseRuleWithGroups(text string, names map[string]bool, groupTargets map[string]Target) (Rule, string, string) {
 	var out Rule
 	parts := strings.Split(text, ",")
 	for i := range parts {
@@ -425,7 +442,9 @@ func parseRule(text string, names map[string]bool) (Rule, string, string) {
 	case "PROXY":
 		out.Target = TargetProxy
 	default:
-		if names[target] {
+		if resolved, okay := groupTargets[target]; okay {
+			out.Target = resolved
+		} else if names[target] {
 			out.Target = TargetProxy
 		} else {
 			return out, "unknown-rule-target", "rule target is not a known node or selector"
@@ -469,4 +488,40 @@ func validateRule(r Rule) error {
 		return fmt.Errorf("unsupported native rule type")
 	}
 	return nil
+}
+
+// A group that has only DIRECT (or only REJECT) leaves is not a proxy selector.
+// Resolve those explicit intents without guessing a mixed selector's choice.
+// Cycles, unknown members and mixed targets retain ordinary selected-node policy.
+func uniformGroupTarget(name string, groups map[string][]string, visiting map[string]bool) (Target, bool) {
+	if visiting[name] || len(visiting) > 128 {
+		return "", false
+	}
+	members, exists := groups[name]
+	if !exists || len(members) == 0 {
+		return "", false
+	}
+	visiting[name] = true
+	defer delete(visiting, name)
+	var result Target
+	for _, member := range members {
+		var target Target
+		switch strings.ToUpper(member) {
+		case "DIRECT":
+			target = TargetDirect
+		case "REJECT", "REJECT-DROP":
+			target = TargetBlock
+		default:
+			var okay bool
+			target, okay = uniformGroupTarget(member, groups, visiting)
+			if !okay {
+				return "", false
+			}
+		}
+		if result != "" && result != target {
+			return "", false
+		}
+		result = target
+	}
+	return result, result != ""
 }
