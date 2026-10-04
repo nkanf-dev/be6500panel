@@ -268,3 +268,38 @@ fn recovered_compiled_cleanup_uses_executor_and_blocks_stop_on_failure() {
         || line.starts_with("-4 rule del")));
     assert_eq!(built.get(), 0);
 }
+
+#[test]
+fn off_capture_native_observer_seam_has_no_constructor_or_lifecycle_actions() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let command = fixture.root.join("artifacts/fake-command");
+    let hash = Sha256::digest(COMMAND.as_bytes()).into();
+    let capture = Rc::new(RefCell::new(CaptureRuntime::with_observer(
+        Controller::open(fixture.root.join("capture")).unwrap(),
+        Binaries {
+            ip: TrustedBinary::admit(&command, hash).unwrap(),
+            iptables: TrustedBinary::admit(&command, hash).unwrap(),
+        },
+        fixture.root.join("exec"),
+        table_names(b"").unwrap(),
+        be6500_panel::readiness_tun::NativeObserver::with_proc_root(
+            fixture.root.join("missing-native-source"),
+        ),
+    )));
+    assert!(!fixture.root.join("exec/commands").exists());
+    let mut manager = fixture.manager(capture.clone());
+    manager
+        .configure(
+            ServiceId::SingBox,
+            0,
+            b"not native configuration: off means no parse\n",
+            None,
+        )
+        .unwrap();
+    assert!(manager.start(ServiceId::SingBox).unwrap().active);
+    manager.stop(ServiceId::SingBox).unwrap();
+    assert_eq!(capture.borrow().status().phase, Phase::Off);
+    assert!(!fixture.root.join("exec/commands").exists());
+    assert!(!fixture.root.join("missing-native-source").exists());
+}

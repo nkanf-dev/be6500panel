@@ -2,12 +2,17 @@ pub mod auth;
 #[cfg(unix)]
 pub mod capture_executor;
 #[cfg(unix)]
+pub mod capture_input;
+#[cfg(unix)]
 pub mod capture_kernel;
+#[cfg(unix)]
+pub mod capture_lan;
 pub mod capture_plan;
 #[cfg(unix)]
 pub mod capture_runtime;
 #[cfg(unix)]
 pub mod capture_state;
+pub mod endpoint_dns;
 pub mod http;
 pub mod memory;
 pub mod native;

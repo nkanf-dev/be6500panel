@@ -108,9 +108,7 @@ fn check(budget: &Budget<'_>) -> Result<(), LanError> {
     budget.check().map_err(error)
 }
 fn valid_interface(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 15
-        && name.bytes().all(|b| b > 32 && b != 127 && b != b'/')
+    !name.is_empty() && name.len() <= 15 && name.bytes().all(|b| b > 32 && b != 127 && b != b'/')
 }
 fn read(
     observer: &mut impl Observer,
@@ -192,10 +190,7 @@ pub fn observe(
     Ok(snapshot)
 }
 
-fn scope(
-    interfaces: &[Interface],
-    budget: &Budget<'_>,
-) -> Result<Scope, LanError> {
+fn scope(interfaces: &[Interface], budget: &Budget<'_>) -> Result<Scope, LanError> {
     if interfaces.len() > MAX_INTERFACES {
         return Err(LanError::Limit);
     }
@@ -346,8 +341,7 @@ fn push(rows: &mut Vec<Row>, row: Row) -> Result<(), LanError> {
         let capacity = rows
             .capacity()
             .saturating_mul(2)
-            .max(16)
-            .min(2 * MAX_SOURCE_ROWS);
+            .clamp(16, 2 * MAX_SOURCE_ROWS);
         rows.try_reserve_exact(capacity - rows.len())
             .map_err(|_| LanError::Limit)?;
     }
@@ -495,7 +489,9 @@ fn eligible(
         };
         if let Some(row) = candidate {
             let address = Ipv4Addr::from(row.ip);
-            let foreign = group.iter().any(|r| r.ip == row.ip && r.source == Source::ForeignArp);
+            let foreign = group
+                .iter()
+                .any(|r| r.ip == row.ip && r.source == Source::ForeignArp);
             if !row.conflict
                 && !foreign
                 && !address.is_loopback()

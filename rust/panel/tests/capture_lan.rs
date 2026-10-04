@@ -12,7 +12,8 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
-const HEADER: &str = "IP address       HW type     Flags       HW address            Mask     Device\n";
+const HEADER: &str =
+    "IP address       HW type     Flags       HW address            Mask     Device\n";
 const MAC: &str = "02:00:00:00:00:01";
 
 fn interface(name: &str, addresses: &[(&str, u8)]) -> Interface {
@@ -20,9 +21,13 @@ fn interface(name: &str, addresses: &[(&str, u8)]) -> Interface {
         name: name.into(),
         up: true,
         mtu: 1500,
-        addresses: addresses.iter().map(|(ip, bits)| InterfaceAddress {
-            address: ip.parse().unwrap(), bits: *bits,
-        }).collect(),
+        addresses: addresses
+            .iter()
+            .map(|(ip, bits)| InterfaceAddress {
+                address: ip.parse().unwrap(),
+                bits: *bits,
+            })
+            .collect(),
     }
 }
 struct Fake {
@@ -51,7 +56,12 @@ impl Fake {
     }
 }
 impl Observer for Fake {
-    fn read_file(&mut self, path: &Path, limit: usize, b: &Budget<'_>) -> Result<Vec<u8>, TunError> {
+    fn read_file(
+        &mut self,
+        path: &Path,
+        limit: usize,
+        b: &Budget<'_>,
+    ) -> Result<Vec<u8>, TunError> {
         b.check()?;
         assert_eq!(limit, MAX_SOURCE_BYTES);
         let path = path.to_str().unwrap();
@@ -82,7 +92,10 @@ impl Observer for Fake {
     }
 }
 fn budget(cancel: &AtomicBool) -> Budget<'_> {
-    Budget { deadline: Instant::now() + Duration::from_secs(10), cancel }
+    Budget {
+        deadline: Instant::now() + Duration::from_secs(10),
+        cancel,
+    }
 }
 fn lease(expiry: u64, mac: &str, ip: &str) -> String {
     format!("{expiry} {mac} {ip} synthetic-host *\n")
@@ -96,7 +109,8 @@ fn fresh_scope_uses_masks_and_retains_all_actual_interfaces_without_device_reads
     let cancel = AtomicBool::new(false);
     let mut fake = Fake::new("", "");
     fake.files.clear();
-    fake.interfaces.push(interface("guest", &[("192.168.50.1", 24)]));
+    fake.interfaces
+        .push(interface("guest", &[("192.168.50.1", 24)]));
     fake.interfaces.last_mut().unwrap().up = false;
     let snapshot = observe(&mut fake, false, 100, &budget(&cancel)).unwrap();
     assert_eq!(snapshot.lan_ipv4_prefixes, ["192.168.31.0/24"]);
@@ -114,10 +128,19 @@ fn fresh_scope_uses_masks_and_retains_all_actual_interfaces_without_device_reads
 #[test]
 fn br_lan_missing_down_or_only_host_prefix_cannot_authorize_scope() {
     let cancel = AtomicBool::new(false);
-    for kind in ["missing", "down", "host", "default", "bad-mask", "duplicate"] {
+    for kind in [
+        "missing",
+        "down",
+        "host",
+        "default",
+        "bad-mask",
+        "duplicate",
+    ] {
         let mut fake = Fake::new("", "");
         match kind {
-            "missing" => { fake.interfaces.remove(0); }
+            "missing" => {
+                fake.interfaces.remove(0);
+            }
             "down" => fake.interfaces[0].up = false,
             "host" => fake.interfaces[0].addresses[0].bits = 32,
             "default" => fake.interfaces[0].addresses[0].bits = 0,
@@ -125,7 +148,10 @@ fn br_lan_missing_down_or_only_host_prefix_cannot_authorize_scope() {
             "duplicate" => fake.interfaces.push(fake.interfaces[0].clone()),
             _ => unreachable!(),
         }
-        assert!(observe(&mut fake, false, 100, &budget(&cancel)).is_err(), "{kind}");
+        assert!(
+            observe(&mut fake, false, 100, &budget(&cancel)).is_err(),
+            "{kind}"
+        );
         assert!(fake.reads.is_empty());
     }
 }
@@ -144,13 +170,26 @@ fn current_lease_or_complete_lan_arp_authorizes_but_expired_lease_does_not() {
     }
     for expiry in [1, 100] {
         let mut fake = Fake::new(&lease(expiry, MAC, "192.168.31.20"), "");
-        assert!(observe(&mut fake, true, 100, &budget(&cancel)).unwrap().devices.is_empty());
+        assert!(
+            observe(&mut fake, true, 100, &budget(&cancel))
+                .unwrap()
+                .devices
+                .is_empty()
+        );
     }
-    let mut fake = Fake::new(&lease(99, MAC, "192.168.31.20"), &arp(MAC, "192.168.31.21", "br-lan"));
+    let mut fake = Fake::new(
+        &lease(99, MAC, "192.168.31.20"),
+        &arp(MAC, "192.168.31.21", "br-lan"),
+    );
     let snapshot = observe(&mut fake, true, 100, &budget(&cancel)).unwrap();
     assert_eq!(snapshot.devices[0].ip, "192.168.31.21");
     let mut fake = Fake::new("", "192.168.31.20 0x1 0x0 00:00:00:00:00:00 * br-lan\n");
-    assert!(observe(&mut fake, true, 100, &budget(&cancel)).unwrap().devices.is_empty());
+    assert!(
+        observe(&mut fake, true, 100, &budget(&cancel))
+            .unwrap()
+            .devices
+            .is_empty()
+    );
 }
 
 #[test]
@@ -158,17 +197,37 @@ fn guest_foreign_multiple_ips_and_multiple_mac_claims_never_authorize() {
     let cancel = AtomicBool::new(false);
     let other = "02:00:00:00:00:02";
     let cases = [
-        (lease(0, MAC, "192.168.31.20"), arp(MAC, "192.168.31.20", "guest")),
+        (
+            lease(0, MAC, "192.168.31.20"),
+            arp(MAC, "192.168.31.20", "guest"),
+        ),
         (String::new(), arp(MAC, "192.168.31.20", "guest")),
-        (String::new(), arp(MAC, "192.168.31.20", "br-lan") + &arp(MAC, "192.168.31.20", "guest")),
-        (String::new(), arp(MAC, "192.168.31.20", "br-lan") + &arp(MAC, "192.168.31.21", "br-lan")),
-        (lease(0, MAC, "192.168.31.20") + &lease(0, MAC, "192.168.31.21"), String::new()),
-        (lease(0, MAC, "192.168.31.20"), arp(other, "192.168.31.20", "br-lan")),
+        (
+            String::new(),
+            arp(MAC, "192.168.31.20", "br-lan") + &arp(MAC, "192.168.31.20", "guest"),
+        ),
+        (
+            String::new(),
+            arp(MAC, "192.168.31.20", "br-lan") + &arp(MAC, "192.168.31.21", "br-lan"),
+        ),
+        (
+            lease(0, MAC, "192.168.31.20") + &lease(0, MAC, "192.168.31.21"),
+            String::new(),
+        ),
+        (
+            lease(0, MAC, "192.168.31.20"),
+            arp(other, "192.168.31.20", "br-lan"),
+        ),
         (lease(0, MAC, "192.168.50.20"), String::new()),
     ];
     for (leases, arp) in cases {
         let mut fake = Fake::new(&leases, &arp);
-        assert!(observe(&mut fake, true, 100, &budget(&cancel)).unwrap().devices.is_empty());
+        assert!(
+            observe(&mut fake, true, 100, &budget(&cancel))
+                .unwrap()
+                .devices
+                .is_empty()
+        );
     }
 }
 
@@ -176,7 +235,10 @@ fn guest_foreign_multiple_ips_and_multiple_mac_claims_never_authorize() {
 fn stale_arp_is_suppressed_but_its_ip_owner_conflict_is_not_erased() {
     let cancel = AtomicBool::new(false);
     let other = "02:00:00:00:00:02";
-    let mut fake = Fake::new(&lease(0, MAC, "192.168.31.20"), &arp(MAC, "192.168.31.21", "br-lan"));
+    let mut fake = Fake::new(
+        &lease(0, MAC, "192.168.31.20"),
+        &arp(MAC, "192.168.31.21", "br-lan"),
+    );
     let snapshot = observe(&mut fake, true, 100, &budget(&cancel)).unwrap();
     assert_eq!(snapshot.devices.len(), 1);
     assert_eq!(snapshot.devices[0].ip, "192.168.31.20");
@@ -190,9 +252,22 @@ fn stale_arp_is_suppressed_but_its_ip_owner_conflict_is_not_erased() {
 #[test]
 fn network_broadcast_management_and_foreign_hosts_are_excluded_but_slash31_hosts_work() {
     let cancel = AtomicBool::new(false);
-    for ip in ["192.168.31.0", "192.168.31.255", "192.168.31.1", "192.0.2.1", "127.0.0.2", "169.254.1.2"] {
+    for ip in [
+        "192.168.31.0",
+        "192.168.31.255",
+        "192.168.31.1",
+        "192.0.2.1",
+        "127.0.0.2",
+        "169.254.1.2",
+    ] {
         let mut fake = Fake::new(&lease(0, MAC, ip), "");
-        assert!(observe(&mut fake, true, 100, &budget(&cancel)).unwrap().devices.is_empty(), "{ip}");
+        assert!(
+            observe(&mut fake, true, 100, &budget(&cancel))
+                .unwrap()
+                .devices
+                .is_empty(),
+            "{ip}"
+        );
     }
     let mut fake = Fake::new(&lease(0, MAC, "192.168.31.0"), "");
     fake.interfaces[0].addresses[0].bits = 31;
@@ -214,18 +289,27 @@ fn malformed_or_unavailable_identity_source_refuses_devices_not_gateway() {
         lease(0, MAC, "192.168.31.20") + &lease(0, MAC, "192.168.31.20"),
     ] {
         let mut fake = Fake::new(&line, "");
-        assert_eq!(observe(&mut fake, true, 100, &budget(&cancel)).err(), Some(LanError::Sources));
+        assert_eq!(
+            observe(&mut fake, true, 100, &budget(&cancel)).err(),
+            Some(LanError::Sources)
+        );
         assert!(observe(&mut fake, false, 100, &budget(&cancel)).is_ok());
     }
     for raw in ["", "not an ARP table", "IP address HW address\nbad row\n"] {
         let mut fake = Fake::new(&lease(0, MAC, "192.168.31.20"), "");
         fake.files.insert("/proc/net/arp", raw.as_bytes().to_vec());
-        assert_eq!(observe(&mut fake, true, 100, &budget(&cancel)).err(), Some(LanError::Sources));
+        assert_eq!(
+            observe(&mut fake, true, 100, &budget(&cancel)).err(),
+            Some(LanError::Sources)
+        );
     }
     for path in ["/tmp/dhcp.leases", "/proc/net/arp"] {
         let mut fake = Fake::new(&lease(0, MAC, "192.168.31.20"), "");
         fake.files.remove(path);
-        assert_eq!(observe(&mut fake, true, 100, &budget(&cancel)).err(), Some(LanError::Sources));
+        assert_eq!(
+            observe(&mut fake, true, 100, &budget(&cancel)).err(),
+            Some(LanError::Sources)
+        );
     }
 }
 
@@ -235,18 +319,31 @@ fn fixed_lease_fallback_normalizes_mac_and_never_masks_invalid_source() {
     for spelling in ["02-00-00-00-00-AB", "0200.0000.00ab"] {
         let mut fake = Fake::new("", "");
         fake.files.remove("/tmp/dhcp.leases");
-        fake.files.insert("/tmp/dnsmasq.leases", lease(0, spelling, "192.168.31.20").into_bytes());
+        fake.files.insert(
+            "/tmp/dnsmasq.leases",
+            lease(0, spelling, "192.168.31.20").into_bytes(),
+        );
         let snapshot = observe(&mut fake, true, 100, &budget(&cancel)).unwrap();
         assert_eq!(snapshot.devices[0].mac, "02:00:00:00:00:ab");
-        assert_eq!(fake.reads, ["/tmp/dhcp.leases", "/tmp/dnsmasq.leases", "/proc/net/arp"]);
+        assert_eq!(
+            fake.reads,
+            ["/tmp/dhcp.leases", "/tmp/dnsmasq.leases", "/proc/net/arp"]
+        );
     }
     let mut fake = Fake::new("bad row\n", "");
     fake.files.insert("/tmp/dnsmasq.leases", Vec::new());
-    assert_eq!(observe(&mut fake, true, 100, &budget(&cancel)).err(), Some(LanError::Sources));
+    assert_eq!(
+        observe(&mut fake, true, 100, &budget(&cancel)).err(),
+        Some(LanError::Sources)
+    );
     assert_eq!(fake.reads, ["/tmp/dhcp.leases"]);
-    fake.failures.insert("/tmp/dhcp.leases", TunError::Observation);
+    fake.failures
+        .insert("/tmp/dhcp.leases", TunError::Observation);
     fake.reads.clear();
-    assert_eq!(observe(&mut fake, true, 100, &budget(&cancel)).err(), Some(LanError::Sources));
+    assert_eq!(
+        observe(&mut fake, true, 100, &budget(&cancel)).err(),
+        Some(LanError::Sources)
+    );
     assert_eq!(fake.reads, ["/tmp/dhcp.leases"]);
 }
 
@@ -254,46 +351,86 @@ fn fixed_lease_fallback_normalizes_mac_and_never_masks_invalid_source() {
 fn device_source_row_and_interface_caps_fail_without_truncation() {
     let cancel = AtomicBool::new(false);
     for count in [MAX_DEVICES, MAX_DEVICES + 1] {
-        let rows: String = (0..count).map(|i| lease(0, &format!("02:00:00:00:00:{:02x}", i + 1),
-            &format!("192.168.31.{}", i + 2))).collect();
+        let rows: String = (0..count)
+            .map(|i| {
+                lease(
+                    0,
+                    &format!("02:00:00:00:00:{:02x}", i + 1),
+                    &format!("192.168.31.{}", i + 2),
+                )
+            })
+            .collect();
         let mut fake = Fake::new(&rows, "");
         let result = observe(&mut fake, true, 100, &budget(&cancel));
-        if count == MAX_DEVICES { assert_eq!(result.unwrap().devices.len(), count); }
-        else { assert_eq!(result.err(), Some(LanError::Limit)); }
+        if count == MAX_DEVICES {
+            assert_eq!(result.unwrap().devices.len(), count);
+        } else {
+            assert_eq!(result.err(), Some(LanError::Limit));
+        }
     }
     let mut fake = Fake::new("", "");
-    fake.files.insert("/tmp/dhcp.leases", vec![b' '; MAX_SOURCE_BYTES + 1]);
-    assert_eq!(observe(&mut fake, true, 100, &budget(&cancel)).err(), Some(LanError::Limit));
+    fake.files
+        .insert("/tmp/dhcp.leases", vec![b' '; MAX_SOURCE_BYTES + 1]);
+    assert_eq!(
+        observe(&mut fake, true, 100, &budget(&cancel)).err(),
+        Some(LanError::Limit)
+    );
     let mut fake = Fake::new(&"\n".repeat(MAX_SOURCE_ROWS + 1), "");
-    assert_eq!(observe(&mut fake, true, 100, &budget(&cancel)).err(), Some(LanError::Limit));
+    assert_eq!(
+        observe(&mut fake, true, 100, &budget(&cancel)).err(),
+        Some(LanError::Limit)
+    );
     let mut fake = Fake::new("", "");
-    fake.interfaces[1].addresses = (0..MAX_MANAGEMENT_IPS).map(|i| InterfaceAddress {
-        address: IpAddr::V4(std::net::Ipv4Addr::new(198, 51, 100, i as u8)), bits: 24,
-    }).collect();
-    assert_eq!(observe(&mut fake, false, 100, &budget(&cancel)).err(), Some(LanError::Limit));
+    fake.interfaces[1].addresses = (0..MAX_MANAGEMENT_IPS)
+        .map(|i| InterfaceAddress {
+            address: IpAddr::V4(std::net::Ipv4Addr::new(198, 51, 100, i as u8)),
+            bits: 24,
+        })
+        .collect();
+    assert_eq!(
+        observe(&mut fake, false, 100, &budget(&cancel)).err(),
+        Some(LanError::Limit)
+    );
 }
 
 #[test]
 fn absolute_budget_and_source_errors_are_fixed_and_private() {
     let cancel = AtomicBool::new(false);
     let mut fake = Fake::new(&lease(0, MAC, "192.168.31.20"), "");
-    let expired = Budget { deadline: Instant::now(), cancel: &cancel };
-    assert_eq!(observe(&mut fake, true, 100, &expired).err(), Some(LanError::Deadline));
+    let expired = Budget {
+        deadline: Instant::now(),
+        cancel: &cancel,
+    };
+    assert_eq!(
+        observe(&mut fake, true, 100, &expired).err(),
+        Some(LanError::Deadline)
+    );
     assert!(fake.reads.is_empty());
     cancel.store(true, Ordering::Relaxed);
-    assert_eq!(observe(&mut fake, false, 100, &budget(&cancel)).err(), Some(LanError::Cancelled));
+    assert_eq!(
+        observe(&mut fake, false, 100, &budget(&cancel)).err(),
+        Some(LanError::Cancelled)
+    );
     cancel.store(false, Ordering::Relaxed);
     fake.cancel_on_read = true;
-    assert_eq!(observe(&mut fake, true, 100, &budget(&cancel)).err(), Some(LanError::Cancelled));
+    assert_eq!(
+        observe(&mut fake, true, 100, &budget(&cancel)).err(),
+        Some(LanError::Cancelled)
+    );
     assert_eq!(fake.reads, ["/tmp/dhcp.leases"]);
-    for error in [LanError::Sources, LanError::Scope, LanError::Limit, LanError::Deadline, LanError::Cancelled] {
+    for error in [
+        LanError::Sources,
+        LanError::Scope,
+        LanError::Limit,
+        LanError::Deadline,
+        LanError::Cancelled,
+    ] {
         let text = format!("{error:?} {error}");
         for private in [MAC, "192.168.31.20", "synthetic-host", "/tmp/"] {
             assert!(!text.contains(private));
         }
     }
 }
-
 
 #[test]
 fn prefix_boundaries_duplicate_arp_and_invalid_actual_addresses_are_checked() {
@@ -355,13 +492,13 @@ fn expired_source_rows_still_count_and_arp_source_limit_is_independent() {
         Some(LanError::Limit)
     );
     let mut fake = Fake::new("", "");
-    fake.files.insert("/proc/net/arp", vec![b' '; MAX_SOURCE_BYTES + 1]);
+    fake.files
+        .insert("/proc/net/arp", vec![b' '; MAX_SOURCE_BYTES + 1]);
     assert_eq!(
         observe(&mut fake, true, 100, &budget(&cancel)).err(),
         Some(LanError::Limit)
     );
 }
-
 
 #[test]
 fn output_is_numeric_ip_order_and_management_exact_cap_is_supported() {

@@ -592,7 +592,23 @@ fn readiness_domain(raw: &[u8], dns: &Dns) -> Result<String> {
 }
 
 /// Build a normalized A/IN question. Network probes supply an OS-random ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuestionType {
+    A,
+    Aaaa,
+}
+impl QuestionType {
+    fn number(self) -> u16 {
+        match self {
+            Self::A => 1,
+            Self::Aaaa => 28,
+        }
+    }
+}
 pub fn dns_query(domain: &str, id: u16) -> Result<Vec<u8>> {
+    dns_query_for(domain, id, QuestionType::A)
+}
+pub fn dns_query_for(domain: &str, id: u16, question: QuestionType) -> Result<Vec<u8>> {
     let domain = normalized_domain(domain).ok_or(ReadinessError::Domain)?;
     let mut query = vec![0; 12];
     query[..2].copy_from_slice(&id.to_be_bytes());
@@ -602,7 +618,9 @@ pub fn dns_query(domain: &str, id: u16) -> Result<Vec<u8>> {
         query.push(label.len() as u8);
         query.extend_from_slice(label.as_bytes());
     }
-    query.extend_from_slice(&[0, 0, 1, 0, 1]);
+    query.push(0);
+    query.extend_from_slice(&question.number().to_be_bytes());
+    query.extend_from_slice(&1u16.to_be_bytes());
     Ok(query)
 }
 fn word(packet: &[u8], offset: usize) -> u16 {
@@ -662,6 +680,14 @@ fn name(
 
 /// Parse every section before accepting a reachable answer-section IN A record.
 pub fn validate_dns_response(response: &[u8], query: &[u8]) -> Result<()> {
+    // Preserve the original public readiness contract: an A/IN query and real
+    // A answer, never an AAAA-only readiness success.
+    if query.len() < 4 || query[query.len() - 4..] != [0, 1, 0, 1] {
+        return Err(ReadinessError::InvalidResponse);
+    }
+    dns_response_addresses(response, query).map(|_| ())
+}
+pub fn dns_response_addresses(response: &[u8], query: &[u8]) -> Result<Vec<IpAddr>> {
     let invalid = ReadinessError::InvalidResponse;
     if !(12..=MAX_DNS_PACKET).contains(&query.len())
         || !(12..=MAX_DNS_PACKET).contains(&response.len())
@@ -670,8 +696,12 @@ pub fn validate_dns_response(response: &[u8], query: &[u8]) -> Result<()> {
     }
     let mut query_boundaries = [false; MAX_DNS_PACKET];
     let (mut requested, query_end) = name(query, 12, &mut query_boundaries)?;
-    if query_end + 4 != query.len()
-        || query[query_end..] != [0, 1, 0, 1]
+    if query_end + 4 != query.len() {
+        return Err(invalid);
+    }
+    let question_type = word(query, query_end);
+    if !matches!(question_type, 1 | 28)
+        || query[query_end + 2..] != [0, 1]
         || word(query, 2) != 0x0100
         || word(query, 4) != 1
         || query[6..12] != [0; 6]
@@ -691,7 +721,7 @@ pub fn validate_dns_response(response: &[u8], query: &[u8]) -> Result<()> {
     let (question, mut offset) = name(response, 12, &mut boundaries)?;
     if offset + 4 > response.len()
         || question != requested
-        || response[offset..offset + 4] != [0, 1, 0, 1]
+        || response[offset..offset + 4] != query[query_end..]
     {
         return Err(invalid);
     }
@@ -725,7 +755,13 @@ pub fn validate_dns_response(response: &[u8], query: &[u8]) -> Result<()> {
                         return Err(invalid);
                     }
                     if section == 0 && class == 1 {
-                        addresses.push(owner);
+                        let address = Ipv4Addr::new(
+                            response[start],
+                            response[start + 1],
+                            response[start + 2],
+                            response[start + 3],
+                        );
+                        addresses.push((owner, IpAddr::V4(address)));
                     }
                 }
                 5 => {
@@ -778,6 +814,11 @@ pub fn validate_dns_response(response: &[u8], query: &[u8]) -> Result<()> {
                 28 => {
                     if end - start != 16 {
                         return Err(invalid);
+                    }
+                    if section == 0 && class == 1 {
+                        let octets: [u8; 16] =
+                            response[start..end].try_into().map_err(|_| invalid)?;
+                        addresses.push((owner, IpAddr::V6(Ipv6Addr::from(octets))));
                     }
                 }
                 16 => {
@@ -872,15 +913,28 @@ pub fn validate_dns_response(response: &[u8], query: &[u8]) -> Result<()> {
     for _ in 0..=aliases.len() {
         if let Some((_, alias)) = aliases.iter().find(|(owner, _)| owner == &requested) {
             // CNAME with an A at the same owner is not a valid resolved chain.
-            if addresses.contains(&requested) {
+            if addresses.iter().any(|(owner, _)| owner == &requested) {
                 return Err(invalid);
             }
             requested.clone_from(alias);
         } else {
-            return if addresses.contains(&requested) {
-                Ok(())
-            } else {
+            let mut resolved: Vec<IpAddr> = addresses
+                .into_iter()
+                .filter(|(owner, address)| {
+                    owner == &requested
+                        && match address {
+                            IpAddr::V4(_) => question_type == 1,
+                            IpAddr::V6(_) => question_type == 28,
+                        }
+                })
+                .map(|(_, address)| address)
+                .collect();
+            resolved.sort_unstable();
+            resolved.dedup();
+            return if resolved.is_empty() {
                 Err(ReadinessError::NoAnswer)
+            } else {
+                Ok(resolved)
             };
         }
     }
@@ -967,6 +1021,65 @@ pub fn wait_readiness(raw: &[u8], deadline: Instant, cancel: Option<&AtomicBool>
         }
         std::thread::sleep(RETRY_INTERVAL.min(deadline.saturating_duration_since(Instant::now())));
     }
+}
+
+pub(crate) fn exchange_dns(
+    network: Network,
+    address: SocketAddr,
+    query: &[u8],
+    deadline: Instant,
+    cancel: Option<&AtomicBool>,
+) -> Result<Vec<u8>> {
+    check(deadline, cancel)?;
+    if address.port() == 0
+        || address.ip().is_unspecified()
+        || !(12..=MAX_DNS_PACKET).contains(&query.len())
+    {
+        return Err(ReadinessError::Address);
+    }
+    #[cfg(unix)]
+    {
+        let response = socket_io::exchange(network, address, query, deadline, cancel)?;
+        check(deadline, cancel)?;
+        Ok(response)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (network, address, query);
+        Err(ReadinessError::Unavailable)
+    }
+}
+pub(crate) fn truncated_dns_response(response: &[u8], query: &[u8]) -> Result<bool> {
+    if !(12..=MAX_DNS_PACKET).contains(&response.len())
+        || !(12..=MAX_DNS_PACKET).contains(&query.len())
+    {
+        return Err(ReadinessError::InvalidResponse);
+    }
+    let flags = word(response, 2);
+    if flags & 0x0200 == 0 {
+        return Ok(false);
+    }
+    if word(response, 0) != word(query, 0)
+        || flags & 0x8000 == 0
+        || flags & (0x7800 | 0x0040 | 0x000f) != 0
+        || word(response, 4) != 1
+    {
+        return Err(ReadinessError::InvalidResponse);
+    }
+    let mut boundaries = [false; MAX_DNS_PACKET];
+    let (requested, end) = name(query, 12, &mut boundaries)?;
+    if end + 4 != query.len() {
+        return Err(ReadinessError::InvalidResponse);
+    }
+    let mut boundaries = [false; MAX_DNS_PACKET];
+    let (question, offset) = name(response, 12, &mut boundaries)?;
+    if question != requested
+        || offset + 4 > response.len()
+        || response[offset..offset + 4] != query[end..]
+    {
+        return Err(ReadinessError::InvalidResponse);
+    }
+    Ok(true)
 }
 
 #[cfg(unix)]
@@ -1139,11 +1252,25 @@ mod socket_io {
         deadline: Instant,
         cancel: Option<&AtomicBool>,
     ) -> Result<()> {
-        if target.network == Network::Tcp {
-            let mut stream = connect(target.address, deadline, cancel)?;
-            let Some(query) = query else {
-                return check(deadline, cancel);
-            };
+        let Some(query) = query else {
+            if target.network != Network::Tcp {
+                return Err(ReadinessError::Network);
+            }
+            let _stream = connect(target.address, deadline, cancel)?;
+            return check(deadline, cancel);
+        };
+        let response = exchange(target.network, target.address, query, deadline, cancel)?;
+        validate_dns_response(&response, query)
+    }
+    pub(super) fn exchange(
+        network: Network,
+        address: SocketAddr,
+        query: &[u8],
+        deadline: Instant,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Vec<u8>> {
+        if network == Network::Tcp {
+            let mut stream = connect(address, deadline, cancel)?;
             let mut framed = Vec::with_capacity(query.len() + 2);
             framed.extend_from_slice(&(query.len() as u16).to_be_bytes());
             framed.extend_from_slice(query);
@@ -1157,10 +1284,9 @@ mod socket_io {
             let mut response = vec![0; size];
             read_exact(&mut stream, &mut response, deadline, cancel)?;
             check(deadline, cancel)?;
-            validate_dns_response(&response, query)
+            Ok(response)
         } else {
-            let query = query.ok_or(ReadinessError::Network)?;
-            let bind = if target.address.is_ipv4() {
+            let bind = if address.is_ipv4() {
                 "0.0.0.0:0"
             } else {
                 "[::]:0"
@@ -1169,9 +1295,7 @@ mod socket_io {
             socket
                 .set_nonblocking(true)
                 .map_err(|_| ReadinessError::Io)?;
-            socket
-                .connect(target.address)
-                .map_err(|_| ReadinessError::Io)?;
+            socket.connect(address).map_err(|_| ReadinessError::Io)?;
             loop {
                 check(deadline, cancel)?;
                 match socket.send(query) {
@@ -1191,7 +1315,7 @@ mod socket_io {
                         if size > MAX_DNS_PACKET {
                             return Err(ReadinessError::InvalidResponse);
                         }
-                        return validate_dns_response(&response[..size], query);
+                        return Ok(response[..size].to_vec());
                     }
                     Err(error) if transient(&error) => {
                         wait(socket.as_raw_fd(), libc::POLLIN, deadline, cancel)?

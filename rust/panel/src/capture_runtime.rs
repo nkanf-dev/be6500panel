@@ -42,6 +42,35 @@ impl CaptureRuntime {
             executor: None,
         }
     }
+    /// Native current-source builder using the same bounded Observer seam as
+    /// readiness. Does not observe, resolve, execute or start on construction.
+    pub fn with_observer<O: Observer + 'static>(
+        controller: Controller,
+        binaries: Binaries,
+        run_dir: PathBuf,
+        names: TableNames,
+        mut observer: O,
+    ) -> Self {
+        Self::new(
+            controller,
+            binaries,
+            run_dir,
+            names,
+            move |desired, accepted, deadline| {
+                let cancel = std::sync::atomic::AtomicBool::new(false);
+                let budget = crate::readiness_tun::Budget {
+                    deadline,
+                    cancel: &cancel,
+                };
+                crate::capture_input::observe_and_build(&mut observer, desired, accepted, &budget)
+                    .map_err(|error| match error {
+                        crate::capture_input::InputError::Deadline => HookError::Deadline,
+                        crate::capture_input::InputError::Canceled => HookError::Cancelled,
+                        _ => HookError::Failed,
+                    })
+            },
+        )
+    }
     pub fn desired(&self) -> Desired {
         self.controller.desired()
     }
