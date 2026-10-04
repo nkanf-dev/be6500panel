@@ -9,6 +9,8 @@ pub mod policy_store;
 #[cfg(unix)]
 pub mod rules_http;
 #[cfg(unix)]
+pub mod runtime_process;
+#[cfg(unix)]
 pub mod runtime_store;
 pub mod server;
 pub mod static_files;
