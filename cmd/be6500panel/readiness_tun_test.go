@@ -633,3 +633,40 @@ func TestTUNPreStartRouteOutputBound(t *testing.T) {
 		t.Fatal("oversized route output accepted")
 	}
 }
+
+func TestCaptureBackendObservationIsOneShot(t *testing.T) {
+	for _, which := range []string{"ready", "missing", "down", "rpf", "pid-reused"} {
+		f := newTUNReadinessFixture(t)
+		interfaceReads := 0
+		switch which {
+		case "missing":
+			f.ifaces = f.ifaces[:1]
+		case "down":
+			f.ifaces[1].up = false
+		case "rpf":
+			f.files["/proc/sys/net/ipv4/conf/b6p-tun/rp_filter"] = []byte("0\n")
+		}
+		f.io.interfaces = func() ([]tunReadinessInterface, error) { interfaceReads++; return f.ifaces, nil }
+		if which == "pid-reused" {
+			f.onRead = func(path string) {
+				if path == tunProcFixtureBase+"/fdinfo/7" {
+					f.files[tunProcFixtureBase+"/stat"] = tunStatFixture(4321, 123457, "S")
+				}
+			}
+		}
+		started := time.Now()
+		err := observeOwnedNativeBackendWithIO(context.Background(), []byte(tunReadinessFixtureJSON), f.getStatus, f.io)
+		if (err == nil) != (which == "ready") {
+			t.Fatal(which, err)
+		}
+		if f.probes != 0 || interfaceReads > 1 || time.Since(started) > time.Second {
+			t.Fatal("GET retried/probed instead of observing", which, f.probes, interfaceReads)
+		}
+	}
+}
+func TestCaptureBackendObservationLegacyDoesNotProbe(t *testing.T) {
+	observed := tunReadinessIO{probeListeners: func(context.Context, []byte) error { t.Fatal("GET performed listener probe"); return nil }}
+	if err := observeOwnedNativeBackendWithIO(context.Background(), []byte(`{"inbounds":[{"type":"tproxy"}]}`), nil, observed); err != nil {
+		t.Fatal(err)
+	}
+}

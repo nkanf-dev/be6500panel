@@ -163,7 +163,7 @@ func run() error {
 			if err != nil {
 				return proxy.RulesPlanInput{}, clients, errors.New("capture_configuration_unavailable")
 			}
-			if err = checkOwnedNativeReadiness(ctx, raw, func() (managedruntime.Status, error) {
+			if err = observeOwnedNativeBackend(ctx, raw, func() (managedruntime.Status, error) {
 				state, err := runtimeManager.Status(managedruntime.SingBox)
 				if err != nil || state.Generation != generation {
 					return state, errors.New("capture accepted generation changed")

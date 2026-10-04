@@ -600,3 +600,36 @@ func (output *tunReadinessBoundedOutput) Write(raw []byte) (int, error) {
 	}
 	return output.buffer.Write(raw)
 }
+
+// observeOwnedNativeBackend is a single read-only ownership sample, not a
+// startup wait or a DNS connectivity probe. Missing TUN state returns promptly.
+func observeOwnedNativeBackend(ctx context.Context, raw []byte, status func() (managedruntime.Status, error)) error {
+	return observeOwnedNativeBackendWithIO(ctx, raw, status, nativeTUNReadinessIO())
+}
+func observeOwnedNativeBackendWithIO(ctx context.Context, raw []byte, status func() (managedruntime.Status, error), observe tunReadinessIO) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	target, err := nativeTUNReadinessTarget(raw)
+	if err != nil {
+		return err
+	}
+	if target == nil {
+		return nil
+	} // installed legacy resource proof is controller-owned
+	initial, err := tunReadinessStatus(status)
+	if err != nil {
+		return err
+	}
+	identity, err := observeTUNReadinessIdentity(initial, observe)
+	if err != nil {
+		return err
+	}
+	if err = observeOwnedTUN(*target, identity.pid, observe); err != nil {
+		return err
+	}
+	if err = identity.unchanged(status, observe); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
