@@ -28,6 +28,20 @@ const (
 	FailureBlockProxy FailurePolicy = "block-proxy"
 )
 
+type DatapathMode string
+
+const (
+	DatapathTPROXY    DatapathMode = "tproxy"
+	DatapathRoutedTUN DatapathMode = "routed-tun"
+)
+
+// RoutedTUNConfig is explicit managed original-packet intent. A nil value never
+// changes an existing TPROXY compiler input or accepted runtime configuration.
+type RoutedTUNConfig struct {
+	InterfaceName string `json:"interfaceName"`
+	Address       string `json:"address"`
+}
+
 type Ports struct{ Mixed, TProxy, DNS uint16 }
 
 // Node is private input. JSON and formatting deliberately do not expose node
@@ -169,6 +183,8 @@ type CompileInput struct {
 	Endpoints              []string           `json:"-"`
 	BootstrapDomains       []string           `json:"-"`
 	ManagementIPs          []string           `json:"-"`
+	Datapath               DatapathMode       `json:",omitempty"`
+	RoutedTUN              *RoutedTUNConfig   `json:",omitempty"`
 	IPv6                   IPv6Mode
 	Failure                FailurePolicy
 	Ports                  Ports
