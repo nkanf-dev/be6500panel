@@ -36,11 +36,39 @@ pub struct RulesState {
     nodes: Vec<crate::native::Node>,
     diagnostics: Vec<Diagnostic>,
     summary: PolicySummary,
+    data_dir: PathBuf,
 }
 impl fmt::Debug for RulesState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("RulesState (private)")
     }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ApplyInput {
+    revision: String,
+    generation: u64,
+    #[serde(default)]
+    acknowledged_revision: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyResponse {
+    status: crate::runtime_http::WireStatus,
+    draft_revision: String,
+    #[serde(rename = "configSHA256")]
+    config_sha256: String,
+    applied: bool,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyUncertain {
+    error: ApiError<'static>,
+    status: crate::runtime_http::WireStatus,
+    draft_revision: String,
+    #[serde(rename = "configSHA256")]
+    config_sha256: String,
+    applied: bool,
 }
 impl RulesState {
     /// Reads only subscription.yaml and the independent draft. Missing source
@@ -50,13 +78,15 @@ impl RulesState {
         let subscription = read_subscription(data_dir.as_ref())?;
         let summary = summarize_policy(&subscription);
         let prepared = PreparedSubscription::new(subscription.rules).map_err(|_| RulesError)?;
-        let store = Store::open(data_dir).map_err(|_| RulesError)?;
+        let store = Store::open(data_dir.as_ref()).map_err(|_| RulesError)?;
+        let data_dir = data_dir.as_ref().canonicalize().map_err(|_| RulesError)?;
         Ok(Self {
             store,
             subscription: prepared,
             nodes: subscription.nodes,
             diagnostics: subscription.diagnostics,
             summary,
+            data_dir,
         })
     }
     fn preview(&self, policy: &Policy) -> Result<EffectivePolicy, RulesError> {
@@ -80,6 +110,7 @@ impl RulesState {
         path: &str,
         method: Method,
         body: &[u8],
+        runtime: Option<&mut crate::runtime_http::RuntimeHttp>,
     ) -> io::Result<()> {
         let head = method == Method::Head;
         match (path, method) {
@@ -93,7 +124,15 @@ impl RulesState {
                 };
                 write_json(writer, 200, "OK", &response, head)
             }
-            ("/api/proxy/local-rules", Method::Get | Method::Head) => self.readback(writer, head),
+            ("/api/proxy/local-rules", Method::Get | Method::Head) => {
+                self.readback(writer, head, runtime)
+            }
+            ("/api/proxy/local-rules/apply", Method::Post) => {
+                let Some(runtime) = runtime else {
+                    return runtime_unavailable(writer, false);
+                };
+                self.apply_saved(writer, body, runtime)
+            }
             ("/api/proxy/local-rules" | "/api/proxy/local-rules/preview", Method::Post) => {
                 let policy = match decode_policy(body) {
                     Ok(policy) => policy,
@@ -140,7 +179,7 @@ impl RulesState {
                     Ok(outcome) if outcome.durability_error.is_some() => {
                         write_save_uncertain(writer, &outcome)
                     }
-                    Ok(_) => self.readback(writer, false),
+                    Ok(_) => self.readback(writer, false, runtime),
                     Err(failure) => write_save_failed(writer, failure, &self.store.snapshot()),
                 }
             }
@@ -157,7 +196,326 @@ impl RulesState {
             ),
         }
     }
-    fn response<'a>(&'a self, draft: &'a Snapshot, preview: &'a EffectivePolicy) -> Readback<'a> {
+    fn runtime_evidence(
+        &self,
+        runtime: Option<&mut crate::runtime_http::RuntimeHttp>,
+    ) -> (Applied, u64) {
+        use sha2::{Digest, Sha256};
+        let Some(runtime) = runtime else {
+            return (Applied::unknown(), 0);
+        };
+        let Ok(status) = runtime.rule_status() else {
+            return (Applied::unknown(), 0);
+        };
+        let Ok(Some(config)) = runtime.rule_config() else {
+            return (Applied::unknown(), status.generation);
+        };
+        let generation = config.identity.generation;
+        if status.generation != generation
+            || !status.ready
+            || !status.running_matches_accepted
+            || !status.desired
+            || status.resource_suspended
+            || status.durability_uncertain
+            || status.needs_recovery
+        {
+            return (Applied::unknown(), generation);
+        }
+        let Some(manifest) = crate::rule_apply::read_manifest(&self.data_dir) else {
+            return (Applied::unknown(), generation);
+        };
+        if manifest.generation != generation
+            || manifest.native_sha256 != config.identity.sha256
+            || manifest.native_sha256 != format!("{:x}", Sha256::digest(config.bytes()))
+        {
+            return (Applied::unknown(), generation);
+        }
+        (
+            Applied {
+                state: "known",
+                revision: Some(manifest.revision),
+                generation: Some(generation),
+            },
+            generation,
+        )
+    }
+    fn apply_saved(
+        &mut self,
+        writer: &mut impl Write,
+        body: &[u8],
+        runtime: &mut crate::runtime_http::RuntimeHttp,
+    ) -> io::Result<()> {
+        use sha2::{Digest, Sha256};
+        if body.len() > 64 << 10
+            || body
+                .iter()
+                .find(|byte| !byte.is_ascii_whitespace())
+                .is_none_or(|byte| *byte != b'{')
+        {
+            return error(
+                writer,
+                400,
+                "Bad Request",
+                "invalid_json",
+                "Apply fields or types do not match the contract.",
+                false,
+            );
+        }
+        let input: ApplyInput = match serde_json::from_slice(body) {
+            Ok(value) => value,
+            Err(_) => {
+                return error(
+                    writer,
+                    400,
+                    "Bad Request",
+                    "invalid_json",
+                    "Apply fields or types do not match the contract.",
+                    false,
+                );
+            }
+        };
+        let draft = self.store.snapshot();
+        if input.revision != draft.revision {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "local_rules_revision_changed",
+                "Local draft changed; read it again.",
+                false,
+            );
+        }
+        if !input.acknowledged_revision.is_empty()
+            && input.acknowledged_revision != self.summary.revision
+        {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "policy_revision_changed",
+                "Subscription policy changed; review omissions again.",
+                false,
+            );
+        }
+        if self.summary.omitted > 0 && input.acknowledged_revision.is_empty() {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "policy_acknowledgment_required",
+                "Review and acknowledge omitted subscription rules.",
+                false,
+            );
+        }
+        let before = match runtime.rule_status() {
+            Ok(value) => value,
+            Err(failed) => return runtime.write_failure(writer, failed),
+        };
+        if before.generation != input.generation {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "generation_conflict",
+                "Runtime configuration changed; read it again.",
+                false,
+            );
+        }
+        if !before.desired
+            || !before.ready
+            || !before.running_matches_accepted
+            || before.resource_suspended
+        {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "runtime_not_ready",
+                "Start and verify the owned runtime before applying rules.",
+                false,
+            );
+        }
+        if before.durability_uncertain || before.needs_recovery {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "runtime_recovery_pending",
+                "Recover the runtime before applying new rules.",
+                false,
+            );
+        }
+        let accepted = match runtime.rule_config() {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "not_configured",
+                    "Service is not configured.",
+                    false,
+                );
+            }
+            Err(failed) => return runtime.write_failure(writer, failed),
+        };
+        if accepted.identity.generation != input.generation {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "generation_conflict",
+                "Runtime configuration changed; read it again.",
+                false,
+            );
+        }
+        let refs = match crate::rule_apply::read_verified_refs(&self.data_dir) {
+            Ok(value) => value,
+            Err(_) => {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "rules_unavailable",
+                    "Pinned rule sets are unavailable or changed.",
+                    false,
+                );
+            }
+        };
+        let effective = match self.subscription.merge(&draft.policy) {
+            Ok(value) => value,
+            Err(_) => {
+                return error(
+                    writer,
+                    422,
+                    "Unprocessable Entity",
+                    "local_rules_invalid",
+                    "Local policy cannot be merged.",
+                    false,
+                );
+            }
+        };
+        let output = match crate::rule_apply::compile_preserving(
+            accepted.bytes(),
+            &self.nodes,
+            effective.rules,
+            self.diagnostics.clone(),
+            refs,
+            input.acknowledged_revision == self.summary.revision,
+        ) {
+            Ok(value) => value,
+            Err(_) => {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "proxy_configuration_invalid",
+                    "Accepted proxy settings or selected node cannot be preserved.",
+                    false,
+                );
+            }
+        };
+        // Source provenance is not needed during checker/readiness/storage. Do
+        // not retain a second effective preview graph across the operation.
+        drop(effective.provenance);
+        drop(effective.diagnostics);
+        drop(accepted);
+        let status = match runtime.configure_rules(input.generation, &output.config) {
+            Ok(value) => value,
+            Err(failed) => return runtime.write_failure(writer, failed),
+        };
+        let readback = match runtime.rule_config() {
+            Ok(Some(value)) => value,
+            _ => {
+                return write_json(
+                    writer,
+                    500,
+                    "Internal Server Error",
+                    &ApplyUncertain {
+                        error: ApiError {
+                            code: "local_rules_readback_failed",
+                            message: "Runtime accepted state is unconfirmed; read its status.",
+                        },
+                        status: status.into(),
+                        draft_revision: draft.revision,
+                        config_sha256: output.sha256,
+                        applied: false,
+                    },
+                    false,
+                );
+            }
+        };
+        if readback.identity.generation != status.generation
+            || readback.bytes() != output.config
+            || format!("{:x}", Sha256::digest(readback.bytes())) != output.sha256
+            || status.durability_uncertain
+            || status.needs_recovery
+            || !status.desired
+            || !status.ready
+            || !status.running_matches_accepted
+            || status.resource_suspended
+        {
+            return write_json(
+                writer,
+                500,
+                "Internal Server Error",
+                &ApplyUncertain {
+                    error: ApiError {
+                        code: "local_rules_readback_failed",
+                        message: "Runtime accepted state is unconfirmed; read its status.",
+                    },
+                    status: status.into(),
+                    draft_revision: draft.revision,
+                    config_sha256: output.sha256,
+                    applied: false,
+                },
+                false,
+            );
+        }
+        drop(readback);
+        let manifest = crate::rule_apply::AppliedManifest {
+            revision: draft.revision.clone(),
+            native_sha256: output.sha256.clone(),
+            generation: status.generation,
+        };
+        if crate::rule_apply::write_manifest(&self.data_dir, &manifest).is_err() {
+            return write_json(
+                writer,
+                500,
+                "Internal Server Error",
+                &ApplyUncertain {
+                    error: ApiError {
+                        code: "storage_failed",
+                        message: "Runtime changed, but applied-rule evidence could not be durably saved.",
+                    },
+                    status: status.into(),
+                    draft_revision: draft.revision,
+                    config_sha256: output.sha256,
+                    applied: false,
+                },
+                false,
+            );
+        }
+        write_json(
+            writer,
+            200,
+            "OK",
+            &ApplyResponse {
+                status: status.into(),
+                draft_revision: draft.revision,
+                config_sha256: output.sha256,
+                applied: true,
+            },
+            false,
+        )
+    }
+    fn response<'a>(
+        &'a self,
+        draft: &'a Snapshot,
+        preview: &'a EffectivePolicy,
+        applied: Applied,
+        runtime_generation: u64,
+    ) -> Readback<'a> {
         Readback {
             draft: Draft(draft),
             subscription_revision: &self.summary.revision,
@@ -166,23 +524,36 @@ impl RulesState {
                 fingerprints: self.subscription.fingerprints(),
             },
             preview,
-            applied: Applied { state: "unknown" },
-            runtime_generation: 0,
+            applied,
+            runtime_generation,
             policy_summary: &self.summary,
         }
     }
     fn readback_fits(&self, draft: &Snapshot) -> bool {
-        self.preview(&draft.policy)
-            .is_ok_and(|preview| json_length(&self.response(draft, &preview)).is_ok())
+        self.preview(&draft.policy).is_ok_and(|preview| {
+            json_length(&self.response(draft, &preview, Applied::unknown(), 0)).is_ok()
+        })
     }
-    fn readback(&self, writer: &mut impl Write, head: bool) -> io::Result<()> {
+    fn readback(
+        &self,
+        writer: &mut impl Write,
+        head: bool,
+        runtime: Option<&mut crate::runtime_http::RuntimeHttp>,
+    ) -> io::Result<()> {
         // Fresh accepted Store snapshot; never a stale pre-save response.
         let draft = self.store.snapshot();
         let preview = match self.preview(&draft.policy) {
             Ok(preview) => preview,
             Err(_) => return unavailable(writer, head),
         };
-        write_json(writer, 200, "OK", &self.response(&draft, &preview), head)
+        let (applied, generation) = self.runtime_evidence(runtime);
+        write_json(
+            writer,
+            200,
+            "OK",
+            &self.response(&draft, &preview, applied, generation),
+            head,
+        )
     }
 }
 
@@ -550,6 +921,19 @@ struct NodesResponse<'a> {
 #[derive(Serialize)]
 struct Applied {
     state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generation: Option<u64>,
+}
+impl Applied {
+    fn unknown() -> Self {
+        Self {
+            state: "unknown",
+            revision: None,
+            generation: None,
+        }
+    }
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

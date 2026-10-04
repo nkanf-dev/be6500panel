@@ -423,3 +423,249 @@ fn runtime_without_owner_is_explicitly_unavailable() {
     let value = body(&response, 503);
     assert_eq!(value["error"]["code"], "runtime_unavailable");
 }
+
+#[test]
+fn rule_apply_attests_exact_live_readback_and_keeps_draft_distinct() {
+    use be6500_panel::native::{CompileInput, compile_native};
+    let _serial = SERIAL.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.root.join("subscription.yaml"),
+        r#"proxies:
+  - name: Synthetic current
+    type: vless
+    server: node.example
+    port: 443
+    uuid: 00000000-0000-4000-8000-000000000001
+    network: tcp
+    tls: true
+    udp: true
+    servername: certificate.example
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: '01020304'
+rules:
+  - MATCH,PROXY
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(
+        fixture.root.join("subscription.yaml"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(fixture.root.join("rules"))
+        .unwrap();
+    let mut refs = Vec::new();
+    for (tag, kind, name) in [
+        ("cn-domain", "domain", "domains.srs"),
+        ("cn-ip", "ip", "ips.srs"),
+    ] {
+        let path = fixture.root.join("rules").join(name);
+        fs::write(&path, b"synthetic binary rule set").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        refs.push(json!({"Tag":tag,"Kind":kind,"Path":path,"SHA256":format!("{:x}",Sha256::digest(b"synthetic binary rule set")),"SourceURL":"","MaxBytes":1024}));
+    }
+    fs::write(
+        fixture.root.join("rule-sets.json"),
+        serde_json::to_vec(&refs).unwrap(),
+    )
+    .unwrap();
+    fs::set_permissions(
+        fixture.root.join("rule-sets.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let reference: Value = serde_json::from_str(include_str!("fixtures/native-go.json")).unwrap();
+    let mut input: CompileInput =
+        serde_json::from_value(reference["cases"][0]["input"].clone()).unwrap();
+    input.rule_sets=refs.iter().map(|value|serde_json::from_value(json!({"tag":value["Tag"],"kind":value["Kind"],"path":value["Path"],"sha256":value["SHA256"],"sourceURL":"","maxBytes":1024})).unwrap()).collect();
+    let original = compile_native(&input).unwrap();
+    let mut accepted: Value = serde_json::from_slice(&original.config).unwrap();
+    accepted["experimental"] = json!({"clash_api":{"external_controller":"127.0.0.1:9090","secret":"synthetic-private-secret"}});
+    accepted["log"]["level"] = "debug".into();
+    accepted["outbounds"][0]["bind_interface"] = "wan-test".into();
+    let accepted_text = serde_json::to_string(&accepted).unwrap();
+    let mut owner = fixture.runtime();
+    let service = Service::new(fixture.root.clone())
+        .with_data_dir(&fixture.root)
+        .with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    let first = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(first["applied"]["state"], "unknown");
+    let policy = json!({"rules":[{"id":"gpt-direct","enabled":true,"label":"GPT direct","note":"draft only","rule":{"kind":"domain","value":"gpt.kanglives.top","target":"direct","index":0}}],"subscriptionEdits":[]});
+    let saved = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules",
+        Some(&json!({"policy":policy})),
+        &cookie,
+        200,
+    );
+    let revision = saved["draft"]["revision"].as_str().unwrap();
+    assert_eq!(saved["applied"]["state"], "unknown");
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":accepted_text,"generation":0})),
+        &cookie,
+        200,
+    );
+    let off = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules/apply",
+        Some(&json!({"revision":revision,"generation":1})),
+        &cookie,
+        409,
+    );
+    assert_eq!(off["error"]["code"], "runtime_not_ready");
+    let old_pid = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    )["pid"]
+        .as_u64()
+        .unwrap();
+    let stale = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules/apply",
+        Some(&json!({"revision":"changed","generation":1})),
+        &cookie,
+        409,
+    );
+    assert_eq!(stale["error"]["code"], "local_rules_revision_changed");
+    let stale = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules/apply",
+        Some(&json!({"revision":revision,"generation":0})),
+        &cookie,
+        409,
+    );
+    assert_eq!(stale["error"]["code"], "generation_conflict");
+    fixture.reject.set(true);
+    let cleanup = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules/apply",
+        Some(&json!({"revision":revision,"generation":1})),
+        &cookie,
+        503,
+    );
+    assert_eq!(cleanup["error"]["code"], "cleanup_failed");
+    assert_eq!(cleanup["status"]["pid"], old_pid);
+    assert!(!fixture.root.join("local-proxy-rules-applied.json").exists());
+    // Explicit retryable restart re-establishes ready resource state; Apply
+    // itself must refuse while a previous recovery condition remains pending.
+    fixture.reject.set(false);
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/restart",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    let applied = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules/apply",
+        Some(&json!({"revision":revision,"generation":1})),
+        &cookie,
+        200,
+    );
+    assert_eq!(applied["applied"], true);
+    assert_eq!(applied["status"]["generation"], 2);
+    assert_eq!(applied["draftRevision"], revision);
+    let manifest: Value = serde_json::from_slice(
+        &fs::read(fixture.root.join("local-proxy-rules-applied.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["nativeSHA256"], applied["configSHA256"]);
+    assert_eq!(manifest["generation"], 2);
+    assert!(manifest.get("nativeSha256").is_none());
+    let actual = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/config?service=sing-box",
+        None,
+        &cookie,
+        200,
+    );
+    let text = actual["config"].as_str().unwrap();
+    assert_eq!(
+        format!("{:x}", Sha256::digest(text.as_bytes())),
+        applied["configSHA256"]
+    );
+    let doc: Value = serde_json::from_str(text).unwrap();
+    for key in ["inbounds", "outbounds", "log", "experimental"] {
+        assert_eq!(doc[key], accepted[key], "preserved {key}");
+    }
+    assert!(
+        doc["route"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule| rule["domain"] == json!(["gpt.kanglives.top"])
+                && rule["outbound"] == "direct")
+    );
+    let active = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(
+        active["applied"],
+        json!({"state":"known","revision":revision,"generation":2})
+    );
+    let mut edited = policy.clone();
+    edited["rules"][0]["label"] = "different draft".into();
+    let saved = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules",
+        Some(&json!({"policy":edited})),
+        &cookie,
+        200,
+    );
+    assert_ne!(saved["draft"]["revision"], revision);
+    assert_eq!(saved["applied"]["revision"], revision);
+    assert_eq!(saved["runtimeGeneration"], 2);
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/stop",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    let stopped = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(stopped["applied"]["state"], "unknown");
+}

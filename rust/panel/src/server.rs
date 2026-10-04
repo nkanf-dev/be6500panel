@@ -299,19 +299,22 @@ impl Service {
         if rules_http::is_rules_path(request.path()) {
             // Session lock never covers draft filesystem I/O or streaming.
             drop(auth);
-            if matches!(
-                request.path(),
-                "/api/proxy/local-rules/apply" | "/api/proxy/select"
-            ) {
+            if request.path() == "/api/proxy/select" {
                 return if request.method == Method::Post {
                     rules_http::runtime_unavailable(&mut writer, head_only)
                 } else {
                     rules_http::method_not_allowed(&mut writer, head_only, "POST")
                 };
             }
-            if request.path() == "/api/proxy/local-rules/preview" && request.method != Method::Post
+            if matches!(
+                request.path(),
+                "/api/proxy/local-rules/preview" | "/api/proxy/local-rules/apply"
+            ) && request.method != Method::Post
             {
                 return rules_http::method_not_allowed(&mut writer, head_only, "POST");
+            }
+            if request.path() == "/api/proxy/local-rules/apply" && runtime.is_none() {
+                return rules_http::runtime_unavailable(&mut writer, head_only);
             }
             let Some(rules) = &self.rules else {
                 return rules_http::unavailable(&mut writer, head_only);
@@ -320,7 +323,9 @@ impl Service {
                 return rules_http::unavailable(&mut writer, head_only);
             };
             return match state.as_mut() {
-                Ok(state) => state.respond(&mut writer, request.path(), request.method, &body),
+                Ok(state) => {
+                    state.respond(&mut writer, request.path(), request.method, &body, runtime)
+                }
                 Err(_) => rules_http::unavailable(&mut writer, head_only),
             };
         }

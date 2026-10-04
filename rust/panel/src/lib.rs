@@ -20,6 +20,8 @@ pub mod readiness_dns;
 #[cfg(unix)]
 pub mod readiness_tun;
 #[cfg(unix)]
+pub mod rule_apply;
+#[cfg(unix)]
 pub mod rules_http;
 #[cfg(unix)]
 pub mod runtime_http;

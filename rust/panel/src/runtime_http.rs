@@ -26,6 +26,30 @@ impl RuntimeHttp {
     pub fn close(&mut self) -> Result<(), ManagerError> {
         self.manager.close()
     }
+    pub(crate) fn rule_status(&mut self) -> Result<Status, ManagerError> {
+        self.manager.status(ServiceId::SingBox)
+    }
+    pub(crate) fn rule_config(
+        &self,
+    ) -> Result<Option<crate::runtime_manager::ConfigSnapshot>, ManagerError> {
+        self.manager.config(ServiceId::SingBox)
+    }
+    pub(crate) fn configure_rules(
+        &mut self,
+        generation: u64,
+        bytes: &[u8],
+    ) -> Result<Status, ManagerError> {
+        self.manager
+            .configure(ServiceId::SingBox, generation, bytes, None)
+    }
+    pub(crate) fn write_failure(
+        &mut self,
+        writer: &mut impl Write,
+        error: ManagerError,
+    ) -> io::Result<()> {
+        failure(writer, &mut self.manager, error, false)
+    }
+
     pub(crate) fn respond(
         &mut self,
         writer: &mut impl Write,
@@ -252,7 +276,7 @@ fn query_service(query: &str) -> Option<ServiceId> {
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WireStatus {
+pub(crate) struct WireStatus {
     service: ServiceId,
     state: crate::runtime_manager::State,
     generation: u64,
