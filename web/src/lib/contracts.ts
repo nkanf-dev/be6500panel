@@ -264,6 +264,9 @@ export const ProxySelectSchema = Schema.Struct({
 });
 export const ProxyCaptureSchema = Schema.Struct({
   active: Schema.Boolean,
+  scope: Schema.optional(Schema.Literal("gateway", "devices")),
+  lanIPv4Prefixes: Schema.optional(Schema.Array(Schema.String)),
+  installedLanIPv4Prefixes: Schema.optional(Schema.Array(Schema.String)),
   desired: Schema.optional(Schema.Boolean),
   clients: Schema.optional(
     Schema.Array(
@@ -335,10 +338,20 @@ export type ProxySelectInput = {
   failure: "direct";
   ports: { mixed: number; tproxy: number; dns: number };
 };
-export type ProxyCaptureInput = (
-  | { devices: readonly { mac: string }[]; clientIPv4?: never }
-  | { clientIPv4: string; devices?: never }
-) & {
-  clientIPv6?: string;
-  ipv6: IPv6Policy;
-};
+export type ProxyCaptureInput =
+  | {
+      scope: "gateway";
+      ipv6: "direct";
+      devices?: never;
+      clientIPv4?: never;
+      clientIPv6?: never;
+      lanIPv4Prefixes?: never;
+    }
+  | ((
+      | { devices: readonly { mac: string }[]; clientIPv4?: never }
+      | { clientIPv4: string; devices?: never }
+    ) & {
+      scope?: "devices";
+      clientIPv6?: string;
+      ipv6: IPv6Policy;
+    });

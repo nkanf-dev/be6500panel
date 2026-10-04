@@ -91,6 +91,7 @@ describe("real proxy operations", () => {
     const fetch = setup();
     const user = userEvent.setup();
     render(<ProxyPage />);
+    await user.click(screen.getByText("高级设置与诊断"));
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "解析并导入节点" }),
@@ -101,7 +102,9 @@ describe("real proxy operations", () => {
       "https://subscriptions.example.test/private-test",
     );
     await user.click(screen.getByRole("button", { name: "解析并导入节点" }));
-    await screen.findByText("Synthetic Node");
+    await screen.findByText("已导入 1 个节点");
+    await user.click(screen.getByRole("button", { name: "更换节点" }));
+    await screen.findByRole("button", { name: "选择节点 Synthetic Node" });
     expect(screen.getByLabelText("私密订阅 URL")).toHaveValue("");
     expect(fetch).toHaveBeenCalledWith(
       "/api/proxy/import",
@@ -134,13 +137,16 @@ describe("real proxy operations", () => {
       }),
     );
     expect(
-      fetch.mock.calls.filter(([url]) => url === "/api/proxy/capture"),
+      fetch.mock.calls.filter(
+        ([url, init]) => url === "/api/proxy/capture" && init.method !== "GET",
+      ),
     ).toHaveLength(0);
   });
   it("imports YAML content without URL or client-side conversion", async () => {
     const fetch = setup();
     const user = userEvent.setup();
     render(<ProxyPage />);
+    await user.click(screen.getByText("高级设置与诊断"));
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "解析并导入节点" }),
@@ -203,7 +209,8 @@ describe("real proxy operations", () => {
     });
     const user = userEvent.setup();
     render(<ProxyPage />);
-    await user.click(screen.getByRole("tab", { name: "客户端接管" }));
+    await user.click(screen.getByText("高级设置与诊断"));
+    await user.click(screen.getByRole("tab", { name: "设备诊断" }));
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "审阅客户端接管" }),
@@ -244,19 +251,34 @@ describe("real proxy operations", () => {
           ? Promise.resolve(
               jsonResponse({ enabled: true, services: [runtimeStatus] }),
             )
-          : url === "/api/proxy/nodes"
-            ? Promise.resolve(
-                jsonResponse({
-                  ...proxyNodes,
-                  selectedNodeId: "node-synthetic",
-                }),
-              )
-            : new Promise<Response>((resolve) => {
-                complete = resolve;
-              }),
+          : url === "/api/proxy/capture"
+            ? Promise.resolve(jsonResponse({ active: false, commands: 0 }))
+            : url === "/api/proxy/node-probes"
+              ? Promise.resolve(
+                  jsonResponse({
+                    revision: "test",
+                    available: false,
+                    target: "https://www.gstatic.com/generate_204",
+                    running: false,
+                    results: [],
+                    limits: { maxNodes: 256, concurrency: 1, timeoutMs: 3000 },
+                  }),
+                )
+              : url === "/api/proxy/nodes"
+                ? Promise.resolve(
+                    jsonResponse({
+                      ...proxyNodes,
+                      selectedNodeId: "node-synthetic",
+                    }),
+                  )
+                : new Promise<Response>((resolve) => {
+                    complete = resolve;
+                  }),
     );
     const user = userEvent.setup();
     render(<ProxyPage />);
+    await user.click(screen.getByText("高级设置与诊断"));
+    await user.click(screen.getByRole("button", { name: "更换节点" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "保存配置" })).toBeEnabled(),
     );

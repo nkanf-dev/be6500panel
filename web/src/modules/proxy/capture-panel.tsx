@@ -223,8 +223,8 @@ export function CapturePanel({
   return (
     <Panel>
       <PanelHeader
-        title={strings.proxy.capture.title}
-        subtitle={strings.proxy.capture.subtitle}
+        title="设备诊断"
+        subtitle="按设备审阅和应用接管选择"
         action={
           <Badge
             tone={
