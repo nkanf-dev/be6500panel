@@ -8,6 +8,7 @@ pub mod native;
 pub mod policy;
 #[cfg(unix)]
 pub mod policy_store;
+pub mod readiness_dns;
 #[cfg(unix)]
 pub mod rules_http;
 #[cfg(unix)]
