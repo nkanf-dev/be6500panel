@@ -90,18 +90,32 @@ func (p *readinessPorts) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// runtimeReadiness checks local listeners from an already validated native config.
+// runtimeReadiness checks local listeners and owned TUN resources, when selected,
+// from an already validated native config. It does not prove Internet success.
 // FRPC has no required local listener; its process state is distinct from tunnel connectivity.
 func runtimeReadiness(manager func() *managedruntime.Manager) func(context.Context, string) error {
 	return func(ctx context.Context, service string) error {
 		if service != managedruntime.SingBox {
 			return nil
 		}
-		raw, _, err := manager().Config(service)
+		if manager == nil {
+			return errors.New("managed runtime unavailable")
+		}
+		owned := manager()
+		if owned == nil {
+			return errors.New("managed runtime unavailable")
+		}
+		raw, generation, err := owned.Config(service)
 		if err != nil {
 			return err
 		}
-		return checkNativeReadiness(ctx, raw)
+		return checkOwnedNativeReadiness(ctx, raw, func() (managedruntime.Status, error) {
+			status, err := owned.Status(service)
+			if err == nil && status.Generation != generation {
+				return managedruntime.Status{}, errors.New("accepted configuration changed during readiness")
+			}
+			return status, err
+		})
 	}
 }
 
