@@ -1,4 +1,8 @@
 #[cfg(unix)]
+pub mod artifact_http;
+#[cfg(unix)]
+pub mod artifact_source;
+#[cfg(unix)]
 pub mod artifact_stage;
 pub mod auth;
 #[cfg(unix)]

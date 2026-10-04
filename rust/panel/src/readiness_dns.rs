@@ -1023,6 +1023,25 @@ pub fn wait_readiness(raw: &[u8], deadline: Instant, cancel: Option<&AtomicBool>
     }
 }
 
+pub(crate) fn connect_literal(
+    address: SocketAddr,
+    deadline: Instant,
+    cancel: Option<&AtomicBool>,
+) -> Result<std::net::TcpStream> {
+    check(deadline, cancel)?;
+    if address.ip().is_unspecified() || address.port() == 0 {
+        return Err(ReadinessError::Address);
+    }
+    #[cfg(unix)]
+    {
+        socket_io::connect(address, deadline, cancel)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = address;
+        Err(ReadinessError::Unavailable)
+    }
+}
 pub(crate) fn exchange_dns(
     network: Network,
     address: SocketAddr,
@@ -1123,7 +1142,7 @@ mod socket_io {
             io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
         )
     }
-    fn connect(
+    pub(super) fn connect(
         address: SocketAddr,
         deadline: Instant,
         cancel: Option<&AtomicBool>,

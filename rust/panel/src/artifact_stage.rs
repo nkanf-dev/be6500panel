@@ -99,7 +99,7 @@ fn sha(text: &str) -> Result<[u8; 32], StageError> {
     }
     Ok(out)
 }
-fn metadata(artifact: &Artifact) -> Result<[u8; 32], StageError> {
+pub(crate) fn metadata(artifact: &Artifact) -> Result<[u8; 32], StageError> {
     // Transport scheme/redirect authority belongs to the source provider.
     if artifact.url.is_empty()
         || artifact.url.len() > MAX_URL_BYTES
