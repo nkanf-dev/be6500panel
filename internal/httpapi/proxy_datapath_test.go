@@ -13,12 +13,12 @@ func TestDatapathSelectionPreservesAcceptedBackend(t *testing.T) {
 		t.Fatal(mode, cfg, err)
 	}
 	legacy := []byte(`{"inbounds":[{"type":"tproxy","tag":"tproxy-in"}]}`)
-	if mode, cfg, err = proxyDatapathSelection(nil, nil, legacy); err != nil || mode != "" || cfg != nil {
+	if mode, cfg, err = proxyDatapathSelection(nil, nil, legacy); err != nil || mode != proxy.DatapathRoutedTUN || cfg == nil || cfg.InterfaceName != "b6p-tun" {
 		t.Fatal(mode, cfg, err)
 	}
 	target := proxy.DatapathTPROXY
-	if mode, cfg, err = proxyDatapathSelection(&target, nil, tunRaw); err != nil || mode != target || cfg != nil {
-		t.Fatal(mode, cfg, err)
+	if _, _, err = proxyDatapathSelection(&target, nil, tunRaw); err == nil {
+		t.Fatal("retired TPROXY product path regenerated")
 	}
 	target = proxy.DatapathRoutedTUN
 	input := &proxy.RoutedTUNConfig{InterfaceName: "b6p-tun", Address: "172.31.255.253/30"}
@@ -38,8 +38,8 @@ func TestDatapathSelectionRejectsAmbiguity(t *testing.T) {
 		t.Fatal("explicit unknown backend")
 	}
 	mode := proxy.DatapathRoutedTUN
-	if _, _, err := proxyDatapathSelection(&mode, nil, nil); err == nil {
-		t.Fatal("missing explicit TUN intent")
+	if selected, cfg, err := proxyDatapathSelection(&mode, nil, nil); err != nil || selected != proxy.DatapathRoutedTUN || cfg == nil || cfg.Address != "172.31.255.253/30" {
+		t.Fatal("ready-to-use default missing", selected, cfg, err)
 	}
 	if _, _, err := proxyDatapathSelection(nil, &proxy.RoutedTUNConfig{}, nil); err == nil {
 		t.Fatal("TUN intent without explicit selector")

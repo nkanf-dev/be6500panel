@@ -232,10 +232,15 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 			endpoints = append(endpoints, ip.IP.String())
 		}
 	}
-	dnsBind, tproxyBind := "192.168.31.1", "127.0.0.1"
-	if input.IPv6 == proxy.IPv6Follow {
-		dnsBind, tproxyBind = "::", "::"
+	// The product has one reliable IPv4 routed-TUN path. IPv6 remains the
+	// original router direct path; no retired socket backend is regenerated.
+	if input.IPv6 != "" && input.IPv6 != proxy.IPv6Direct {
+		fail(w, 422, "proxy_configuration_invalid", "当前网关使用 IPv6 直连")
+		return
 	}
+	input.IPv6 = proxy.IPv6Direct
+	input.Ports.TProxy = 7893 // unused internal recovery-era field, not a listener
+	dnsBind := "192.168.31.1"
 	state, err := s.runtime.Status(managedruntime.SingBox)
 	if err != nil {
 		s.runtimeError(w, err)
@@ -254,7 +259,7 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "proxy_datapath_invalid", "代理接管后端与已接受配置不一致")
 		return
 	}
-	out, err := proxy.CompileNative(proxy.CompileInput{Datapath: datapath, RoutedTUN: tunConfig, Node: node, Rules: sub.Rules, Diagnostics: sub.Diagnostics, AcceptUnsupportedRules: input.AcknowledgedRevision == summary.Revision, RuleSets: refs, Endpoints: endpoints, ManagementIPs: []string{"192.168.31.1"}, IPv6: input.IPv6, Failure: input.Failure, Ports: proxy.Ports{Mixed: input.Ports.Mixed, TProxy: input.Ports.TProxy, DNS: input.Ports.DNS}, MixedListenAddress: "192.168.31.1", TProxyListenAddress: tproxyBind, DNSListenAddress: dnsBind})
+	out, err := proxy.CompileNative(proxy.CompileInput{Datapath: datapath, RoutedTUN: tunConfig, Node: node, Rules: sub.Rules, Diagnostics: sub.Diagnostics, AcceptUnsupportedRules: input.AcknowledgedRevision == summary.Revision, RuleSets: refs, Endpoints: endpoints, ManagementIPs: []string{"192.168.31.1"}, IPv6: input.IPv6, Failure: input.Failure, Ports: proxy.Ports{Mixed: input.Ports.Mixed, TProxy: input.Ports.TProxy, DNS: input.Ports.DNS}, MixedListenAddress: "192.168.31.1", DNSListenAddress: dnsBind})
 	if err != nil {
 		fail(w, 422, "proxy_configuration_invalid", "代理策略生成失败")
 		return

@@ -6,8 +6,9 @@ import (
 	"errors"
 )
 
-// Missing request fields preserve the actual accepted backend. No selection
-// record or GET may silently migrate TPROXY or activate a routed-TUN backend.
+// Normal configuration writes use the single tested routed-TUN path. Safe
+// existing TUN settings are retained; an old TPROXY config is read only to keep
+// the current runtime untouched until an explicit save. GET never migrates it.
 func proxyDatapathSelection(requested *proxy.DatapathMode, tun *proxy.RoutedTUNConfig, accepted []byte) (proxy.DatapathMode, *proxy.RoutedTUNConfig, error) {
 	bad := func() (proxy.DatapathMode, *proxy.RoutedTUNConfig, error) {
 		return "", nil, errors.New("proxy_datapath_invalid")
@@ -15,13 +16,10 @@ func proxyDatapathSelection(requested *proxy.DatapathMode, tun *proxy.RoutedTUNC
 	if requested != nil {
 		switch *requested {
 		case proxy.DatapathTPROXY:
-			if tun != nil {
-				return bad()
-			}
-			return proxy.DatapathTPROXY, nil, nil
+			return bad() // retired unreliable product path; cleanup only
 		case proxy.DatapathRoutedTUN:
 			if tun == nil {
-				return bad()
+				return defaultProxyDatapath()
 			}
 			copy := *tun
 			return proxy.DatapathRoutedTUN, &copy, nil
@@ -33,7 +31,7 @@ func proxyDatapathSelection(requested *proxy.DatapathMode, tun *proxy.RoutedTUNC
 		return bad()
 	}
 	if len(accepted) == 0 {
-		return "", nil, nil
+		return defaultProxyDatapath()
 	}
 	var cfg struct {
 		Inbounds []struct {
@@ -91,5 +89,8 @@ func proxyDatapathSelection(requested *proxy.DatapathMode, tun *proxy.RoutedTUNC
 		}
 		return proxy.DatapathRoutedTUN, found, nil
 	}
-	return "", nil, nil
+	return defaultProxyDatapath()
+}
+func defaultProxyDatapath() (proxy.DatapathMode, *proxy.RoutedTUNConfig, error) {
+	return proxy.DatapathRoutedTUN, &proxy.RoutedTUNConfig{InterfaceName: "b6p-tun", Address: "172.31.255.253/30"}, nil
 }
