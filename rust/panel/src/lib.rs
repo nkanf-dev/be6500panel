@@ -7,3 +7,4 @@ pub mod policy;
 pub mod policy_store;
 pub mod server;
 pub mod static_files;
+pub mod subscription;

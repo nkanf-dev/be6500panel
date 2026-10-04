@@ -247,7 +247,7 @@ fn parse_prefix(value: &str) -> Option<(IpAddr, u8)> {
     }
     Some((ip, bits))
 }
-fn validate_node(node: &Node) -> Result<()> {
+pub(crate) fn validate_node(node: &Node) -> Result<()> {
     let valid_server = match node.server.parse::<IpAddr>() {
         Ok(ip) => usable_ip(ip),
         Err(_) => valid_domain(&node.server),
