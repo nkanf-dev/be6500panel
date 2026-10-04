@@ -355,12 +355,23 @@ impl fmt::Debug for ConfigSnapshot {
 struct Run {
     identity: OwnedRunIdentity,
     record: ConfigRecord,
+    binding: ArtifactBinding,
+    artifact_file: Option<crate::readiness_tun::FileIdentity>,
+    artifact_directory: Option<crate::readiness_tun::FileIdentity>,
     ready: bool,
 }
 struct PendingArtifact {
     stage: RetainedStage,
     generation: u64,
     checked: bool,
+    previous_metadata: Option<store::Artifact>,
+    metadata_committed: bool,
+}
+struct ArtifactRecovery {
+    binding: ArtifactBinding,
+    metadata: Option<store::Artifact>,
+    proven: bool,
+    switched_back: bool,
 }
 struct Service {
     binding: Option<ArtifactBinding>,
@@ -371,11 +382,15 @@ struct Service {
     run: Option<Run>,
     pending_check: Option<Candidate>,
     pending_artifact: Option<PendingArtifact>,
+    active_artifact: Option<RetainedStage>,
+    retired_artifact: Option<RetainedStage>,
+    artifact_recovery: Option<ArtifactRecovery>,
     desired: bool,
     restored: bool,
     needs_recovery: bool,
     resource_suspended: bool,
     durability_uncertain: bool,
+    artifact_durability_uncertain: bool,
     failure: Option<Failure>,
 }
 struct FrozenReady {
@@ -390,6 +405,7 @@ pub struct Manager {
     hooks: Hooks,
     limits: Limits,
     closed: bool,
+    closing: bool,
 }
 impl fmt::Debug for Manager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -440,6 +456,7 @@ impl Manager {
             hooks,
             limits,
             closed: false,
+            closing: false,
         })
     }
     fn service(
@@ -506,11 +523,15 @@ impl Manager {
             run: None,
             pending_check: None,
             pending_artifact: None,
+            active_artifact: None,
+            retired_artifact: None,
+            artifact_recovery: None,
             desired: false,
             restored: false,
             needs_recovery: false,
             resource_suspended: true,
             durability_uncertain: false,
+            artifact_durability_uncertain: false,
             failure: None,
         })
     }
@@ -532,11 +553,13 @@ impl Manager {
         }
     }
     fn ensure(&self, service: ServiceId) -> Result<(), Failure> {
-        if self.closed {
+        if self.closed || self.closing {
             return Err(Failure::Closed);
         }
         if self.services[service.index()].pending_check.is_some()
             || self.services[service.index()].pending_artifact.is_some()
+            || self.services[service.index()].retired_artifact.is_some()
+            || self.services[service.index()].artifact_recovery.is_some()
         {
             return Err(Failure::CheckPending);
         }
@@ -602,6 +625,9 @@ impl Manager {
         let matches = run_live
             && slot.run.as_ref().is_some_and(|run| {
                 observed.is_some_and(|status| status.pid == Some(run.identity.pid))
+                    && slot.binding.as_ref().is_some_and(|binding| {
+                        binding.path == run.binding.path && binding.sha256 == run.binding.sha256
+                    })
                     && record.is_some_and(|record| {
                         record.generation == run.identity.accepted_generation
                             && record.sha256 == run.identity.sha256
@@ -636,15 +662,20 @@ impl Manager {
                 .and_then(|status| status.pid),
             desired: slot.desired,
             restored: slot.restored,
-            needs_recovery: slot.needs_recovery,
+            needs_recovery: slot.needs_recovery
+                || slot.artifact_recovery.is_some()
+                || slot.retired_artifact.is_some(),
             resource_suspended: slot.resource_suspended,
             ready,
             running_matches_accepted: matches,
             active: ready
                 && !slot.resource_suspended
                 && !slot.needs_recovery
-                && !slot.durability_uncertain,
-            durability_uncertain: slot.durability_uncertain,
+                && !slot.durability_uncertain
+                && !slot.artifact_durability_uncertain
+                && slot.artifact_recovery.is_none()
+                && slot.retired_artifact.is_none(),
+            durability_uncertain: slot.durability_uncertain || slot.artifact_durability_uncertain,
             error_code: slot.failure.map(Failure::code),
         })
     }
@@ -731,6 +762,8 @@ impl Manager {
             stage: retained,
             generation: expected_generation,
             checked: false,
+            previous_metadata: None,
+            metadata_committed: false,
         });
         let checked = self.services[service.index()]
             .owner
@@ -789,6 +822,331 @@ impl Manager {
                     && pending.stage.admitted().is_ok()
             })
     }
+    fn bind_artifact(
+        &mut self,
+        service: ServiceId,
+        binding: ArtifactBinding,
+    ) -> Result<(), Failure> {
+        let file = fs::symlink_metadata(&binding.path).map_err(|_| Failure::ArtifactUnavailable)?;
+        let directory =
+            fs::symlink_metadata(&binding.root).map_err(|_| Failure::ArtifactUnavailable)?;
+        let slot = &mut self.services[service.index()];
+        slot.artifact_file = Some(crate::readiness_tun::FileIdentity::from_metadata(&file));
+        slot.artifact_directory = Some(crate::readiness_tun::FileIdentity::from_metadata(
+            &directory,
+        ));
+        slot.binding = Some(binding);
+        Ok(())
+    }
+    fn retire_artifact(&mut self, service: ServiceId) -> Result<(), Failure> {
+        let slot = &self.services[service.index()];
+        if let (Some(retired), Some(run)) = (&slot.retired_artifact, &slot.run)
+            && retired.owns_path(&run.binding.path)
+        {
+            return Err(Failure::Process(ProcessError::Busy));
+        }
+        if let Some(retired) = self.services[service.index()].retired_artifact.as_mut() {
+            retired.cleanup().map_err(Failure::ArtifactStage)?;
+        }
+        self.services[service.index()].retired_artifact.take();
+        Ok(())
+    }
+    pub fn retry_artifact_retirement(&mut self, service: ServiceId) -> Result<(), ManagerError> {
+        if self.services[service.index()].artifact_recovery.is_some() {
+            return Err(self.error(service, Failure::CheckPending, None));
+        }
+        self.retire_artifact(service)
+            .map_err(|failure| self.error(service, failure, None))?;
+        self.services[service.index()].failure = None;
+        Ok(())
+    }
+    /// Activate only the typed stage already checked with current accepted
+    /// bytes. No URL fetch or arbitrary executable/PID enters this operation.
+    pub fn activate_staged_artifact(
+        &mut self,
+        service: ServiceId,
+        expected_generation: u64,
+    ) -> Result<Status, ManagerError> {
+        let result = self.activate_artifact_inner(service, expected_generation);
+        match result {
+            Ok(()) => self.status(service),
+            Err((failure, recovery)) => {
+                self.services[service.index()].failure = Some(failure);
+                Err(self.error(service, failure, recovery))
+            }
+        }
+    }
+    fn restart_proven_artifact_after_failure(
+        &mut self,
+        service: ServiceId,
+        proven: bool,
+    ) -> Option<Failure> {
+        if !proven {
+            return None;
+        }
+        match self.start_accepted(service) {
+            Ok(()) => {
+                self.services[service.index()].restored = true;
+                None
+            }
+            Err(failure) => {
+                slot_suspended(&mut self.services[service.index()]);
+                if !matches!(
+                    failure,
+                    Failure::Hook(HookStage::Restore, _) | Failure::Store(StoreError::Durability)
+                ) && let Err(cleanup) = self.withdraw_stop(service)
+                {
+                    return Some(cleanup);
+                }
+                Some(failure)
+            }
+        }
+    }
+    fn activate_artifact_inner(
+        &mut self,
+        service: ServiceId,
+        expected: u64,
+    ) -> Result<(), (Failure, Option<Failure>)> {
+        if self.closed || self.closing {
+            return Err((Failure::Closed, None));
+        }
+        if self.store.service_state(service.into()).generation != expected {
+            return Err((Failure::Generation, None));
+        }
+        let slot = &self.services[service.index()];
+        if slot.pending_check.is_some()
+            || slot.artifact_recovery.is_some()
+            || slot.retired_artifact.is_some()
+        {
+            return Err((Failure::CheckPending, None));
+        }
+        if slot.durability_uncertain || slot.artifact_durability_uncertain {
+            return Err((Failure::Store(StoreError::Durability), None));
+        }
+        if slot.needs_recovery {
+            return Err((Failure::NotReady, None));
+        }
+        let pending = slot
+            .pending_artifact
+            .as_ref()
+            .ok_or((Failure::CheckPending, None))?;
+        if !pending.checked || pending.generation != expected {
+            return Err((Failure::CheckPending, None));
+        }
+        let admitted = pending
+            .stage
+            .admitted()
+            .map_err(|error| (Failure::ArtifactStage(error), None))?;
+        let old_binding = slot
+            .binding
+            .clone()
+            .ok_or((Failure::ArtifactUnavailable, None))?;
+        let new_binding = ArtifactBinding::trusted_local(
+            service,
+            admitted.root,
+            admitted.path,
+            admitted.extracted_sha256,
+            ArtifactProvenance::TrustedLocalModule,
+        );
+        let new_metadata = admitted.artifact.clone();
+        let old_metadata = self.store.service_state(service.into()).artifact.clone();
+        let should_run = slot.desired;
+        let accepted_record = self
+            .store
+            .service_state(service.into())
+            .current
+            .as_ref()
+            .ok_or((Failure::NotConfigured, None))?;
+        let accepted = self
+            .store
+            .read_config(service.into(), accepted_record)
+            .map_err(|error| (Failure::Store(error), None))?;
+        drop(accepted);
+        let proven = self
+            .freeze(service)
+            .map_err(|failure| (failure, None))?
+            .is_some();
+        if should_run && !proven {
+            return Err((Failure::NotReady, None));
+        }
+        // Admission reserves full manifest growth before any old Run stop.
+        self.store
+            .admit_artifact_intent(service.into(), expected, Some(new_metadata.clone()))
+            .map_err(|error| (Failure::Store(error), None))?;
+        self.withdraw_stop(service)
+            .map_err(|failure| (failure, None))?;
+        let readmission = self.services[service.index()]
+            .pending_artifact
+            .as_ref()
+            .ok_or(Failure::CheckPending)
+            .and_then(|pending| {
+                pending
+                    .stage
+                    .admitted()
+                    .map(|_| ())
+                    .map_err(Failure::ArtifactStage)
+            });
+        if let Err(failure) = readmission {
+            let recovery = self.restart_proven_artifact_after_failure(service, proven);
+            return Err((failure, recovery));
+        }
+        let accepted_record = self
+            .store
+            .service_state(service.into())
+            .current
+            .as_ref()
+            .ok_or((Failure::NotConfigured, None))?;
+        if let Err(error) = self.store.read_config(service.into(), accepted_record) {
+            let recovery = self.restart_proven_artifact_after_failure(service, proven);
+            return Err((Failure::Store(error), recovery));
+        }
+        let commit = self
+            .store
+            .set_artifact_intent(service.into(), expected, Some(new_metadata));
+        let outcome = match commit {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let recovery = self.restart_proven_artifact_after_failure(service, proven);
+                return Err((Failure::Store(error), recovery));
+            }
+        };
+        if let Some(pending) = self.services[service.index()].pending_artifact.as_mut() {
+            pending.previous_metadata = old_metadata.clone();
+            pending.metadata_committed = true;
+        }
+        self.artifact_outcome(service, outcome.durability_error)
+            .map_err(|failure| (failure, None))?;
+        // No owned Run remains. New binding stamps must still be admitted.
+        if let Err(failure) = self.bind_artifact(service, new_binding) {
+            let mut recovery = self
+                .abort_staged_artifact(service)
+                .err()
+                .map(|error| error.failure);
+            if recovery.is_none() {
+                recovery = self.restart_proven_artifact_after_failure(service, proven);
+            }
+            if recovery.is_some() {
+                slot_suspended(&mut self.services[service.index()]);
+            }
+            return Err((failure, recovery));
+        }
+        let stage = self.services[service.index()]
+            .pending_artifact
+            .take()
+            .ok_or((Failure::CheckPending, None))?
+            .stage;
+        let slot = &mut self.services[service.index()];
+        slot.retired_artifact = slot.active_artifact.take();
+        slot.active_artifact = Some(stage);
+        slot.artifact_recovery = Some(ArtifactRecovery {
+            binding: old_binding,
+            metadata: old_metadata,
+            proven,
+            switched_back: false,
+        });
+        slot.restored = false;
+        slot.failure = None;
+        if should_run && let Err(failure) = self.start_accepted(service) {
+            slot_suspended(&mut self.services[service.index()]);
+            if matches!(
+                failure,
+                Failure::Hook(HookStage::Restore, _) | Failure::Store(StoreError::Durability)
+            ) {
+                return Err((failure, None));
+            }
+            let recovery = self
+                .recover_staged_artifact(service)
+                .err()
+                .map(|error| error.failure);
+            return Err((failure, recovery));
+        }
+        self.services[service.index()].artifact_recovery.take();
+        self.retire_artifact(service)
+            .map_err(|failure| (failure, None))?;
+        Ok(())
+    }
+    /// Explicit same-owner recovery after failed artifact activation. A failed
+    /// withdrawal keeps the exact new child/binding and both verified artifacts.
+    pub fn recover_staged_artifact(&mut self, service: ServiceId) -> Result<Status, ManagerError> {
+        if self.closed || self.closing {
+            return Err(self.error(service, Failure::Closed, None));
+        }
+        let recovery = self.services[service.index()]
+            .artifact_recovery
+            .as_ref()
+            .ok_or_else(|| self.error(service, Failure::NotReady, None))?;
+        if !recovery.switched_back {
+            let binding = recovery.binding.clone();
+            let metadata = recovery.metadata.clone();
+            self.withdraw_stop(service)
+                .map_err(|failure| self.error(service, failure, None))?;
+            let generation = self.store.service_state(service.into()).generation;
+            let outcome = self
+                .store
+                .set_artifact_intent(service.into(), generation, metadata)
+                .map_err(|error| self.error(service, Failure::Store(error), None))?;
+            self.artifact_outcome(service, outcome.durability_error)
+                .map_err(|failure| self.error(service, failure, None))?;
+            self.bind_artifact(service, binding)
+                .map_err(|failure| self.error(service, failure, None))?;
+            let slot = &mut self.services[service.index()];
+            std::mem::swap(&mut slot.active_artifact, &mut slot.retired_artifact);
+            if let Some(recovery) = slot.artifact_recovery.as_mut() {
+                recovery.switched_back = true;
+            } else {
+                return Err(self.error(service, Failure::NotReady, None));
+            }
+        }
+        let proven = self.services[service.index()]
+            .artifact_recovery
+            .as_ref()
+            .is_some_and(|r| r.proven);
+        if self.services[service.index()].desired && proven {
+            let observed = self
+                .observe(service)
+                .map_err(|failure| self.error(service, failure, None))?;
+            let launch = if observed.is_some_and(|status| status.pid.is_some()) {
+                let status = self.status(service)?;
+                if status.durability_uncertain {
+                    Err(Failure::Store(StoreError::Durability))
+                } else if status.ready && status.running_matches_accepted {
+                    let record = self
+                        .store
+                        .service_state(service.into())
+                        .current
+                        .clone()
+                        .ok_or_else(|| self.error(service, Failure::NotConfigured, None))?;
+                    self.restore_resources(service, &record)
+                } else {
+                    Err(Failure::NotReady)
+                }
+            } else {
+                self.start_accepted(service)
+            };
+            if let Err(failure) = launch {
+                slot_suspended(&mut self.services[service.index()]);
+                let cleanup = if matches!(
+                    failure,
+                    Failure::Hook(HookStage::Restore, _) | Failure::Store(StoreError::Durability)
+                ) {
+                    None
+                } else {
+                    self.withdraw_stop(service).err()
+                };
+                return Err(self.error(service, failure, cleanup));
+            }
+            self.services[service.index()].restored = true;
+        } else {
+            self.services[service.index()].desired = false;
+            self.services[service.index()].needs_recovery = false;
+            self.services[service.index()].resource_suspended = true;
+        }
+        self.services[service.index()].artifact_recovery.take();
+        self.retire_artifact(service)
+            .map_err(|failure| self.error(service, failure, None))?;
+        self.services[service.index()].failure = None;
+        self.status(service)
+    }
     pub fn abort_staged_artifact(&mut self, service: ServiceId) -> Result<(), ManagerError> {
         self.abort_check(service)
     }
@@ -803,6 +1161,22 @@ impl Manager {
                 .map_err(|error| self.error(service, Failure::Process(error), None))?;
         }
         self.services[service.index()].pending_check.take();
+        let rollback = self.services[service.index()]
+            .pending_artifact
+            .as_ref()
+            .filter(|pending| pending.metadata_committed)
+            .map(|pending| (pending.generation, pending.previous_metadata.clone()));
+        if let Some((generation, metadata)) = rollback {
+            let outcome = self
+                .store
+                .set_artifact_intent(service.into(), generation, metadata)
+                .map_err(|error| self.error(service, Failure::Store(error), None))?;
+            self.artifact_outcome(service, outcome.durability_error)
+                .map_err(|failure| self.error(service, failure, None))?;
+            if let Some(pending) = self.services[service.index()].pending_artifact.as_mut() {
+                pending.metadata_committed = false;
+            }
+        }
         if let Some(pending) = self.services[service.index()].pending_artifact.as_mut() {
             pending
                 .stage
@@ -838,10 +1212,24 @@ impl Manager {
             config: &config,
             config_path: &config_path,
             run: slot.run.as_ref().map(|run| &run.identity),
-            artifact_root: slot.binding.as_ref().map(|binding| binding.root.as_path()),
-            artifact_path: slot.binding.as_ref().map(|binding| binding.path.as_path()),
-            artifact_file: slot.artifact_file,
-            artifact_directory: slot.artifact_directory,
+            artifact_root: slot
+                .run
+                .as_ref()
+                .map(|run| run.binding.root.as_path())
+                .or_else(|| slot.binding.as_ref().map(|binding| binding.root.as_path())),
+            artifact_path: slot
+                .run
+                .as_ref()
+                .map(|run| run.binding.path.as_path())
+                .or_else(|| slot.binding.as_ref().map(|binding| binding.path.as_path())),
+            artifact_file: slot
+                .run
+                .as_ref()
+                .map_or(slot.artifact_file, |run| run.artifact_file),
+            artifact_directory: slot
+                .run
+                .as_ref()
+                .map_or(slot.artifact_directory, |run| run.artifact_directory),
             owned_status: slot
                 .owner
                 .as_ref()
@@ -953,6 +1341,13 @@ impl Manager {
                     sha256: record.sha256.clone(),
                 },
                 record: record.clone(),
+                binding: self.services[service.index()]
+                    .binding
+                    .as_ref()
+                    .expect("launched artifact binding")
+                    .clone(),
+                artifact_file: self.services[service.index()].artifact_file,
+                artifact_directory: self.services[service.index()].artifact_directory,
                 ready: false,
             });
         }
@@ -966,6 +1361,13 @@ impl Manager {
         if status.phase != process::Phase::Running
             || status.mode != Some(process::LaunchMode::Run)
             || status.pid != Some(identity.identity.pid)
+            || !self.services[service.index()]
+                .binding
+                .as_ref()
+                .is_some_and(|binding| {
+                    binding.path == identity.binding.path
+                        && binding.sha256 == identity.binding.sha256
+                })
         {
             return Err(Failure::Exited);
         }
@@ -981,6 +1383,19 @@ impl Manager {
             slot.durability_uncertain = true;
             slot.needs_recovery = true;
             slot.resource_suspended = true;
+            return Err(Failure::Store(StoreError::Durability));
+        }
+        Ok(())
+    }
+    fn artifact_outcome(
+        &mut self,
+        service: ServiceId,
+        durability: Option<StoreError>,
+    ) -> Result<(), Failure> {
+        let slot = &mut self.services[service.index()];
+        slot.artifact_durability_uncertain = durability.is_some();
+        if durability.is_some() {
+            slot_suspended(slot);
             return Err(Failure::Store(StoreError::Durability));
         }
         Ok(())
@@ -1025,7 +1440,7 @@ impl Manager {
         self.require_live(service)?;
         let slot = &mut self.services[service.index()];
         slot.resource_suspended = false;
-        slot.needs_recovery = slot.durability_uncertain;
+        slot.needs_recovery = slot.durability_uncertain || slot.artifact_durability_uncertain;
         Ok(())
     }
     fn freeze(&mut self, service: ServiceId) -> Result<Option<FrozenReady>, Failure> {
@@ -1269,7 +1684,11 @@ impl Manager {
             Ok(()) => {
                 let slot = &mut self.services[service.index()];
                 slot.resource_suspended = true;
-                slot.needs_recovery = slot.durability_uncertain || abort_failure.is_some();
+                slot.needs_recovery = slot.durability_uncertain
+                    || slot.artifact_durability_uncertain
+                    || abort_failure.is_some()
+                    || slot.artifact_recovery.is_some()
+                    || slot.retired_artifact.is_some();
                 slot.failure = abort_failure.map(|error| error.failure);
                 if let Some(error) = abort_failure {
                     return Err(error);
@@ -1452,6 +1871,7 @@ impl Manager {
         if self.closed {
             return Ok(());
         }
+        self.closing = true;
         let mut first = None;
         for service in SERVICES {
             self.services[service.index()].desired = false;
@@ -1470,19 +1890,248 @@ impl Manager {
             return Err(error);
         }
         for service in SERVICES {
-            if let Some(owner) = &mut self.services[service.index()].owner
-                && let Err(error) = owner.close()
-            {
-                return Err(self.error(service, Failure::Process(error), None));
+            if let Some(owner) = &mut self.services[service.index()].owner {
+                owner
+                    .close()
+                    .map_err(|error| self.error(service, Failure::Process(error), None))?;
             }
+            self.services[service.index()].owner.take();
+        }
+        for service in SERVICES {
+            if let Some(stage) = self.services[service.index()].active_artifact.as_mut() {
+                stage
+                    .cleanup()
+                    .map_err(|error| self.error(service, Failure::ArtifactStage(error), None))?;
+            }
+            self.services[service.index()].active_artifact.take();
+            if let Some(stage) = self.services[service.index()].retired_artifact.as_mut() {
+                stage
+                    .cleanup()
+                    .map_err(|error| self.error(service, Failure::ArtifactStage(error), None))?;
+            }
+            self.services[service.index()].retired_artifact.take();
+            self.services[service.index()].artifact_recovery.take();
         }
         self.closed = true;
         Ok(())
     }
 }
+fn slot_suspended(slot: &mut Service) {
+    slot.needs_recovery = true;
+    slot.resource_suspended = true;
+}
 fn config_identity(record: &ConfigRecord) -> ConfigIdentity {
     ConfigIdentity {
         generation: record.generation,
         sha256: record.sha256.clone(),
+    }
+}
+
+#[cfg(test)]
+mod artifact_fault_tests {
+    use super::*;
+    use std::{cell::Cell, rc::Rc, sync::Mutex, sync::atomic::AtomicU64};
+    static SERIAL: Mutex<()> = Mutex::new(());
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    const CORE: &str = r#"#!/bin/sh
+case "$1" in check|verify) exit 0;; esac
+trap 'exit 0' TERM
+printf '%s\n' "$$" > "$TMPDIR/marker"
+IFS= read -r value < "$TMPDIR/wait"
+"#;
+    struct Fixture {
+        root: PathBuf,
+        cleanup: Rc<Cell<u32>>,
+    }
+    impl Fixture {
+        fn new() -> Self {
+            let root = fs::canonicalize(std::env::temp_dir())
+                .unwrap()
+                .join(format!(
+                    "b6p-artifact-manager-fault-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                ));
+            fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+            for part in ["artifacts", "run", "run/sing-box"] {
+                fs::DirBuilder::new()
+                    .mode(0o700)
+                    .create(root.join(part))
+                    .unwrap();
+            }
+            let core = CORE.to_owned();
+            fs::write(root.join("artifacts/fake-core"), core.as_bytes()).unwrap();
+            fs::set_permissions(
+                root.join("artifacts/fake-core"),
+                fs::Permissions::from_mode(0o700),
+            )
+            .unwrap();
+            let name = std::ffi::CString::new(
+                root.join("run/sing-box/wait")
+                    .as_os_str()
+                    .as_encoded_bytes(),
+            )
+            .unwrap();
+            assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+            Self {
+                root,
+                cleanup: Rc::new(Cell::new(0)),
+            }
+        }
+        fn manager(&self) -> Manager {
+            let count = self.cleanup.clone();
+            let marker = self.root.join("run/sing-box/marker");
+            let hooks = Hooks::new(
+                |_| Ok(()),
+                move |context| {
+                    let expected = context.run.ok_or(HookError::Failed)?.pid();
+                    while !fs::read_to_string(&marker)
+                        .is_ok_and(|text| text.trim() == expected.to_string())
+                    {
+                        if Instant::now() >= context.deadline {
+                            return Err(HookError::Deadline);
+                        }
+                        std::thread::yield_now();
+                    }
+                    Ok(())
+                },
+                move |_| {
+                    count.set(count.get() + 1);
+                    Ok(())
+                },
+                |_| Ok(()),
+            );
+            let core = CORE.to_owned();
+            Manager::open(
+                self.root.join("services"),
+                self.root.join("run"),
+                ArtifactBindings {
+                    sing_box: Some(ArtifactBinding::trusted_local(
+                        ServiceId::SingBox,
+                        self.root.join("artifacts"),
+                        self.root.join("artifacts/fake-core"),
+                        Sha256::digest(core.as_bytes()).into(),
+                        ArtifactProvenance::TrustedLocalModule,
+                    )),
+                    frpc: None,
+                },
+                hooks,
+                Limits {
+                    process: process::Limits {
+                        term_grace: std::time::Duration::from_millis(100),
+                        kill_grace: std::time::Duration::from_secs(1),
+                        check_timeout: std::time::Duration::from_secs(2),
+                    },
+                    readiness_timeout: std::time::Duration::from_secs(2),
+                    resource_timeout: std::time::Duration::from_secs(1),
+                },
+            )
+            .unwrap()
+        }
+        fn stage(&self) -> Stage {
+            let core = CORE.to_owned();
+            let metadata = store::Artifact {
+                url: "https://example.invalid/fault-core".into(),
+                sha256: format!("{:x}", Sha256::digest(core.as_bytes())),
+                compression: "none".into(),
+                version: "new".into(),
+            };
+            let cancel = AtomicBool::new(false);
+            let budget = crate::readiness_tun::Budget {
+                deadline: Instant::now() + std::time::Duration::from_secs(2),
+                cancel: &cancel,
+            };
+            Stage::from_reader(
+                &self.root.join("artifacts"),
+                &metadata,
+                core.as_bytes(),
+                &budget,
+            )
+            .unwrap()
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+    #[test]
+    fn metadata_precommit_failure_preserves_old_binding_and_restarts_proven_config() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.manager();
+        let service = ServiceId::SingBox;
+        manager.configure(service, 0, b"good\n", None).unwrap();
+        let old = manager.start(service).unwrap();
+        let manifest = fs::read(fixture.root.join("services/sing-box/state.json")).unwrap();
+        manager
+            .check_staged_artifact(service, 1, fixture.stage(), None)
+            .unwrap();
+        manager.store.inject_artifact_fault(false);
+        let error = manager.activate_staged_artifact(service, 1).unwrap_err();
+        assert_eq!(error.failure, Failure::Store(StoreError::Storage));
+        assert_eq!(error.recovery_failure, None);
+        let status = manager.status(service).unwrap();
+        assert!(status.active && status.ready);
+        assert_ne!(status.pid, old.pid);
+        assert_eq!(
+            fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+            manifest
+        );
+        assert!(manager.staged_artifact_checked(service));
+        manager.abort_staged_artifact(service).unwrap();
+        manager.close().unwrap();
+    }
+    #[test]
+    fn metadata_postrename_uncertainty_retains_new_intent_and_old_binding_until_explicit_abort() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.manager();
+        let service = ServiceId::SingBox;
+        manager.configure(service, 0, b"good\n", None).unwrap();
+        manager.start(service).unwrap();
+        let old = manager.services[service.index()]
+            .binding
+            .as_ref()
+            .unwrap()
+            .path
+            .clone();
+        manager
+            .check_staged_artifact(service, 1, fixture.stage(), None)
+            .unwrap();
+        manager.store.inject_artifact_fault(true);
+        let error = manager.activate_staged_artifact(service, 1).unwrap_err();
+        assert_eq!(error.failure, Failure::Store(StoreError::Durability));
+        let status = manager.status(service).unwrap();
+        assert!(
+            status.pid.is_none()
+                && !status.active
+                && status.durability_uncertain
+                && status.needs_recovery
+        );
+        assert_eq!(
+            manager.services[service.index()]
+                .binding
+                .as_ref()
+                .unwrap()
+                .path,
+            old
+        );
+        assert_eq!(
+            manager
+                .store
+                .snapshot(service.into())
+                .artifact
+                .as_ref()
+                .unwrap()
+                .version,
+            "new"
+        );
+        assert!(manager.staged_artifact_checked(service));
+        manager.abort_staged_artifact(service).unwrap();
+        assert!(manager.store.snapshot(service.into()).artifact.is_none());
+        assert!(!manager.status(service).unwrap().durability_uncertain);
+        assert!(manager.start(service).unwrap().active);
+        manager.close().unwrap();
     }
 }

@@ -52,11 +52,15 @@ struct Control {
     events: Vec<(HookStage, ServiceId, u64, Option<u32>, String)>,
     fail_prestart_generation: Option<u64>,
     fail_ready_generation: Option<u64>,
+    fail_ready_once: bool,
+    fail_cleanup_after_readiness: bool,
     fail_cleanup: bool,
     fail_cleanup_generation: Option<u64>,
     fail_restore: bool,
     prestart_mutate_generation: Option<u64>,
     cleanup_mutate_candidate: bool,
+    cleanup_replace_stage: Option<PathBuf>,
+    replace_stage_after_restore: Option<PathBuf>,
     ready_expired: bool,
 }
 struct Fixture {
@@ -157,6 +161,14 @@ impl Fixture {
                     Some(identity.pid()),
                     context.config.sha256.clone(),
                 ));
+                if ready_control.borrow().fail_ready_once {
+                    let mut control = ready_control.borrow_mut();
+                    control.fail_ready_once = false;
+                    if control.fail_cleanup_after_readiness {
+                        control.fail_cleanup = true;
+                    }
+                    return Err(HookError::Failed);
+                }
                 if ready_control.borrow().ready_expired {
                     // Finite fake hook that explicitly honors/reports its deadline.
                     return Err(HookError::Deadline);
@@ -193,6 +205,10 @@ impl Fixture {
                     || control.fail_cleanup_generation == Some(context.config.generation)
                 {
                     return Err(HookError::Failed);
+                }
+                if let Some(path) = control.cleanup_replace_stage.take() {
+                    fs::remove_file(&path).unwrap();
+                    fs::write(&path, b"foreign replacement").unwrap();
                 }
                 if control.cleanup_mutate_candidate {
                     // Same-uid mutation after Check is still rejected by the
@@ -236,6 +252,14 @@ impl Fixture {
                 ));
                 if restore_control.borrow().fail_restore {
                     return Err(HookError::Failed);
+                }
+                if let Some(path) = restore_control
+                    .borrow_mut()
+                    .replace_stage_after_restore
+                    .take()
+                {
+                    fs::remove_file(&path).unwrap();
+                    fs::write(path, b"foreign replacement").unwrap();
                 }
                 Ok(())
             },
@@ -1110,4 +1134,578 @@ fn exited_run_with_pending_staged_checker_still_withdraws_and_reaps() {
     assert!(result.pid.is_none() && result.needs_recovery);
     assert!(!path.exists());
     assert!(!exists(pid));
+}
+
+#[test]
+fn checked_artifact_switch_uses_same_generation_with_withdrawal_before_old_stop() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    let old_pid = live(&mut manager, service, b"good\n");
+    fixture.expect_live(service, old_pid);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "new-fixture".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    let switched = manager.activate_staged_artifact(service, 1).unwrap();
+    assert!(switched.active && switched.ready && switched.desired);
+    assert_eq!(switched.generation, 1);
+    assert_ne!(switched.pid, Some(old_pid));
+    assert!(!exists(old_pid));
+    assert_eq!(manager.config(service).unwrap().unwrap().bytes(), b"good\n");
+    let state: serde_json::Value = serde_json::from_slice(&fixture.manifest(service)).unwrap();
+    assert_eq!(state["artifact"]["version"], "new-fixture");
+    let events = fs::read_to_string(fixture.run(service).join("events")).unwrap();
+    assert!(events.lines().next().unwrap().starts_with("cleanup "));
+    manager.stop(service).unwrap();
+    assert!(
+        path.exists(),
+        "off retains accepted verified artifact for explicit next start"
+    );
+    manager.close().unwrap();
+    assert!(!path.exists());
+    assert!(
+        fixture.base.join("artifacts/fake-core").exists(),
+        "preexisting local trusted files are never removed"
+    );
+}
+#[test]
+fn artifact_cleanup_refusal_keeps_old_runtime_and_abort_keeps_old_metadata() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    let pid = live(&mut manager, service, b"good\n");
+    let manifest = fixture.manifest(service);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "fixture".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    fixture.control.borrow_mut().fail_cleanup = true;
+    assert_eq!(
+        manager
+            .activate_staged_artifact(service, 1)
+            .unwrap_err()
+            .failure,
+        Failure::Hook(HookStage::Cleanup, HookError::Failed)
+    );
+    assert_eq!(manager.status(service).unwrap().pid, Some(pid));
+    assert!(exists(pid));
+    assert!(path.exists());
+    assert_eq!(fixture.manifest(service), manifest);
+    manager.abort_staged_artifact(service).unwrap();
+    assert!(!path.exists());
+    fixture.control.borrow_mut().fail_cleanup = false;
+    manager.stop(service).unwrap();
+}
+#[test]
+fn new_artifact_readiness_failure_restores_exact_proven_old_binding_and_metadata() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    let pid = live(&mut manager, service, b"good\n");
+    let manifest = fixture.manifest(service);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "fixture".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    fixture.control.borrow_mut().fail_ready_once = true;
+    let failed = manager.activate_staged_artifact(service, 1).unwrap_err();
+    assert_eq!(
+        failed.failure,
+        Failure::Hook(HookStage::Readiness, HookError::Failed)
+    );
+    assert_eq!(failed.recovery_failure, None);
+    let restored = manager.status(service).unwrap();
+    assert!(restored.active && restored.restored && restored.desired);
+    assert_eq!(restored.generation, 1);
+    assert_ne!(restored.pid, Some(pid));
+    assert_eq!(fixture.manifest(service), manifest);
+    assert!(!path.exists());
+    assert!(!exists(pid));
+}
+
+#[test]
+fn artifact_new_child_cleanup_failure_retains_new_binding_and_both_stages_for_explicit_recovery() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    live(&mut manager, service, b"good\n");
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(5),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "first".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let first = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    manager.activate_staged_artifact(service, 1).unwrap();
+    let old = manager.status(service).unwrap();
+    let old_manifest = fixture.manifest(service);
+    let mut artifact = artifact;
+    artifact.version = "second".into();
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let second = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    fixture.control.borrow_mut().fail_ready_once = true;
+    fixture.control.borrow_mut().fail_cleanup_after_readiness = true;
+    let failed = manager.activate_staged_artifact(service, 1).unwrap_err();
+    assert_eq!(
+        failed.failure,
+        Failure::Hook(HookStage::Readiness, HookError::Failed)
+    );
+    assert_eq!(
+        failed.recovery_failure,
+        Some(Failure::Hook(HookStage::Cleanup, HookError::Failed))
+    );
+    let held = manager.status(service).unwrap();
+    assert_ne!(held.pid, old.pid);
+    assert!(held.pid.is_some() && !held.active && held.needs_recovery);
+    assert!(first.exists() && second.exists());
+    assert_eq!(
+        manager.restart(service).unwrap_err().failure,
+        Failure::CheckPending
+    );
+    assert_eq!(
+        manager
+            .retry_artifact_retirement(service)
+            .unwrap_err()
+            .failure,
+        Failure::CheckPending
+    );
+    fixture.control.borrow_mut().fail_cleanup = false;
+    let recovered = manager.recover_staged_artifact(service).unwrap();
+    assert!(recovered.active && recovered.restored);
+    assert_eq!(recovered.generation, 1);
+    assert_eq!(fixture.manifest(service), old_manifest);
+    assert!(first.exists() && !second.exists());
+    manager.close().unwrap();
+    assert!(!first.exists());
+}
+#[test]
+fn owned_artifact_close_file_cleanup_failure_retains_retry_without_closed_process_owner() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    live(&mut manager, service, b"good\n");
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "fixture".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    let pid = manager
+        .activate_staged_artifact(service, 1)
+        .unwrap()
+        .pid
+        .unwrap();
+    fs::remove_file(&path).unwrap();
+    fs::write(&path, b"foreign replacement").unwrap();
+    assert!(manager.close().is_err());
+    assert!(!exists(pid));
+    assert_eq!(manager.status(service).unwrap().pid, None);
+    assert_eq!(manager.start(service).unwrap_err().failure, Failure::Closed);
+    assert_eq!(fs::read(&path).unwrap(), b"foreign replacement");
+    fs::remove_file(&path).unwrap();
+    manager.close().unwrap();
+    manager.close().unwrap();
+}
+
+#[test]
+fn retained_ready_old_artifact_restore_retry_uses_same_pid_without_new_withdrawal() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    live(&mut manager, service, b"good\n");
+    let manifest = fixture.manifest(service);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "fixture".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    fixture.control.borrow_mut().fail_ready_once = true;
+    fixture.control.borrow_mut().fail_restore = true;
+    let failure = manager.activate_staged_artifact(service, 1).unwrap_err();
+    assert_eq!(
+        failure.recovery_failure,
+        Some(Failure::Hook(HookStage::Restore, HookError::Failed))
+    );
+    let held = manager.status(service).unwrap();
+    assert!(held.ready && held.running_matches_accepted && !held.active && held.pid.is_some());
+    let pid = held.pid.unwrap();
+    let withdrawals = fixture
+        .control
+        .borrow()
+        .events
+        .iter()
+        .filter(|e| e.0 == HookStage::Cleanup)
+        .count();
+    fixture.control.borrow_mut().fail_restore = false;
+    let restored = manager.recover_staged_artifact(service).unwrap();
+    assert_eq!(restored.pid, Some(pid));
+    assert!(restored.active && restored.restored);
+    assert_eq!(
+        fixture
+            .control
+            .borrow()
+            .events
+            .iter()
+            .filter(|e| e.0 == HookStage::Cleanup)
+            .count(),
+        withdrawals
+    );
+    assert_eq!(fixture.manifest(service), manifest);
+    assert!(!path.exists());
+}
+#[test]
+fn stage_readmission_failure_with_failed_old_readiness_withdraws_unready_recovery_child() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    let pid = live(&mut manager, service, b"good\n");
+    let manifest = fixture.manifest(service);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "fixture".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    fixture.control.borrow_mut().cleanup_replace_stage = Some(path.clone());
+    fixture.control.borrow_mut().fail_ready_once = true;
+    let failed = manager.activate_staged_artifact(service, 1).unwrap_err();
+    assert!(matches!(failed.failure, Failure::ArtifactStage(_)));
+    assert_eq!(
+        failed.recovery_failure,
+        Some(Failure::Hook(HookStage::Readiness, HookError::Failed))
+    );
+    let observed = manager.status(service).unwrap();
+    assert!(observed.pid.is_none() && observed.needs_recovery && !observed.active);
+    assert!(!exists(pid));
+    assert_eq!(fixture.manifest(service), manifest);
+    assert_eq!(fs::read(&path).unwrap(), b"foreign replacement");
+    assert_eq!(
+        fixture
+            .control
+            .borrow()
+            .events
+            .iter()
+            .filter(|e| e.0 == HookStage::Cleanup)
+            .count(),
+        2
+    );
+    fs::remove_file(path).unwrap();
+    manager.abort_staged_artifact(service).unwrap();
+}
+
+#[test]
+fn stopped_artifact_switch_keeps_off_and_requires_explicit_start_for_readiness() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    manager.configure(service, 0, b"good\n", None).unwrap();
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "off-fixture".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    assert_eq!(
+        manager
+            .activate_staged_artifact(service, 2)
+            .unwrap_err()
+            .failure,
+        Failure::Generation
+    );
+    assert!(manager.staged_artifact_checked(service));
+    let stopped = manager.activate_staged_artifact(service, 1).unwrap();
+    assert!(!stopped.desired && !stopped.ready && !stopped.active && stopped.pid.is_none());
+    assert_eq!(stopped.generation, 1);
+    assert!(path.exists());
+    assert!(!fixture.run(service).join("starts").exists());
+    assert!(manager.start(service).unwrap().active);
+    manager.close().unwrap();
+    assert!(!path.exists());
+}
+#[test]
+fn failed_old_stage_retirement_is_bounded_and_explicit_retry_preserves_current_ready_run() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    live(&mut manager, service, b"good\n");
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(5),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "first".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let old_path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    manager.activate_staged_artifact(service, 1).unwrap();
+    let artifact = store::Artifact {
+        version: "second".into(),
+        ..artifact
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let new_path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    fixture.control.borrow_mut().replace_stage_after_restore = Some(old_path.clone());
+    assert!(matches!(
+        manager
+            .activate_staged_artifact(service, 1)
+            .unwrap_err()
+            .failure,
+        Failure::ArtifactStage(_)
+    ));
+    let current = manager.status(service).unwrap();
+    assert!(
+        current.ready
+            && current.running_matches_accepted
+            && current.needs_recovery
+            && !current.active
+    );
+    let pid = current.pid.unwrap();
+    assert!(new_path.exists());
+    assert_eq!(fs::read(&old_path).unwrap(), b"foreign replacement");
+    assert_eq!(
+        manager.restart(service).unwrap_err().failure,
+        Failure::CheckPending
+    );
+    fs::remove_file(old_path).unwrap();
+    manager.retry_artifact_retirement(service).unwrap();
+    let qualified = manager.status(service).unwrap();
+    assert_eq!(qualified.pid, Some(pid));
+    assert!(qualified.active && !qualified.needs_recovery && qualified.error_code.is_none());
+    manager.close().unwrap();
+    assert!(!new_path.exists());
+}
+
+#[test]
+fn changed_off_accepted_config_refuses_checked_artifact_before_metadata_or_start() {
+    use be6500_panel::{artifact_stage::Stage, readiness_tun::Budget};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut manager = fixture.manager();
+    let service = ServiceId::SingBox;
+    manager.configure(service, 0, b"good\n", None).unwrap();
+    let manifest = fixture.manifest(service);
+    let cancel = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(3),
+        cancel: &cancel,
+    };
+    let artifact = store::Artifact {
+        url: "https://example.invalid/checked-core".into(),
+        sha256: format!("{:x}", Sha256::digest(HELPER.as_bytes())),
+        compression: "none".into(),
+        version: "off-fixture".into(),
+    };
+    let stage = Stage::from_reader(
+        &fixture.base.join("artifacts"),
+        &artifact,
+        HELPER.as_bytes(),
+        &budget,
+    )
+    .unwrap();
+    let path = stage.admitted().unwrap().path.to_path_buf();
+    manager
+        .check_staged_artifact(service, 1, stage, None)
+        .unwrap();
+    fs::write(
+        fixture.base.join("services/sing-box/config-1.json"),
+        b"changed after check\n",
+    )
+    .unwrap();
+    assert_eq!(
+        manager
+            .activate_staged_artifact(service, 1)
+            .unwrap_err()
+            .failure,
+        Failure::Store(StoreError::InvalidState)
+    );
+    assert_eq!(fixture.manifest(service), manifest);
+    assert!(!fixture.run(service).join("starts").exists());
+    assert!(path.exists());
+    assert!(!manager.status(service).unwrap().desired);
+    manager.abort_staged_artifact(service).unwrap();
+    assert!(!path.exists());
 }

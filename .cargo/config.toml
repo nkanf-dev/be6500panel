@@ -4,3 +4,7 @@
 target-dir = ".build/rust"
 jobs = 1
 incremental = false
+
+# Native fork/check/lock fault fixtures must not overlap across test cases.
+[env]
+RUST_TEST_THREADS = { value = "1", force = true }

@@ -288,6 +288,12 @@ impl fmt::Debug for RetainedStage {
     }
 }
 impl RetainedStage {
+    /// Ownership comparison only, NOT file admission or current liveness.
+    /// Retirement must still reach its exact-inode cleanup after a prior
+    /// unlink, when admission appropriately refuses the now-absent name.
+    pub(crate) fn owns_path(&self, path: &Path) -> bool {
+        self.owned.as_ref().is_some_and(|owned| owned.path == path)
+    }
     pub fn checked(&self, budget: &Budget<'_>) -> Result<Admission<'_>, StageError> {
         check(budget)?;
         let admission = self.admitted();

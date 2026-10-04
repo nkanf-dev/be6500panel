@@ -220,6 +220,8 @@ pub struct RuntimeStore {
     owner: [u8; 16],
     #[cfg(test)]
     fault: Option<Fault>,
+    #[cfg(test)]
+    artifact_fault: Option<bool>,
 }
 impl fmt::Debug for RuntimeStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -325,6 +327,8 @@ impl RuntimeStore {
             owner,
             #[cfg(test)]
             fault: None,
+            #[cfg(test)]
+            artifact_fault: None,
         };
         store.checked(ServiceId::SingBox)?;
         store.checked(ServiceId::Frpc)?;
@@ -578,6 +582,25 @@ impl RuntimeStore {
     /// Persist only a bounded artifact request. This is NOT executable trust
     /// or activation: the caller must stage/check/withdraw/own it separately.
     /// Config generation, current and proven lastGood records stay unchanged.
+    #[cfg(test)]
+    pub(crate) fn inject_artifact_fault(&mut self, after_commit: bool) {
+        self.artifact_fault = Some(after_commit);
+    }
+    pub fn admit_artifact_intent(
+        &self,
+        service: ServiceId,
+        expected_generation: u64,
+        artifact: Option<Artifact>,
+    ) -> Result<(), StoreError> {
+        let slot = self.checked(service)?;
+        if slot.state.generation != expected_generation {
+            return Err(StoreError::Generation);
+        }
+        let mut next = slot.state.clone();
+        next.artifact = artifact.map(validate_artifact_intent).transpose()?;
+        let bytes = serialize_state(&next)?;
+        self.admit(&slot.dir.file, &[bytes.len()])
+    }
     pub fn set_artifact_intent(
         &mut self,
         service: ServiceId,
@@ -590,6 +613,18 @@ impl RuntimeStore {
         }
         let mut next = slot.state.clone();
         next.artifact = artifact.map(validate_artifact_intent).transpose()?;
+        #[cfg(test)]
+        if let Some(after_commit) = self.artifact_fault.take() {
+            let previous = self.fault;
+            self.fault = Some(if after_commit {
+                Fault::CommittedSync
+            } else {
+                Fault::Write
+            });
+            let outcome = self.save_state(service, next);
+            self.fault = previous;
+            return outcome;
+        }
         self.save_state(service, next)
     }
     fn save_state(

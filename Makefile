@@ -7,6 +7,8 @@ RUST_TARGET_DIR ?= $(CURDIR)/.build/rust
 export CARGO_TARGET_DIR := $(RUST_TARGET_DIR)
 export CARGO_BUILD_JOBS := 1
 export CARGO_INCREMENTAL := 0
+# Process/fault fixtures share native ownership slots; run test cases serially.
+export RUST_TEST_THREADS := 1
 
 setup:
 	cd web && bun install --frozen-lockfile
