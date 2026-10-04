@@ -28,6 +28,10 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	if in.IPv6 != IPv6Direct && in.IPv6 != IPv6Follow && in.IPv6 != IPv6Block {
 		return out, fmt.Errorf("invalid IPv6 policy")
 	}
+	if err := validateNativeDatapath(in); err != nil {
+		return out, err
+	}
+	routedTUN := in.Datapath == DatapathRoutedTUN
 	if in.Failure == "" {
 		in.Failure = FailureDirect
 	}
@@ -64,18 +68,31 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	if in.DNSListenAddress == "" {
 		in.DNSListenAddress = "127.0.0.1"
 	}
-	for _, s := range []string{in.MixedListenAddress, in.TProxyListenAddress, in.DNSListenAddress} {
+	listenAddresses := []string{in.MixedListenAddress, in.TProxyListenAddress, in.DNSListenAddress}
+	if routedTUN {
+		// TUN has no TPROXY socket. Keep its reserved port contract, but validate
+		// only the mixed and DNS listeners that this backend actually emits.
+		listenAddresses = []string{in.MixedListenAddress, in.DNSListenAddress}
+	}
+	for _, s := range listenAddresses {
 		listen, err := netip.ParseAddr(s)
 		if err != nil || listen.Zone() != "" || listen.IsMulticast() {
 			return out, fmt.Errorf("invalid listener address")
 		}
 	}
-	if in.IPv6 == IPv6Follow {
+	if !routedTUN && in.IPv6 == IPv6Follow {
 		listen, _ := netip.ParseAddr(in.TProxyListenAddress)
 		if !listen.Is6() {
 			return out, fmt.Errorf("IPv6 follow requires a dual-stack IPv6 TPROXY listener address")
 		}
 	}
+	clientIngressTag := "tproxy-in"
+	clientInbound := map[string]any{"type": "tproxy", "tag": clientIngressTag, "listen": in.TProxyListenAddress, "listen_port": in.Ports.TProxy, "udp_timeout": "2m", "udp_nat_max": 1024}
+	if routedTUN {
+		clientIngressTag = "tun-in"
+		clientInbound = nativeRoutedTUNInbound(*in.RoutedTUN)
+	}
+	clientInbounds := []string{"mixed-in", clientIngressTag}
 	var err error
 
 	if in.DirectDNS == (DNSEndpoint{}) {
@@ -96,6 +113,11 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	}
 	if len(in.Rules)+len(in.Overrides) > MaxRules || len(in.Endpoints) > 256 || len(in.BootstrapDomains) > 256 || len(in.ManagementIPs) > 128 {
 		return out, fmt.Errorf("compiler input limit exceeded")
+	}
+	if routedTUN {
+		if err := validateNativeRoutedTUNCollisions(in, localDNS); err != nil {
+			return out, err
+		}
 	}
 	for _, d := range in.Diagnostics {
 		// Do not echo caller-supplied diagnostic text, which can contain private data.
@@ -158,7 +180,7 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	// Hijack only client ingress, not DNS transport traffic. A DNS transport
 	// detour calls the outbound dialer directly, without re-entering route rules;
 	// its router-originated sockets also avoid the planner's LAN PREROUTING hooks.
-	routeRules = append(routeRules, map[string]any{"inbound": []string{"mixed-in", "tproxy-in"}, "port": []uint16{53}, "action": "hijack-dns"})
+	routeRules = append(routeRules, map[string]any{"inbound": clientInbounds, "port": []uint16{53}, "action": "hijack-dns"})
 	routeRules = append(routeRules, map[string]any{"ip_cidr": private, "outbound": "direct"})
 	// Explicit mixed-proxy hostnames need local resolution too: merely routing
 	// them direct would use the direct outbound's public DoT bootstrap resolver.
@@ -173,7 +195,7 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	if in.IPv6 == IPv6Block {
 		routeRules = append(routeRules, map[string]any{"ip_version": 6, "action": "reject"})
 	}
-	routeRules = append(routeRules, map[string]any{"inbound": []string{"mixed-in", "tproxy-in"}, "action": "sniff", "sniffer": []string{"http", "tls", "dns", "quic"}, "timeout": "300ms"})
+	routeRules = append(routeRules, map[string]any{"inbound": clientInbounds, "action": "sniff", "sniffer": []string{"http", "tls", "dns", "quic"}, "timeout": "300ms"})
 	dnsRules := []map[string]any{}
 	if len(bootstrap) > 0 {
 		dnsRules = append(dnsRules, map[string]any{"domain": bootstrap, "server": "dns-direct", "rewrite_ttl": 300})
@@ -261,7 +283,7 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 		"dns": map[string]any{"servers": servers, "rules": dnsRules, "final": "dns-proxy", "cache_capacity": 1024, "timeout": "5s", "reverse_mapping": true, "strategy": strategy},
 		"inbounds": []map[string]any{
 			{"type": "mixed", "tag": "mixed-in", "listen": in.MixedListenAddress, "listen_port": in.Ports.Mixed},
-			{"type": "tproxy", "tag": "tproxy-in", "listen": in.TProxyListenAddress, "listen_port": in.Ports.TProxy, "udp_timeout": "2m", "udp_nat_max": 1024},
+			clientInbound,
 			{"type": "direct", "tag": "dns-in", "listen": in.DNSListenAddress, "listen_port": in.Ports.DNS},
 		},
 		"outbounds": []map[string]any{
@@ -279,7 +301,11 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	out.SHA256 = hex.EncodeToString(hash[:])
 	out.CoreVersion = CoreVersion
 	out.EndpointHosts = sortedUnique(append(append([]string{in.Node.Server}, in.Endpoints...), bootstrap...))
-	out.RequiredFeatures = []string{"with_utls", "badlinkname", "tcp_fast_open", "tproxy_tcp_udp", "tls_dns"}
+	clientFeature := "tproxy_tcp_udp"
+	if routedTUN {
+		clientFeature = "system_tun_tcp_udp"
+	}
+	out.RequiredFeatures = []string{"with_utls", "badlinkname", "tcp_fast_open", clientFeature, "tls_dns"}
 	out.IPv6 = in.IPv6
 	out.Failure = in.Failure
 	return out, nil
