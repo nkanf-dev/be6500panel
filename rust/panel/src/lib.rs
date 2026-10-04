@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod capture_plan;
 pub mod http;
 pub mod memory;
 pub mod native;
