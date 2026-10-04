@@ -11,7 +11,13 @@ import { ThemeProvider } from "../../theme";
 import { TrafficHistoryPanel } from "./TrafficHistoryPanel";
 import { loadTrafficHistory } from "../../lib/traffic-history-api";
 import { downloadTrafficHistory } from "../../lib/traffic-history-format";
-import { TRAFFIC_HISTORY_RANGES } from "../../lib/traffic-history-contracts";
+import {
+  TRAFFIC_HISTORY_RANGES,
+  TrafficHistorySchema,
+  trafficHistoryRangeLabels,
+  trafficHistoryRangeSeconds,
+} from "../../lib/traffic-history-contracts";
+import { Schema } from "effect";
 import { historyFixture } from "./history-fixture.test-data";
 vi.mock("../../lib/traffic-history-api", () => ({
   loadTrafficHistory: vi.fn(),
@@ -41,6 +47,38 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("durable history panel", () => {
+  it("keeps the common presets ordered, exact and canonical in labels and decoding", () => {
+    const expected = [
+      ["30m", 1800, "最近 30 分钟"],
+      ["1h", 3600, "最近 1 小时"],
+      ["3h", 10800, "最近 3 小时"],
+      ["6h", 21600, "最近 6 小时"],
+      ["10h", 36000, "最近 10 小时"],
+      ["12h", 43200, "最近 12 小时"],
+      ["1d", 86400, "最近 24 小时"],
+      ["3d", 3 * 86400, "最近 3 天"],
+      ["7d", 7 * 86400, "最近 7 天"],
+      ["30d", 30 * 86400, "最近 30 天"],
+      ["180d", 180 * 86400, "最近 180 天"],
+      ["1y", 365 * 86400, "最近 1 年"],
+    ] as const;
+    expect(TRAFFIC_HISTORY_RANGES).toEqual(expected.map(([range]) => range));
+    for (const [range, seconds, label] of expected) {
+      expect(trafficHistoryRangeSeconds[range]).toBe(seconds);
+      expect(trafficHistoryRangeLabels[range]).toBe(label);
+      expect(
+        Schema.decodeUnknownSync(TrafficHistorySchema)(historyFixture(range))
+          .range,
+      ).toBe(range);
+    }
+    expect(Object.values(trafficHistoryRangeLabels)).not.toContain("最近 1 天");
+    expect(() =>
+      Schema.decodeUnknownSync(TrafficHistorySchema)({
+        ...historyFixture(),
+        range: "24h",
+      }),
+    ).toThrow();
+  });
   it("offers all real time windows even before the first measurement", async () => {
     const empty = {
       ...historyFixture(),
@@ -55,6 +93,17 @@ describe("durable history panel", () => {
         .getAllByRole("option")
         .map((option) => (option as HTMLOptionElement).value),
     ).toEqual([...TRAFFIC_HISTORY_RANGES]);
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual(
+      TRAFFIC_HISTORY_RANGES.map((range) => trafficHistoryRangeLabels[range]),
+    );
+    expect(
+      screen.getAllByRole("option", { name: "最近 24 小时" }),
+    ).toHaveLength(1);
+    expect(
+      screen.queryByRole("option", { name: "最近 1 天" }),
+    ).not.toBeInTheDocument();
     await screen.findByText("此时间范围没有真实记录");
     expect(screen.getByText("尚无真实记录")).toBeInTheDocument();
     expect(screen.queryByText("演示数据")).not.toBeInTheDocument();
@@ -67,6 +116,10 @@ describe("durable history panel", () => {
       await waitFor(() =>
         expect(load).toHaveBeenLastCalledWith(range, expect.any(AbortSignal)),
       );
+      await screen.findByText("此时间范围没有真实记录");
+      expect(screen.getByText("尚无真实记录")).toBeInTheDocument();
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "导出 CSV" })).toBeDisabled();
     }
   });
   it("does not present an all-uncovered bucket grid as measured zero traffic", async () => {

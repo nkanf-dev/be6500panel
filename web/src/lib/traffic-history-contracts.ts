@@ -1,10 +1,15 @@
 import { Schema } from "effect";
 
+/** WAN presets use existing server tiers. The canonical 1d is shown as 24 hours. */
 export const TRAFFIC_HISTORY_RANGES = [
   "30m",
+  "1h",
   "3h",
   "6h",
+  "10h",
+  "12h",
   "1d",
+  "3d",
   "7d",
   "30d",
   "180d",
@@ -14,9 +19,13 @@ export type TrafficHistoryRange = (typeof TRAFFIC_HISTORY_RANGES)[number];
 export const TRAFFIC_HISTORY_MAX_POINTS = 1500;
 export const trafficHistoryRangeLabels: Record<TrafficHistoryRange, string> = {
   "30m": "最近 30 分钟",
+  "1h": "最近 1 小时",
   "3h": "最近 3 小时",
   "6h": "最近 6 小时",
-  "1d": "最近 1 天",
+  "10h": "最近 10 小时",
+  "12h": "最近 12 小时",
+  "1d": "最近 24 小时",
+  "3d": "最近 3 天",
   "7d": "最近 7 天",
   "30d": "最近 30 天",
   "180d": "最近 180 天",
@@ -24,9 +33,13 @@ export const trafficHistoryRangeLabels: Record<TrafficHistoryRange, string> = {
 };
 export const trafficHistoryRangeSeconds: Record<TrafficHistoryRange, number> = {
   "30m": 1800,
+  "1h": 3600,
   "3h": 10800,
   "6h": 21600,
+  "10h": 36000,
+  "12h": 43200,
   "1d": 86400,
+  "3d": 3 * 86400,
   "7d": 7 * 86400,
   "30d": 30 * 86400,
   "180d": 180 * 86400,

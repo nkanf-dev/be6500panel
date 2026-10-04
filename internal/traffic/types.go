@@ -26,10 +26,21 @@ var ErrRange = errors.New("unsupported traffic history range")
 var ErrMaxPoints = errors.New("maxPoints must be between 1 and 2000")
 var ErrClosed = errors.New("traffic history is closed")
 
+// Presets share existing retention tiers; adding a range never changes a ring.
+// Keep one canonical day name (1d), displayed as 24 hours by the UI.
 var ranges = map[string]time.Duration{
-	"30m": 30 * time.Minute, "3h": 3 * time.Hour, "6h": 6 * time.Hour,
-	"1d": 24 * time.Hour, "7d": 7 * 24 * time.Hour, "30d": 30 * 24 * time.Hour,
-	"180d": 180 * 24 * time.Hour, "1y": 365 * 24 * time.Hour,
+	"30m":  30 * time.Minute,
+	"1h":   time.Hour,
+	"3h":   3 * time.Hour,
+	"6h":   6 * time.Hour,
+	"10h":  10 * time.Hour,
+	"12h":  12 * time.Hour,
+	"1d":   24 * time.Hour,
+	"3d":   3 * 24 * time.Hour,
+	"7d":   7 * 24 * time.Hour,
+	"30d":  30 * 24 * time.Hour,
+	"180d": 180 * 24 * time.Hour,
+	"1y":   365 * 24 * time.Hour,
 }
 
 // ValidateQuery rejects arbitrary time spans and bounds both memory and output.
