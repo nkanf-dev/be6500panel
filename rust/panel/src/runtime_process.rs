@@ -481,6 +481,11 @@ impl ProcessOwner {
     pub fn status(&mut self) -> Result<Status, ProcessError> {
         self.request(Action::Status)
     }
+    /// Internal readiness sampling of this retained owner. It grants no PID
+    /// adoption or mutation and uses the existing supervisor/channel only.
+    pub(crate) fn observe_retained(&self) -> Result<Status, ProcessError> {
+        self.request(Action::Status)
+    }
     /// Exit is observed without reaping. Caller cleanup is still required.
     pub fn poll_exited(&mut self) -> Result<Option<ExitReport>, ProcessError> {
         Ok(self.status()?.exit)
@@ -523,7 +528,7 @@ impl ProcessOwner {
         }
         Ok(())
     }
-    fn request(&mut self, action: Action) -> Result<Status, ProcessError> {
+    fn request(&self, action: Action) -> Result<Status, ProcessError> {
         let (reply, result) = mpsc::sync_channel(1);
         self.sender
             .as_ref()

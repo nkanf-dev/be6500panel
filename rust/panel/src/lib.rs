@@ -1,10 +1,14 @@
 pub mod auth;
+#[cfg(unix)]
+pub mod capture_executor;
 pub mod capture_plan;
 #[cfg(unix)]
 pub mod capture_state;
 pub mod http;
 pub mod memory;
 pub mod native;
+#[cfg(unix)]
+pub mod native_runtime;
 pub mod policy;
 #[cfg(unix)]
 pub mod policy_store;

@@ -246,6 +246,13 @@ pub struct HookContext<'a> {
     /// same-hash monotonic record after readiness and durable acceptance.
     pub config_path: &'a Path,
     pub run: Option<&'a OwnedRunIdentity>,
+    /// Fixed admitted artifact location, private and never serialized/logged.
+    pub artifact_root: Option<&'a Path>,
+    pub artifact_path: Option<&'a Path>,
+    pub artifact_file: Option<crate::readiness_tun::FileIdentity>,
+    pub artifact_directory: Option<crate::readiness_tun::FileIdentity>,
+    /// Samples the actual retained ProcessOwner, not a client/disk PID.
+    pub owned_status: Option<&'a dyn Fn() -> Result<process::Status, ProcessError>>,
     pub deadline: Instant,
 }
 impl fmt::Debug for HookContext<'_> {
@@ -349,6 +356,8 @@ struct Run {
 }
 struct Service {
     binding: Option<ArtifactBinding>,
+    artifact_file: Option<crate::readiness_tun::FileIdentity>,
+    artifact_directory: Option<crate::readiness_tun::FileIdentity>,
     config_root: PathBuf,
     owner: Option<ProcessOwner>,
     run: Option<Run>,
@@ -463,8 +472,26 @@ impl Manager {
         } else {
             None
         };
+        let artifact_file = binding
+            .as_ref()
+            .map(|binding| {
+                fs::symlink_metadata(&binding.path)
+                    .map(|metadata| crate::readiness_tun::FileIdentity::from_metadata(&metadata))
+                    .map_err(|_| Failure::ArtifactUnavailable)
+            })
+            .transpose()?;
+        let artifact_directory = binding
+            .as_ref()
+            .map(|binding| {
+                fs::symlink_metadata(&binding.root)
+                    .map(|metadata| crate::readiness_tun::FileIdentity::from_metadata(&metadata))
+                    .map_err(|_| Failure::ArtifactUnavailable)
+            })
+            .transpose()?;
         Ok(Service {
             binding,
+            artifact_file,
+            artifact_directory,
             config_root,
             owner,
             run: None,
@@ -669,14 +696,26 @@ impl Manager {
         let config_path = self.services[service.index()]
             .config_root
             .join(&record.file);
+        let slot = &self.services[service.index()];
+        let observe = || {
+            slot.owner
+                .as_ref()
+                .ok_or(ProcessError::Closed)?
+                .observe_retained()
+        };
         let context = HookContext {
             service,
             config: &config,
             config_path: &config_path,
-            run: self.services[service.index()]
-                .run
+            run: slot.run.as_ref().map(|run| &run.identity),
+            artifact_root: slot.binding.as_ref().map(|binding| binding.root.as_path()),
+            artifact_path: slot.binding.as_ref().map(|binding| binding.path.as_path()),
+            artifact_file: slot.artifact_file,
+            artifact_directory: slot.artifact_directory,
+            owned_status: slot
+                .owner
                 .as_ref()
-                .map(|run| &run.identity),
+                .map(|_| &observe as &dyn Fn() -> Result<process::Status, ProcessError>),
             deadline: Instant::now() + duration,
         };
         self.hooks.call(stage, &context)
