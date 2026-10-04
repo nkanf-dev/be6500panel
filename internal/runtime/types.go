@@ -78,6 +78,11 @@ type Options struct {
 	StableAfter     time.Duration
 	MaxRestarts     int
 	CleanupHook     func(context.Context, string) error
+	// PreStartHook checks private, checksum-matched accepted config after owned
+	// withdrawal and before launch. It runs in the mutation lane with
+	// ReadyTimeout, must honor ctx, and must not mutate the manager or resources.
+	// Config/Status reads are safe. Do not retain or log the private config bytes.
+	PreStartHook func(context.Context, string, []byte) error
 	// ReadyHook checks fixed local listeners, not remote connectivity. It must
 	// honor ctx and must not call manager mutations; Config/Status reads are safe.
 	ReadyHook func(context.Context, string) error

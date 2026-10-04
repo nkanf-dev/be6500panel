@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -1069,9 +1070,33 @@ func (m *Manager) startProcess(ctx context.Context, id string) error {
 	s.errorCode = ""
 	s.retryAt = time.Time{}
 	m.mu.Unlock()
+	if err := m.checkPreStart(ctx, id, running.disk.Current); err != nil {
+		m.mu.Lock()
+		s.state = Error
+		s.errorCode = "prestart_failed"
+		s.desired = false
+		m.mu.Unlock()
+		return err
+	}
 	args := []string{"run", "-c", path}
 	if id == FRPC {
 		args = []string{"-c", path}
+	}
+	// The hook may succeed after cancellation. Close also sets its flag before
+	// its lifetime cancellation reaches the operation; neither may launch.
+	m.mu.Lock()
+	err := ctx.Err()
+	if err == nil && m.closed {
+		err = ErrClosed
+	}
+	if err != nil {
+		s.state = Error
+		s.errorCode = "prestart_failed"
+		s.desired = false
+	}
+	m.mu.Unlock()
+	if err != nil {
+		return err
 	}
 	p, err := launch(binary, args, m.opts)
 	if err != nil {
@@ -1159,6 +1184,35 @@ func (m *Manager) startProcess(ctx context.Context, id string) error {
 	m.mu.Unlock()
 	return nil
 }
+
+// checkPreStart reads the immutable accepted record, not a candidate or a
+// caller-supplied body. A lower installed write limit must not strand an older
+// accepted config. Hook diagnostics and private bytes never reach public errors.
+func (m *Manager) checkPreStart(ctx context.Context, id string, record *configRecord) error {
+	if m.opts.PreStartHook == nil {
+		return nil
+	}
+	raw, err := readBounded(configPath(m.opts, id, record), storedConfigLimit(m.opts))
+	if err != nil {
+		return ErrReadiness
+	}
+	sum := sha256.Sum256(raw)
+	if hex.EncodeToString(sum[:]) != record.SHA256 {
+		return ErrReadiness
+	}
+	preCtx, cancel := context.WithTimeout(ctx, m.opts.ReadyTimeout)
+	hookErr := m.opts.PreStartHook(preCtx, id, raw)
+	preErr := preCtx.Err()
+	cancel()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if hookErr != nil || preErr != nil {
+		return ErrReadiness
+	}
+	return nil
+}
+
 func (m *Manager) stopProcess(id string, disable bool) error {
 	m.mu.Lock()
 	s := m.services[id]
