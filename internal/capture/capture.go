@@ -21,6 +21,10 @@ import (
 	"be6500panel/internal/storage"
 )
 
+// Runner must honor context cancellation and deadlines. Observation calls it
+// outside the controller lock; Go cannot bound an uncooperative callback.
+// Observation and mutation calls may overlap; callback-owned state needs its
+// own synchronization.
 type Runner func(context.Context, []string) ([]byte, error)
 type Status struct {
 	Desired          bool           `json:"desired"`
@@ -56,6 +60,7 @@ func (e *CommandError) Unwrap() error { return e.Err }
 
 type Controller struct {
 	mu               sync.Mutex
+	observationEpoch uint64 // Volatile mutation identity; rejects stale GET results, including ABA.
 	path             string
 	runner           Runner
 	tableNames       func() (map[string]int, error)
@@ -163,6 +168,7 @@ func installedClients(own proxy.RulesOwnership) []Client {
 func (c *Controller) Apply(ctx context.Context, input proxy.RulesPlanInput) (Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observationEpoch++
 	return c.applyLocked(ctx, input)
 }
 func (c *Controller) applyLocked(ctx context.Context, input proxy.RulesPlanInput) (Status, error) {
@@ -213,6 +219,7 @@ func (c *Controller) applyLocked(ctx context.Context, input proxy.RulesPlanInput
 func (c *Controller) Cleanup(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observationEpoch++
 	return c.cleanupLocked(ctx)
 }
 func (c *Controller) cleanupLocked(ctx context.Context) error {

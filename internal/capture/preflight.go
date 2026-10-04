@@ -550,18 +550,7 @@ func markCollisions(out []byte) error {
 // Reconcile checks the kernel, without creating or repairing any rule. A failed
 // observation leaves the journal available for explicit Cleanup/recovery.
 func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.plan == nil {
-		return c.statusLocked(), nil
-	}
-	err := c.observeStatusLocked(ctx)
-	if err != nil {
-		c.restoreError = "capture_observation_failed"
-	} else if c.restoreError == "capture_observation_failed" {
-		c.restoreError = ""
-	}
-	return c.statusLocked(), err
+	return c.reconcileObservation(ctx, false)
 }
 
 // Resource proof and desired-scope drift are separate. A failed read is not

@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"time"
 
 	"be6500panel/internal/proxy"
 )
@@ -36,6 +37,9 @@ type Client struct {
 // It must return every selected MAC in clients, including unresolved identities.
 // Datapath and TUN fields come only from that accepted config, never Desired or
 // a recovery journal. GET reconciliation only compares the resulting intent.
+// Builders must honor context cancellation and deadlines. GET invokes them
+// outside the controller lock, without goroutines to hide blocked callbacks.
+// GET and mutation builds may overlap; synchronize callback-owned state.
 type Builder func(context.Context, Desired) (proxy.RulesPlanInput, []Client, error)
 
 func normalizeDesired(d Desired) (Desired, error) {
@@ -138,6 +142,7 @@ func (c *Controller) loadDesired() error {
 func (c *Controller) SetBuilder(builder Builder) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observationEpoch++
 	c.builder = builder
 }
 func (c *Controller) Desired() Desired {
@@ -185,6 +190,7 @@ func (c *Controller) Select(ctx context.Context, d Desired) (Status, error) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observationEpoch++
 	return c.selectLocked(ctx, normalized)
 }
 
@@ -194,6 +200,7 @@ func (c *Controller) Select(ctx context.Context, d Desired) (Status, error) {
 func (c *Controller) Disable(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observationEpoch++
 	return c.disableLocked(ctx, Desired{IPv6: c.desired.IPv6})
 }
 
@@ -201,6 +208,7 @@ func (c *Controller) Disable(ctx context.Context) error {
 func (c *Controller) Restore(ctx context.Context) (Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observationEpoch++
 	c.failedPlan = nil
 	return c.restoreLocked(ctx)
 }
@@ -248,64 +256,183 @@ func (c *Controller) restoreBuiltLocked(ctx context.Context, input proxy.RulesPl
 // ReconcileDesired only observes. The server-owned readiness-gated refresh loop
 // performs any rule changes; an HTTP GET never creates or deletes resources.
 func (c *Controller) ReconcileDesired(ctx context.Context) (Status, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	return c.reconcileObservation(ctx, true)
+}
+
+const (
+	observationBudget         = 3 * time.Second
+	observationBuilderBudget  = time.Second
+	observationResourceBudget = 2 * time.Second
+)
+
+// observationSnapshot owns all mutable values used by an unlocked GET. The
+// original plan pointer is an identity token only; reads use the cloned plan.
+// The callbacks must honor their context. No abandoned goroutine is used to
+// pretend that an uncooperative callback has a hard execution deadline.
+type observationSnapshot struct {
+	epoch               uint64
+	desired             Desired
+	builder             Builder
+	planIdentity        *proxy.OwnedRulesPlan
+	failedPlanIdentity  *proxy.OwnedRulesPlan
+	inspector           *Controller
+	status              Status
+	cleanupFailed       bool
+	disableNotPersisted bool
+	restoreError        string
+}
+
+func (c *Controller) observationSnapshotLocked() observationSnapshot {
+	d := c.desired
+	d.Devices = slices.Clone(d.Devices)
+	snapshot := observationSnapshot{
+		epoch: c.observationEpoch, desired: d, builder: c.builder,
+		planIdentity: c.plan, failedPlanIdentity: c.failedPlan,
+		status: c.statusLocked(), cleanupFailed: c.cleanupFailed,
+		disableNotPersisted: c.disableNotPersisted, restoreError: c.restoreError,
+	}
+	if c.plan != nil {
+		plan := clonePlan(*c.plan)
+		// This private inspector has no storage paths, desired intent or live
+		// controller ownership. Only observeLocked may use it, never mutation.
+		snapshot.inspector = &Controller{plan: &plan, runner: c.runner, tableNames: c.tableNames}
+	}
+	return snapshot
+}
+
+func (c *Controller) observationMatchesLocked(snapshot observationSnapshot) bool {
+	return c.observationEpoch == snapshot.epoch && c.plan == snapshot.planIdentity &&
+		c.failedPlan == snapshot.failedPlanIdentity && reflect.DeepEqual(c.desired, snapshot.desired) &&
+		c.cleanupFailed == snapshot.cleanupFailed && c.disableNotPersisted == snapshot.disableNotPersisted &&
+		c.restoreError == snapshot.restoreError && reflect.DeepEqual(c.statusLocked(), snapshot.status)
+}
+
+// A busy mutation lane does not prove either activity or clean absence. This
+// response is temporary only: it never sets the actual-cleanup failure latch.
+func busyObservation(state Status) (Status, error) {
+	state.Active = false
+	state.CleanupPending = true
+	state.State = "cleanup-pending"
+	if state.Error != "capture_disable_not_persisted" && state.Error != "capture_cleanup_failed" {
+		state.Error = "capture_observation_busy"
+	}
+	if state.Clients == nil {
+		state.Clients = []Client{}
+	}
+	return state, errors.New("capture_observation_busy")
+}
+
+// Both GET entry points use short, nonblocking lock sections. Scope resolution
+// has a one-second context budget; installed proof gets a separate two-second
+// context after a failed build, within the total three-second context budget.
+func (c *Controller) reconcileObservation(ctx context.Context, desiredScope bool) (Status, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, observationBudget)
+	defer cancel()
+	if !c.mu.TryLock() {
+		return busyObservation(Status{})
+	}
+	snapshot := c.observationSnapshotLocked()
+	c.mu.Unlock()
+
+	clients := slices.Clone(snapshot.status.Clients)
+	scopeState := ""
 	var scopeErr error
 	var partial *PartialScopeError
-	c.scopeState = ""
-	if c.desired.Enabled || len(c.desired.Devices) > 0 {
-		if c.builder == nil {
-			c.clients = desiredClients(c.desired)
-			if c.desired.Enabled {
+	if desiredScope && (snapshot.desired.Enabled || len(snapshot.desired.Devices) > 0) {
+		if snapshot.builder == nil {
+			clients = desiredClients(snapshot.desired)
+			if snapshot.desired.Enabled {
 				scopeErr = errors.New("capture_configuration_unavailable")
 			}
 		} else {
-			d := c.desired
+			d := snapshot.desired
 			d.Devices = slices.Clone(d.Devices)
-			input, clients, buildErr := c.builder(ctx, d)
-			c.clients = slices.Clone(clients)
-			if c.desired.Enabled {
+			buildCtx, stopBuild := context.WithTimeout(ctx, observationBuilderBudget)
+			input, builtClients, buildErr := snapshot.builder(buildCtx, d)
+			// An expired callback is never fresh scope proof, even if it
+			// accidentally returns nil. Retain previous selected observations.
+			if contextErr := buildCtx.Err(); contextErr != nil {
+				buildErr = errors.Join(buildErr, contextErr)
+			} else {
+				clients = slices.Clone(builtClients)
+			}
+			stopBuild()
+			if snapshot.desired.Enabled {
 				pendingDevices := errors.As(buildErr, &partial)
-				if buildErr != nil && !pendingDevices {
+				if buildErr != nil && (!pendingDevices || errors.Is(buildErr, context.Canceled) || errors.Is(buildErr, context.DeadlineExceeded)) {
 					scopeErr = buildErr
 				} else if expected, err := proxy.PlanOwnedRules(input); err != nil {
 					scopeErr = errors.New("capture_native_scope_invalid")
-				} else if c.plan != nil {
-					c.scopeState = "current"
-					if !plansEqual(*c.plan, expected) {
-						c.scopeState = "changed"
+				} else if snapshot.inspector != nil {
+					scopeState = "current"
+					if !plansEqual(*snapshot.inspector.plan, expected) {
+						scopeState = "changed"
 						scopeErr = errors.New("capture_scope_changed_apply_required")
 					}
 				}
 			}
 		}
-		if c.desired.Enabled && scopeErr != nil && c.scopeState == "" {
-			c.scopeState = "unresolved"
+		if snapshot.desired.Enabled && scopeErr != nil && scopeState == "" {
+			scopeState = "unresolved"
 		}
 	}
-	if c.plan == nil {
-		if scopeErr != nil {
-			c.restoreError = scopeErr.Error()
-		} else if partial != nil {
-			c.restoreError = partial.Error()
+
+	// Scope failure cannot prove old resources gone. Always attempt saved
+	// resource reads, with the budget reserved separately from the builder.
+	var observationErr error
+	if snapshot.inspector != nil {
+		resourceCtx, stopReads := context.WithTimeout(ctx, observationResourceBudget)
+		observationErr = snapshot.inspector.observeLocked(resourceCtx)
+		observationErr = errors.Join(observationErr, resourceCtx.Err())
+		stopReads()
+	}
+
+	if !c.mu.TryLock() {
+		return busyObservation(snapshot.status)
+	}
+	defer c.mu.Unlock()
+	if !c.observationMatchesLocked(snapshot) {
+		// Disable, Select or another mutation/observation owns newer state.
+		// Do not publish old clients, resource proof, warnings or uncertainty.
+		return c.statusLocked(), nil
+	}
+	if desiredScope {
+		c.clients = clients
+		c.scopeState = scopeState
+	}
+	stickyCleanupError := c.cleanupFailed && c.restoreError == "capture_cleanup_failed"
+	if snapshot.inspector == nil {
+		if !stickyCleanupError {
+			if scopeErr != nil {
+				c.restoreError = scopeErr.Error()
+			} else if partial != nil {
+				c.restoreError = partial.Error()
+			}
+		}
+		if scopeErr == nil && partial != nil {
 			return c.statusLocked(), partial
 		}
 		return c.statusLocked(), scopeErr
 	}
-	// A changed or unresolved desired build does not prove old rules vanished.
-	// Always check the saved plan once, without cleanup or reapplication.
-	observationErr := c.observeStatusLocked(ctx)
-	if scopeErr != nil {
-		c.restoreError = scopeErr.Error()
-	} else if observationErr != nil {
-		c.restoreError = "capture_observation_failed"
-	} else if c.desired.Enabled && !c.cleanupFailed {
-		c.restoreError = ""
-		if partial != nil {
-			c.restoreError = partial.Error()
+	c.active = observationErr == nil
+	c.cleanupPending = observationErr != nil || c.cleanupFailed
+	if !stickyCleanupError {
+		switch {
+		case scopeErr != nil:
+			c.restoreError = scopeErr.Error()
+		case observationErr != nil:
+			c.restoreError = "capture_observation_failed"
+		case desiredScope && c.desired.Enabled && !c.cleanupFailed:
+			c.restoreError = ""
+			if partial != nil {
+				c.restoreError = partial.Error()
+			}
+		case c.restoreError == "capture_observation_failed":
+			c.restoreError = ""
 		}
-	} else if c.restoreError == "capture_observation_failed" {
-		c.restoreError = ""
 	}
 	return c.statusLocked(), errors.Join(scopeErr, observationErr)
 }
@@ -319,6 +446,7 @@ func plansEqual(a, b proxy.OwnedRulesPlan) bool {
 func (c *Controller) Suspend(ctx context.Context, code string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observationEpoch++
 	c.restoreError = code
 	return c.cleanupLocked(ctx)
 }
@@ -328,6 +456,7 @@ func (c *Controller) Suspend(ctx context.Context, code string) error {
 func (c *Controller) DisableRetainingSelection(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observationEpoch++
 	desired := c.desired
 	desired.Enabled = false
 	return c.disableLocked(ctx, desired)
@@ -339,6 +468,7 @@ func (c *Controller) DisableRetainingSelection(ctx context.Context) error {
 func (c *Controller) Refresh(ctx context.Context) (Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observationEpoch++
 	if !c.desired.Enabled {
 		return c.statusLocked(), nil
 	}
