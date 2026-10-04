@@ -137,6 +137,9 @@ impl Service {
         }
     }
 
+    pub(crate) fn authentication_required(&self) -> bool {
+        self.auth.lock().is_ok_and(|auth| auth.required())
+    }
     pub fn with_auth(mut self, auth: Auth) -> Self {
         self.auth = Mutex::new(auth);
         self
@@ -426,7 +429,9 @@ impl Service {
             }
             "/api/health" if request.method != Method::Post => {
                 drop(auth);
-                let body = if self.draft_writes_available() {
+                let body = if runtime.is_some() {
+                    b"{\"status\":\"ok\",\"mode\":\"manager\",\"readOnly\":false,\"runtimeEnabled\":true}".as_slice()
+                } else if self.draft_writes_available() {
                     b"{\"status\":\"ok\",\"mode\":\"host\",\"readOnly\":false}".as_slice()
                 } else {
                     HEALTH_BODY

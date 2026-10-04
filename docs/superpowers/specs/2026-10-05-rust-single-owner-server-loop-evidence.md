@@ -1,0 +1,11 @@
+# Single synchronous listener and borrowed runtime owner
+
+`server_loop::serve` borrows one optional RuntimeHttp owner and one bound listener. It creates no Manager, process owner, background timer/thread or per-client worker. The caller keeps its owner after every returned error. Fixed100ms idlepoll supports cancellation; fixed1s outside-request recovery checks use the existing8attempt/backoff policy. No GET/constructor startup restoration. Caller explicitly loads and restores startup intent before running the loop.
+
+Attached owner always requires nonempty authentication, even on loopback. A non-loopback listener also requires authentication. Rejected auth admission changes no child/config. Default CLI remains loopback-only diagnostic/rule-draft with no owner or artifact flags; it now reuses the same loop with None. An actual attached owner is projected as manager/readOnlyfalse/runtimeEnabledtrue in authenticated health; the original diagnostic health body is unchanged.
+
+Cancellation and terminal listener failure close the existing owner. Cleanup refusal returns Shutdown while the owner and its real child remain accessible for retry; no Drop-fallback kill and no automatic recovery after close. Client parse/write failures remain bounded and do not kill the manager. The request/read/write/operation absolute deadlines are unchanged.
+
+Recovery runs on the same synchronous thread as requests. A native operation or slow client can delay the next check until its existing bounded handler finishes; this is not an independent real-time watchdog. Existing process supervisor ownership threads are unchanged; the serving loop adds no threads. This lane claims no aggregate RAM or latency gain.
+
+Synthetic qualification exercises the actual serving loop, loopback auth/HTTP, fake fixed core and finite monotonic deadline. It covers diagnostichealth/noowner, required authentication, real owned start, cancelcleanup, retainedchild on closefailure with explicitretry, exit recovery through fixedloopcadence and offpersistence. Test-only client threads are not production workers. Hostfulltest/fmt/clippy/diff and ARMv7crossbuild are logged externally under embedded-performance-2026-10-04. No router/core/capture operations, production startup binding, remoteTLStermination, artifact fetch parity or full migration are claimed.

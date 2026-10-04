@@ -2,7 +2,6 @@ use be6500_panel::auth::Auth;
 use be6500_panel::server::Service;
 use be6500_panel::static_files::StaticFiles;
 use std::ffi::OsString;
-use std::io;
 use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -96,16 +95,9 @@ fn run(options: Options) -> Result<(), &'static str> {
     }
     let listener =
         TcpListener::bind(options.listen).map_err(|_| "loopback listener unavailable")?;
-    loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                // A bad/slow client is bounded and closed; no per-request logs.
-                let _ = service.handle(stream);
-            }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(_) => return Err("listener failed"),
-        }
-    }
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    be6500_panel::server_loop::serve(&listener, &service, None, &cancel)
+        .map_err(|_| "listener failed")
 }
 
 fn main() -> ExitCode {

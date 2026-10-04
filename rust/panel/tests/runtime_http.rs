@@ -1100,3 +1100,289 @@ fn rejected_intent_load_preserves_exclusive_owner_for_cleanup() {
     );
     owner.runtime.close().unwrap();
 }
+
+fn loop_request(address: std::net::SocketAddr, raw: Vec<u8>) -> Vec<u8> {
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream.write_all(&raw).unwrap();
+    stream.shutdown(Shutdown::Write).unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).unwrap();
+    response
+}
+#[test]
+fn owned_server_loop_borrows_one_manager_authenticates_and_cleans_on_cancel() {
+    use be6500_panel::server_loop::{LoopError, serve};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.saved_runtime();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let diagnostic = Service::new(fixture.root.clone());
+    assert_eq!(
+        serve(&listener, &diagnostic, Some(&mut owner.runtime), &cancel),
+        Err(LoopError::Authentication)
+    );
+    assert!(!fixture.root.join("run/sing-box/started").exists());
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let stop = cancel.clone();
+    let client_cancel = CancelOnDrop(stop.clone());
+    let client = thread::spawn(move || {
+        let _cancel = client_cancel;
+        body(
+            &loop_request(address, request("GET", "/api/runtime", None, "", "")),
+            401,
+        );
+        let login = loop_request(
+            address,
+            request(
+                "POST",
+                "/api/session/login",
+                Some(&json!({"password":"isolated-secret"})),
+                "",
+                "http://localhost",
+            ),
+        );
+        body(&login, 200);
+        let cookie = std::str::from_utf8(&login)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("Set-Cookie: "))
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let health = body(
+            &loop_request(address, request("GET", "/api/health", None, cookie, "")),
+            200,
+        );
+        assert_eq!(health["mode"], "manager");
+        assert_eq!(health["runtimeEnabled"], true);
+        assert_eq!(health["readOnly"], false);
+        let state = body(
+            &loop_request(address, request("GET", "/api/runtime", None, cookie, "")),
+            200,
+        );
+        assert!(state["services"][0].get("pid").is_none());
+        assert_eq!(state["services"][0]["desired"], false);
+        body(
+            &loop_request(
+                address,
+                request(
+                    "POST",
+                    "/api/runtime/configure",
+                    Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+                    cookie,
+                    "http://localhost",
+                ),
+            ),
+            200,
+        );
+        let running = body(
+            &loop_request(
+                address,
+                request(
+                    "POST",
+                    "/api/runtime/start",
+                    Some(&json!({"service":"sing-box"})),
+                    cookie,
+                    "http://localhost",
+                ),
+            ),
+            200,
+        );
+        assert_eq!(running["state"], "running");
+        let pid = running["pid"].as_u64().unwrap();
+        stop.store(true, Ordering::Release);
+        pid
+    });
+    serve(&listener, &service, Some(&mut owner.runtime), &cancel).unwrap();
+    let pid = client.join().unwrap();
+    assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(Instant::now() + Duration::from_secs(600))
+            .is_empty()
+    );
+    let saved: Value =
+        serde_json::from_slice(&fs::read(fixture.root.join("desired-services.json")).unwrap())
+            .unwrap();
+    assert_eq!(saved["sing-box"], true);
+}
+#[test]
+fn owned_server_close_failure_returns_borrowed_live_handle_for_retry() {
+    use be6500_panel::server_loop::{LoopError, serve};
+    use std::sync::atomic::AtomicBool;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.saved_runtime();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cookie = login(&service);
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+        &cookie,
+        200,
+    );
+    let running = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    fixture.reject.set(true);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let cancel = AtomicBool::new(true);
+    assert!(matches!(
+        serve(&listener, &service, Some(&mut owner.runtime), &cancel),
+        Err(LoopError::Shutdown(_))
+    ));
+    let pid = running["pid"].as_u64().unwrap();
+    assert_eq!(unsafe { libc::kill(pid as i32, 0) }, 0);
+    assert!(owner.runtime.restore_saved().is_empty());
+    assert!(
+        owner
+            .runtime
+            .poll_recovery(Instant::now() + Duration::from_secs(600))
+            .is_empty()
+    );
+    let held = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(held["services"][0]["pid"], pid);
+    fixture.reject.set(false);
+    owner.runtime.close().unwrap();
+    assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
+}
+
+#[test]
+fn owned_loop_observes_exit_and_recovers_without_get_start_side_effects() {
+    use be6500_panel::server_loop::serve;
+    use std::sync::{Arc, atomic::AtomicBool};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.saved_runtime();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let stop = cancel.clone();
+    let client_failed = CancelOnDrop(stop.clone());
+    let client = thread::spawn(move || {
+        let _cancel = client_failed;
+        let login = loop_request(
+            address,
+            request(
+                "POST",
+                "/api/session/login",
+                Some(&json!({"password":"isolated-secret"})),
+                "",
+                "http://localhost",
+            ),
+        );
+        body(&login, 200);
+        let cookie = std::str::from_utf8(&login)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("Set-Cookie: "))
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        body(
+            &loop_request(
+                address,
+                request(
+                    "POST",
+                    "/api/runtime/configure",
+                    Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+                    cookie,
+                    "http://localhost",
+                ),
+            ),
+            200,
+        );
+        let running = body(
+            &loop_request(
+                address,
+                request(
+                    "POST",
+                    "/api/runtime/start",
+                    Some(&json!({"service":"sing-box"})),
+                    cookie,
+                    "http://localhost",
+                ),
+            ),
+            200,
+        );
+        let original = running["pid"].as_u64().unwrap();
+        assert_eq!(unsafe { libc::kill(original as i32, libc::SIGKILL) }, 0);
+        // Exit withdrawal/recovery is driven by the caller loop, not a
+        // status GET. Polls return truthful
+        // transient state and never start/check within the GET handler itself.
+        let deadline = Instant::now() + Duration::from_secs(7);
+        let mut replacement = None;
+        while Instant::now() < deadline {
+            let state = body(
+                &loop_request(address, request("GET", "/api/runtime", None, cookie, "")),
+                200,
+            );
+            let core = &state["services"][0];
+            if core["state"] == "running" && core["restarts"] == 1 {
+                let actual = core["pid"].as_u64().unwrap();
+                assert_ne!(actual, original);
+                assert_eq!(core["recoveryAttempts"], 1);
+                replacement = Some(actual);
+                break;
+            }
+            std::thread::park_timeout(Duration::from_millis(150));
+        }
+        let replacement = replacement.expect("fixed caller cadence must recover fake exited child");
+        let stopped = body(
+            &loop_request(
+                address,
+                request(
+                    "POST",
+                    "/api/runtime/stop",
+                    Some(&json!({"service":"sing-box"})),
+                    cookie,
+                    "http://localhost",
+                ),
+            ),
+            200,
+        );
+        assert_eq!(stopped["desired"], false);
+        assert!(stopped.get("pid").is_none());
+        stop.store(true, Ordering::Release);
+        replacement
+    });
+    let result = serve(&listener, &service, Some(&mut owner.runtime), &cancel);
+    let replacement = client.join().unwrap();
+    result.unwrap();
+    assert_eq!(unsafe { libc::kill(replacement as i32, 0) }, -1);
+    let saved: Value =
+        serde_json::from_slice(&fs::read(fixture.root.join("desired-services.json")).unwrap())
+            .unwrap();
+    assert_eq!(saved["sing-box"], false);
+}
+struct CancelOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
