@@ -10,6 +10,8 @@ pub mod policy;
 pub mod policy_store;
 pub mod readiness_dns;
 #[cfg(unix)]
+pub mod readiness_tun;
+#[cfg(unix)]
 pub mod rules_http;
 #[cfg(unix)]
 pub mod runtime_manager;
