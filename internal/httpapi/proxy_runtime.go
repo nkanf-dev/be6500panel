@@ -61,7 +61,7 @@ func (s *Server) proxyNodes(w http.ResponseWriter, r *http.Request) {
 		diagnostics = append(diagnostics, proxy.Diagnostic{Scope: "subscription", Index: -1, Code: "subscription_unavailable", Message: "持久订阅读取失败"})
 	}
 	selected := p.selected
-	if !s.recordedNodeMatchesAccepted(selected, p.subscription.Nodes) {
+	if !s.ruleRecordedNodeMatchesAccepted(selected, p.subscription.Nodes) {
 		selected = ""
 	}
 	writeJSON(w, 200, struct {
@@ -166,7 +166,7 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 	if !s.runtimeMutationAllowed(w) {
 		return
 	}
-	if !s.runtimeEnabled(w) {
+	if !s.ruleRuntimeEnabled(w) {
 		return
 	}
 	var input struct {
@@ -249,16 +249,16 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 	input.IPv6 = proxy.IPv6Direct
 	input.Ports.TProxy = 7893 // unused internal recovery-era field, not a listener
 	dnsBind := "192.168.31.1"
-	state, err := s.runtime.Status(managedruntime.SingBox)
+	state, err := s.ruleStatus(managedruntime.SingBox)
 	if err != nil {
-		s.runtimeError(w, err)
+		s.ruleRuntimeError(w, err)
 		return
 	}
 	var accepted []byte
 	if state.Configured {
-		accepted, _, err = s.runtime.Config(managedruntime.SingBox)
+		accepted, _, err = s.ruleConfig(managedruntime.SingBox)
 		if err != nil {
-			s.runtimeError(w, err)
+			s.ruleRuntimeError(w, err)
 			return
 		}
 	}
@@ -304,9 +304,9 @@ func (s *Server) proxySelect(w http.ResponseWriter, r *http.Request) {
 		}
 		defer release()
 	}
-	state, err = s.runtime.ConfigureGuarded(r.Context(), managedruntime.SingBox, out.Config, state.Generation, s.runtimeMutationGuard)
+	state, err = s.ruleConfigure(r.Context(), managedruntime.SingBox, out.Config, state.Generation)
 	if err != nil {
-		s.runtimeResult(w, managedruntime.SingBox, "config_committed", state, err)
+		s.ruleRuntimeResult(w, state, err)
 		return
 	}
 	// Only exact accepted readback can attest to the policy used by selection.

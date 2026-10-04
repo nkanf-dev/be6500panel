@@ -68,6 +68,7 @@ type Server struct {
 	closeOnce             sync.Once
 	router                *router.Adapter
 	runtime               *managedruntime.Manager
+	ruleRuntime           *ruleRuntimeCallbacks
 	control               *control.Manager
 	dataDir               string
 	proxyState            *proxyState

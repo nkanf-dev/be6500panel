@@ -181,14 +181,14 @@ func (s *Server) proxyLocalRulesPreview(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) readLocalRulesApplied() (localRulesApplied, uint64) {
 	unknown := localRulesApplied{State: "unknown"}
-	if s.runtime == nil {
+	if !s.hasRuleRuntime() {
 		return unknown, 0
 	}
-	state, err := s.runtime.Status(managedruntime.SingBox)
+	state, err := s.ruleStatus(managedruntime.SingBox)
 	if err != nil {
 		return unknown, 0
 	}
-	raw, generation, err := s.runtime.Config(managedruntime.SingBox)
+	raw, generation, err := s.ruleConfig(managedruntime.SingBox)
 	if err != nil {
 		return unknown, state.Generation
 	}
@@ -236,7 +236,7 @@ func nativeConfigHash(raw []byte) string {
 // Called only after ConfigureGuarded succeeds. A check, saved draft or a
 // failed/restored candidate is never applied evidence.
 func (s *Server) recordLocalRulesApplied(ctx context.Context, draft localrules.Snapshot, out proxy.CompileOutput, state managedruntime.Status) error {
-	raw, generation, err := s.runtime.Config(managedruntime.SingBox)
+	raw, generation, err := s.ruleConfig(managedruntime.SingBox)
 	if err != nil || generation != state.Generation || nativeConfigHash(raw) != out.SHA256 || !bytes.Equal(raw, out.Config) {
 		return errors.New("local_rules_readback_failed")
 	}
@@ -257,7 +257,7 @@ func localRulesConfiguredUncertain(w http.ResponseWriter, state managedruntime.S
 }
 
 func (s *Server) proxyLocalRulesApply(w http.ResponseWriter, r *http.Request) {
-	if !s.localRulesAvailable(w) || !s.runtimeMutationAllowed(w) || !s.runtimeEnabled(w) {
+	if !s.localRulesAvailable(w) || !s.runtimeMutationAllowed(w) || !s.ruleRuntimeEnabled(w) {
 		return
 	}
 	var input struct {
@@ -297,22 +297,22 @@ func (s *Server) proxyLocalRulesApply(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "selected_node_unavailable", "当前选择节点不可用，请先明确选择节点")
 		return
 	}
-	state, err := s.runtime.Status(managedruntime.SingBox)
+	state, err := s.ruleStatus(managedruntime.SingBox)
 	if err != nil {
-		s.runtimeError(w, err)
+		s.ruleRuntimeError(w, err)
 		return
 	}
 	if state.Generation != input.Generation {
-		s.runtimeError(w, managedruntime.ErrGeneration)
+		s.ruleRuntimeError(w, managedruntime.ErrGeneration)
 		return
 	}
-	accepted, generation, err := s.runtime.Config(managedruntime.SingBox)
+	accepted, generation, err := s.ruleConfig(managedruntime.SingBox)
 	if err != nil {
-		s.runtimeError(w, err)
+		s.ruleRuntimeError(w, err)
 		return
 	}
 	if generation != input.Generation {
-		s.runtimeError(w, managedruntime.ErrGeneration)
+		s.ruleRuntimeError(w, managedruntime.ErrGeneration)
 		return
 	}
 	if !acceptedSelectedNodeMatches(accepted, node) {
@@ -344,9 +344,9 @@ func (s *Server) proxyLocalRulesApply(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "proxy_configuration_invalid", "代理策略生成失败")
 		return
 	}
-	state, err = s.runtime.ConfigureGuarded(r.Context(), managedruntime.SingBox, out.Config, input.Generation, s.runtimeMutationGuard)
+	state, err = s.ruleConfigure(r.Context(), managedruntime.SingBox, out.Config, input.Generation)
 	if err != nil {
-		s.runtimeResult(w, managedruntime.SingBox, "config_committed", state, err)
+		s.ruleRuntimeResult(w, state, err)
 		return
 	}
 	if err = s.recordLocalRulesApplied(r.Context(), draft, out, state); err != nil {
