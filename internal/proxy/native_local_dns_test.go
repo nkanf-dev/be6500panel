@@ -58,7 +58,7 @@ func TestNativeLocalDNSDefaultsPreserveRouterResolver(t *testing.T) {
 }
 
 func TestNativeLocalDNSPrecedesImportedPolicyAndIPv6CatchAll(t *testing.T) {
-	for _, mode := range []IPv6Mode{IPv6Follow, IPv6Direct, IPv6Block} {
+	for _, mode := range []IPv6Mode{"", IPv6Direct, IPv6Follow, IPv6Block} {
 		t.Run(string(mode), func(t *testing.T) {
 			out, err := CompileNative(CompileInput{Node: testNode(t), IPv6: mode, FakeIP: true, Rules: []Rule{
 				{Kind: RuleDomainSuffix, Value: "lan", Target: TargetBlock},
@@ -67,6 +67,12 @@ func TestNativeLocalDNSPrecedesImportedPolicyAndIPv6CatchAll(t *testing.T) {
 				{Kind: RuleDomain, Value: "domestic.example.com", Target: TargetDirect},
 				{Kind: RuleMatch, Target: TargetProxy},
 			}})
+			if mode == IPv6Follow || mode == IPv6Block {
+				if err == nil || len(out.Config) != 0 || !strings.Contains(err.Error(), "routed-tun supports only IPv6 direct") {
+					t.Fatalf("unsupported IPv6 DNS path must not compile: %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,7 +178,7 @@ func TestNativeDNSHijackIsIngressOnly(t *testing.T) {
 		if nativeRuleMatchesValue(rule, "inbound", "dns-in") {
 			continue
 		}
-		if !reflect.DeepEqual(rule["inbound"], []any{"mixed-in", "tproxy-in"}) || !reflect.DeepEqual(rule["port"], []any{float64(53)}) {
+		if !reflect.DeepEqual(rule["inbound"], []any{"mixed-in", "tun-in"}) || !reflect.DeepEqual(rule["port"], []any{float64(53)}) {
 			t.Fatalf("unexpected DNS hijack scope: %v", rule)
 		}
 		port53 = true
@@ -217,7 +223,7 @@ func TestNativeConfiguredLocalDNSAndNoInputMutation(t *testing.T) {
 func TestNativeRejectsLocalDNSLoopsAndInvalidSettings(t *testing.T) {
 	for _, local := range []*LocalDNSConfig{
 		{Server: "private-token.example.com"}, {Server: "0.0.0.0"}, {Server: "224.0.0.1"}, {Server: "fe80::1%br-lan"}, {Server: "::ffff:127.0.0.1"},
-		{Server: "223.5.5.5"}, {Server: "192.168.31.2"}, {Port: 1053}, {Port: 2080}, {Port: 7893},
+		{Server: "223.5.5.5"}, {Server: "192.168.31.2"}, {Port: 1053}, {Port: 2080},
 		{Domains: []string{"https://private-token.example.com"}}, {Hostnames: []string{"bad name"}},
 		{Domains: make([]string, 33)}, {Hostnames: make([]string, 65)},
 	} {
@@ -248,6 +254,12 @@ func TestNativeLocalDNSTargetCoreCheck(t *testing.T) {
 	for _, mode := range []IPv6Mode{IPv6Follow, IPv6Direct, IPv6Block} {
 		for _, fake := range []bool{false, true} {
 			out, err := CompileNative(CompileInput{Node: testNode(t), IPv6: mode, FakeIP: fake, LocalDNS: &LocalDNSConfig{Domains: []string{"office.home"}, Hostnames: []string{"router.office.home"}}, Rules: []Rule{{Kind: RuleMatch, Target: TargetProxy}}})
+			if mode == IPv6Follow || mode == IPv6Block {
+				if err == nil || len(out.Config) != 0 || !strings.Contains(err.Error(), "routed-tun supports only IPv6 direct") {
+					t.Fatalf("unsupported IPv6 DNS path must not compile: %v", err)
+				}
+				continue
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

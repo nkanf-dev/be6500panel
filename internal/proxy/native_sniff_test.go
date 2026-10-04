@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -50,7 +51,7 @@ func nativeSniffPosition(t *testing.T, rules []map[string]any) int {
 }
 
 func TestNativeSniffIncludesQUICWithoutTransportFeature(t *testing.T) {
-	for _, mode := range []IPv6Mode{IPv6Follow, IPv6Direct, IPv6Block} {
+	for _, mode := range []IPv6Mode{"", IPv6Direct, IPv6Follow, IPv6Block} {
 		for _, fake := range []bool{false, true} {
 			name := string(mode)
 			if fake {
@@ -60,13 +61,19 @@ func TestNativeSniffIncludesQUICWithoutTransportFeature(t *testing.T) {
 				in := nativeSniffFixture(t)
 				in.IPv6, in.FakeIP = mode, fake
 				out, err := CompileNative(in)
+				if mode == IPv6Follow || mode == IPv6Block {
+					if err == nil || len(out.Config) != 0 || !strings.Contains(err.Error(), "routed-tun supports only IPv6 direct") {
+						t.Fatalf("unsupported IPv6 sniff path must not compile: %v", err)
+					}
+					return
+				}
 				if err != nil {
 					t.Fatal(err)
 				}
 				rules := maps(decodeConfig(t, out)["route"].(map[string]any)["rules"])
 				sniff := rules[nativeSniffPosition(t, rules)]
 				want := map[string]any{
-					"inbound": []any{"mixed-in", "tproxy-in"},
+					"inbound": []any{"mixed-in", "tun-in"},
 					"action":  "sniff",
 					"sniffer": []any{"http", "tls", "dns", "quic"},
 					"timeout": "300ms",
@@ -77,7 +84,7 @@ func TestNativeSniffIncludesQUICWithoutTransportFeature(t *testing.T) {
 				if out.CoreVersion != "1.14.2" {
 					t.Fatal("QUIC sniff regression no longer targets sing-box 1.14.2")
 				}
-				wantFeatures := []string{"with_utls", "badlinkname", "tcp_fast_open", "tproxy_tcp_udp", "tls_dns"}
+				wantFeatures := []string{"with_utls", "badlinkname", "tcp_fast_open", "system_tun_tcp_udp", "tls_dns"}
 				if !reflect.DeepEqual(out.RequiredFeatures, wantFeatures) {
 					t.Fatalf("packet sniffing must not add a QUIC transport build requirement: %v", out.RequiredFeatures)
 				}
@@ -87,11 +94,17 @@ func TestNativeSniffIncludesQUICWithoutTransportFeature(t *testing.T) {
 }
 
 func TestNativeSniffPreservesBypassAndClassificationOrder(t *testing.T) {
-	for _, mode := range []IPv6Mode{IPv6Follow, IPv6Direct, IPv6Block} {
+	for _, mode := range []IPv6Mode{"", IPv6Direct, IPv6Follow, IPv6Block} {
 		t.Run(string(mode), func(t *testing.T) {
 			in := nativeSniffFixture(t)
 			in.IPv6 = mode
 			out, err := CompileNative(in)
+			if mode == IPv6Follow || mode == IPv6Block {
+				if err == nil || len(out.Config) != 0 || !strings.Contains(err.Error(), "routed-tun supports only IPv6 direct") {
+					t.Fatalf("unsupported IPv6 sniff path must not compile: %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -124,7 +137,7 @@ func TestNativeSniffPreservesBypassAndClassificationOrder(t *testing.T) {
 			for i, rule := range rules {
 				if rule["action"] == "hijack-dns" && reflect.DeepEqual(rule["port"], []any{float64(53)}) {
 					clientDNS = i
-					if !reflect.DeepEqual(rule["inbound"], []any{"mixed-in", "tproxy-in"}) {
+					if !reflect.DeepEqual(rule["inbound"], []any{"mixed-in", "tun-in"}) {
 						t.Fatal("client DNS hijack lost its ingress scope")
 					}
 				}
@@ -143,14 +156,8 @@ func TestNativeSniffPreservesBypassAndClassificationOrder(t *testing.T) {
 					ipv6Policy = i
 				}
 			}
-			if mode == IPv6Follow {
-				if ipv6Policy >= 0 {
-					t.Fatal("IPv6 follow unexpectedly gained a catch-all")
-				}
-			} else if ipv6Policy <= previous || ipv6Policy >= sniff ||
-				(mode == IPv6Direct && rules[ipv6Policy]["outbound"] != "direct") ||
-				(mode == IPv6Block && rules[ipv6Policy]["action"] != "reject") {
-				t.Fatal("IPv6 catch-all policy moved or changed")
+			if ipv6Policy <= previous || ipv6Policy >= sniff || rules[ipv6Policy]["outbound"] != "direct" {
+				t.Fatal("IPv6 direct catch-all policy moved or changed")
 			}
 			previous = sniff
 			for _, match := range []struct{ key, value string }{
@@ -209,7 +216,7 @@ func TestNativeSniffDoesNotEmitDestinationOverrides(t *testing.T) {
 	}
 	config := decodeConfig(t, out)
 	inbounds := maps(config["inbounds"])
-	if inbounds[1]["type"] != "tproxy" || inbounds[1]["network"] != nil {
+	if inbounds[1]["type"] != "tun" || inbounds[1]["network"] != nil || inbounds[1]["stack"] != "system" {
 		t.Fatal("transparent original-destination TCP/UDP ingress changed")
 	}
 	proxy := maps(config["outbounds"])[1]

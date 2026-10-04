@@ -8,19 +8,18 @@ import (
 
 var nativeRoutedTUNInterfaceName = regexp.MustCompile(`^b6p-[A-Za-z0-9_][A-Za-z0-9_-]{0,10}$`)
 
-// validateNativeDatapath keeps routed TUN explicit. Capture preflight must
-// also reject overlap with observed LAN prefixes, routes and occupied interfaces.
+func defaultRoutedTUNConfig() RoutedTUNConfig {
+	return RoutedTUNConfig{InterfaceName: "b6p-tun", Address: "172.31.255.253/30"}
+}
+
+// validateNativeDatapath accepts only the current original-packet main path.
+// Capture preflight must also reject overlap with observed LAN prefixes, routes
+// and occupied interfaces; compilation can check only known input addresses.
 func validateNativeDatapath(in CompileInput) error {
 	switch in.Datapath {
-	case "", DatapathTPROXY:
-		if in.RoutedTUN != nil {
-			return fmt.Errorf("routed TUN configuration requires routed-tun datapath")
-		}
-		return nil
+	case DatapathTPROXY:
+		return fmt.Errorf("tproxy datapath is no longer supported; use routed-tun")
 	case DatapathRoutedTUN:
-		if in.RoutedTUN == nil {
-			return fmt.Errorf("routed-tun requires explicit configuration")
-		}
 		if in.IPv6 != IPv6Direct {
 			return fmt.Errorf("routed-tun supports only IPv6 direct; IPv6 follow and block are not supported")
 		}

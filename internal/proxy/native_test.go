@@ -54,7 +54,7 @@ func TestCompileNativeCurrentKeysAndTransport(t *testing.T) {
 	if len(ins) != 3 {
 		t.Fatal("missing listeners")
 	}
-	for i, want := range []string{"mixed", "tproxy", "direct"} {
+	for i, want := range []string{"mixed", "tun", "direct"} {
 		if ins[i]["type"] != want || ins[i]["network"] != nil {
 			t.Fatalf("TCP/UDP listener changed: %v", ins[i])
 		}
@@ -89,7 +89,7 @@ func TestCompileNativeCurrentKeysAndTransport(t *testing.T) {
 	if rules[0]["action"] != "hijack-dns" || rules[len(rules)-1]["outbound"] != "proxy" {
 		t.Fatal("DNS listener/default routing changed")
 	}
-	for _, bad := range []string{`"clash_api"`, `"geoip"`, `"geosite"`, `"sniff_override_destination"`, `"store_fakeip"`, `"gvisor"`, `"tun"`, `"fakeip"`, `"domain_strategy"`} {
+	for _, bad := range []string{`"clash_api"`, `"geoip"`, `"geosite"`, `"sniff_override_destination"`, `"store_fakeip"`, `"gvisor"`, `"tproxy"`, `"tproxy-in"`, `"fakeip"`, `"domain_strategy"`} {
 		if bytes.Contains(out.Config, []byte(bad)) {
 			t.Fatalf("obsolete/unbuilt key emitted: %s", bad)
 		}
@@ -173,14 +173,14 @@ func TestCompilerRulesPreserveOrderAndBypassPriority(t *testing.T) {
 	}
 }
 func TestFakeIPNativeDNSHasRealNonAddressFallback(t *testing.T) {
-	out, err := CompileNative(CompileInput{Node: testNode(t), FakeIP: true, IPv6: IPv6Follow, RuleSets: stagedRefs(), Rules: []Rule{{Kind: RuleDomain, Value: "foreign.example.com", Target: TargetProxy}}})
+	out, err := CompileNative(CompileInput{Node: testNode(t), FakeIP: true, IPv6: IPv6Direct, RuleSets: stagedRefs(), Rules: []Rule{{Kind: RuleDomain, Value: "foreign.example.com", Target: TargetProxy}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := decodeConfig(t, out)
 	dns := m["dns"].(map[string]any)
 	fake := nativeDNSServer(t, m, "dns-fake")
-	if fake["type"] != "fakeip" || fake["inet4_range"] != "198.18.0.0/15" || fake["inet6_range"] != "fc00::/18" || dns["fakeip"] != nil {
+	if fake["type"] != "fakeip" || fake["inet4_range"] != "198.18.0.0/15" || fake["inet6_range"] != nil || dns["fakeip"] != nil {
 		t.Fatal("fake-IP transport not native")
 	}
 	rules := maps(dns["rules"])
@@ -203,9 +203,15 @@ func TestFakeIPNativeDNSHasRealNonAddressFallback(t *testing.T) {
 	}
 }
 func TestIPv6PolicyAndSeparateListenerBinds(t *testing.T) {
-	for _, mode := range []IPv6Mode{IPv6Follow, IPv6Direct, IPv6Block} {
+	for _, mode := range []IPv6Mode{"", IPv6Direct, IPv6Follow, IPv6Block} {
 		t.Run(string(mode), func(t *testing.T) {
 			out, err := CompileNative(CompileInput{Node: testNode(t), IPv6: mode, FakeIP: true, DNSListenAddress: "::"})
+			if mode == IPv6Follow || mode == IPv6Block {
+				if err == nil || len(out.Config) != 0 || !strings.Contains(err.Error(), "routed-tun supports only IPv6 direct") {
+					t.Fatalf("unsupported IPv6 policy must not compile: %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -214,32 +220,47 @@ func TestIPv6PolicyAndSeparateListenerBinds(t *testing.T) {
 			if ins[0]["listen"] != "127.0.0.1" || ins[2]["listen"] != "::" {
 				t.Fatal("DNS wildcard widens mixed listener")
 			}
-			if mode == IPv6Follow && ins[1]["listen"] != "::" {
-				t.Fatal("missing dual-stack TPROXY listener")
+			if ins[1]["type"] != "tun" || ins[1]["listen"] != nil || ins[1]["listen_port"] != nil {
+				t.Fatal("routed TUN must not emit a transparent socket listener")
 			}
-			if mode != IPv6Follow {
-				fake := nativeDNSServer(t, m, "dns-fake")
-				if fake["inet6_range"] != nil {
-					t.Fatal("fake IPv6 allocation when not captured")
+			fake := nativeDNSServer(t, m, "dns-fake")
+			if fake["inet6_range"] != nil {
+				t.Fatal("fake IPv6 allocation when IPv6 is not captured")
+			}
+			found := false
+			for _, r := range maps(m["route"].(map[string]any)["rules"]) {
+				if r["ip_version"] == float64(6) && r["outbound"] == "direct" {
+					found = true
+				}
+				if r["ip_version"] == float64(6) && r["action"] == "reject" {
+					t.Fatal("IPv6 direct must not become a kill switch")
 				}
 			}
-			if mode == IPv6Block {
-				found := false
-				for _, r := range maps(m["route"].(map[string]any)["rules"]) {
-					if r["ip_version"] == float64(6) && r["action"] == "reject" {
-						found = true
+			if !found || out.IPv6 != IPv6Direct {
+				t.Fatal("missing IPv6 direct policy")
+			}
+			rules := maps(m["dns"].(map[string]any)["rules"])
+			aaaa := -1
+			for i, rule := range rules {
+				if reflect.DeepEqual(rule["query_type"], []any{"AAAA"}) {
+					aaaa = i
+					if rule["server"] != "dns-direct" || rule["action"] != nil {
+						t.Fatal("AAAA queries must retain direct authenticated DNS")
 					}
 				}
-				if !found {
-					t.Fatal("missing IPv6 block intent")
+				if rule["server"] == "dns-fake" && aaaa < 0 {
+					t.Fatal("fake-IP policy hides direct IPv6 DNS")
 				}
+			}
+			if aaaa < 0 {
+				t.Fatal("missing IPv6 direct DNS policy")
 			}
 		})
 	}
 }
 
 func TestNativePrivateBypassDoesNotReserveFakeRangesWhenDisabled(t *testing.T) {
-	out, err := CompileNative(CompileInput{Node: testNode(t), IPv6: IPv6Follow})
+	out, err := CompileNative(CompileInput{Node: testNode(t), IPv6: IPv6Direct})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +288,7 @@ func TestCompilerRejectsInvalidInputs(t *testing.T) {
 	n := testNode(t)
 	inputs := []CompileInput{
 		{Node: n, Failure: FailureBlockProxy}, {Node: n, Failure: "unknown"}, {Node: n, IPv6: "unknown"},
-		{Node: n, Ports: Ports{1, 1, 2}}, {Node: n, Ports: Ports{1, 0, 2}},
+		{Node: n, Ports: Ports{1, 1, 1}}, {Node: n, Ports: Ports{0, 1, 2}},
 		{Node: n, ListenAddress: "not-an-ip"}, {Node: n, IPv6: IPv6Follow, TProxyListenAddress: "127.0.0.1"},
 		{Node: n, Endpoints: []string{"example.com"}}, {Node: n, ManagementIPs: []string{"fe80::1%eth0"}},
 		{Node: n, BootstrapDomains: []string{"https://private-token.example.com"}},

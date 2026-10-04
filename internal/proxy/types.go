@@ -31,17 +31,21 @@ const (
 type DatapathMode string
 
 const (
+	// DatapathTPROXY is retained only to withdraw old ownership journals.
+	// CompileNative rejects this retired backend.
 	DatapathTPROXY    DatapathMode = "tproxy"
 	DatapathRoutedTUN DatapathMode = "routed-tun"
 )
 
-// RoutedTUNConfig is explicit managed original-packet intent. A nil value never
-// changes an existing TPROXY compiler input or accepted runtime configuration.
+// RoutedTUNConfig is managed original-packet intent. CompileNative defaults a
+// nil value to b6p-tun at 172.31.255.253/30 without changing caller input.
 type RoutedTUNConfig struct {
 	InterfaceName string `json:"interfaceName"`
 	Address       string `json:"address"`
 }
 
+// Ports includes TProxy only for old ownership journals. CompileNative ignores
+// it and validates the mixed and DNS listeners that routed TUN actually emits.
 type Ports struct{ Mixed, TProxy, DNS uint16 }
 
 // Node is private input. JSON and formatting deliberately do not expose node
@@ -190,7 +194,7 @@ type CompileInput struct {
 	Ports                  Ports
 	ListenAddress          string
 	MixedListenAddress     string
-	TProxyListenAddress    string
+	TProxyListenAddress    string // Ignored; retained while internal callers migrate.
 	DNSListenAddress       string
 	DirectDNS              DNSEndpoint
 	ProxyDNS               DNSEndpoint

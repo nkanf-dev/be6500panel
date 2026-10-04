@@ -17,45 +17,88 @@ func routedTUNFixture(t *testing.T) CompileInput {
 	return in
 }
 
-// These hashes pin bytes from the pre-TUN compiler, not just JSON semantics.
-func TestNativeRoutedTUNLegacyGolden(t *testing.T) {
-	cases := []struct {
-		name string
-		mode IPv6Mode
-		fake bool
-		want string
-	}{
-		{"default", "", false, "3b3d731238b2f6a1bf2029123c1ed0279edde4413663f2e684ccd48ac5c0bb8a"},
-		{"direct", IPv6Direct, false, "a7233b42561a9071a3f61d277b038f6fee953c365285fdcfbf607693c69cfdfb"},
-		{"direct-fake", IPv6Direct, true, "c3b2714e5fc154d50ba540647dc84ede36abd588a489b16aa3c909b56a388301"},
-		{"follow", IPv6Follow, false, "3b4319c215849541fafac60166986c79119aee3a639ef48edb81f3d31b581aa0"},
-		{"follow-fake", IPv6Follow, true, "8000114d13b1effa68ed3e1a96053e6317c9f4de05f9386d2be27e9b95253bb4"},
-		{"block", IPv6Block, false, "650cf28acb52b4a98252186f2020a417d91fa5415dccf181ef7039eeb4445f75"},
-		{"block-fake", IPv6Block, true, "0db950f37096909ddc3897e2e114833494bea8c25007b0eaf47b9529cf460e7a"},
+func TestNativeRoutedTUNDefaultsMatchExplicitConfiguration(t *testing.T) {
+	in := CompileInput{Node: testNode(t)}
+	first, err := CompileNative(in)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
+	if in.Datapath != "" || in.RoutedTUN != nil {
+		t.Fatal("compiler changed caller datapath or allocated caller configuration")
+	}
+	for _, tc := range []struct {
+		name string
+		mode DatapathMode
+		tun  *RoutedTUNConfig
+	}{
+		{"explicit-default", DatapathRoutedTUN, nil},
+		{"explicit-config", DatapathRoutedTUN, &RoutedTUNConfig{InterfaceName: "b6p-tun", Address: "172.31.255.253/30"}},
+		{"default-with-config", "", &RoutedTUNConfig{InterfaceName: "b6p-tun", Address: "172.31.255.253/30"}},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			in := nativeSniffFixture(t)
-			if tc.name == "default" {
-				in = CompileInput{Node: testNode(t)}
+			in.Datapath, in.RoutedTUN = tc.mode, tc.tun
+			out, err := CompileNative(in)
+			if err != nil {
+				t.Fatal(err)
 			}
-			in.IPv6, in.FakeIP = tc.mode, tc.fake
-			for _, mode := range []DatapathMode{"", DatapathTPROXY} {
-				in.Datapath = mode
-				out, err := CompileNative(in)
-				if err != nil {
-					t.Fatal(err)
-				}
-				hash := sha256.Sum256(out.Config)
-				if got := hex.EncodeToString(hash[:]); got != tc.want || got != out.SHA256 {
-					t.Errorf("legacy byte hash mode=%q: got %s, want %s", mode, got, tc.want)
-				}
-				features := []string{"with_utls", "badlinkname", "tcp_fast_open", "tproxy_tcp_udp", "tls_dns"}
-				if !reflect.DeepEqual(out.RequiredFeatures, features) {
-					t.Fatal("legacy feature requirements changed")
-				}
+			if !reflect.DeepEqual(first, out) {
+				t.Fatal("default and explicit routed TUN differ")
 			}
 		})
+	}
+	config := decodeConfig(t, first)
+	tun := maps(config["inbounds"])[1]
+	if tun["type"] != "tun" || tun["interface_name"] != "b6p-tun" || !reflect.DeepEqual(tun["address"], []any{"172.31.255.253/30"}) {
+		t.Fatal("default must be the managed routed-TUN main path")
+	}
+	if in.IPv6 != "" || in.Failure != "" || in.Ports != (Ports{}) {
+		t.Fatal("compiler defaults mutated caller input")
+	}
+	in.Ports.TProxy = 65535
+	again, err := CompileNative(in)
+	if err != nil || !reflect.DeepEqual(first, again) {
+		t.Fatalf("unused TPROXY port changed default listener configuration: %v", err)
+	}
+}
+
+func TestNativeRoutedTUNRejectsRetiredTPROXYBackend(t *testing.T) {
+	for _, config := range []*RoutedTUNConfig{nil, {InterfaceName: "b6p-tun", Address: "172.31.255.253/30"}} {
+		out, err := CompileNative(CompileInput{Node: testNode(t), Datapath: DatapathTPROXY, RoutedTUN: config})
+		if err == nil || len(out.Config) != 0 || !strings.Contains(err.Error(), "tproxy datapath is no longer supported") {
+			t.Fatalf("retired unsafe backend must not compile: %v", err)
+		}
+	}
+}
+
+func TestNativeRoutedTUNValidatesOnlyActualListenerPorts(t *testing.T) {
+	in := CompileInput{Node: testNode(t), Ports: Ports{Mixed: 2080, DNS: 1053}}
+	baseline, err := CompileNative(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, unused := range []uint16{0, 7893, 2080, 1053, 53, 65535} {
+		in.Ports.TProxy = unused
+		out, err := CompileNative(in)
+		if err != nil || !reflect.DeepEqual(baseline, out) {
+			t.Fatalf("unused TPROXY port affected compilation: %v", err)
+		}
+		if in.Ports.TProxy != unused {
+			t.Fatal("unused port normalization mutated caller input")
+		}
+	}
+	for _, ports := range []Ports{{Mixed: 7893, DNS: 1053}, {Mixed: 2080, DNS: 7893}} {
+		in.Ports = ports
+		if _, err := CompileNative(in); err != nil {
+			t.Fatalf("unused reserved port conflicts with an actual listener: %v", err)
+		}
+	}
+	in.Ports, in.LocalDNS = Ports{Mixed: 2080, DNS: 1053}, &LocalDNSConfig{Port: 7893}
+	if _, err := CompileNative(in); err != nil {
+		t.Fatalf("unused port must not reserve a nonexistent core listener: %v", err)
+	}
+	in.Ports.Mixed = 7893
+	if _, err := CompileNative(in); err == nil || !strings.Contains(err.Error(), "core listener port") {
+		t.Fatalf("local DNS may not loop into an actual listener on 7893: %v", err)
 	}
 }
 
@@ -93,16 +136,16 @@ func TestNativeRoutedTUNPreservesPolicyAndOriginalPacketIntent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		legacy := in
-		legacy.Datapath, legacy.RoutedTUN = "", nil
-		old, err := CompileNative(legacy)
+		defaultInput := in
+		defaultInput.Datapath, defaultInput.RoutedTUN = "", nil
+		defaultOutput, err := CompileNative(defaultInput)
 		if err != nil {
 			t.Fatal(err)
 		}
-		config, oldConfig := decodeConfig(t, out), decodeConfig(t, old)
-		// Replace the one expected listener change and ingress tag. All other
-		// route order, local DNS authority, staged rules and outbounds are exact.
-		config["inbounds"].([]any)[1] = oldConfig["inbounds"].([]any)[1]
+		if !reflect.DeepEqual(out, defaultOutput) {
+			t.Fatal("explicit routed TUN changed current default policy or metadata")
+		}
+		config := decodeConfig(t, out)
 		rules := maps(config["route"].(map[string]any)["rules"])
 		clientDNS, sniff := 0, 0
 		for _, rule := range rules {
@@ -123,13 +166,9 @@ func TestNativeRoutedTUNPreservesPolicyAndOriginalPacketIntent(t *testing.T) {
 					t.Fatal("TUN client DNS port changed")
 				}
 			}
-			rule["inbound"] = []any{"mixed-in", "tproxy-in"}
 		}
-		if clientDNS != 1 || sniff != 1 || !reflect.DeepEqual(config, oldConfig) {
-			t.Fatal("routed TUN changed policy, node identity, resolver authority or native fields beyond its ingress")
-		}
-		if !reflect.DeepEqual(out.Diagnostics, old.Diagnostics) || !reflect.DeepEqual(out.EndpointHosts, old.EndpointHosts) || out.Failure != old.Failure || out.IPv6 != old.IPv6 {
-			t.Fatal("routed TUN changed public compiler metadata beyond required features")
+		if clientDNS != 1 || sniff != 1 {
+			t.Fatal("routed TUN must have one client DNS hijack and one sniff action")
 		}
 		for _, key := range []string{
 			"sniff", "sniff_override_destination", "override_destination", "override_address", "override_port",
@@ -158,9 +197,7 @@ func TestNativeRoutedTUNRejectsInvalidSelectionAndConfiguration(t *testing.T) {
 		{"unknown-datapath", func(in *CompileInput) { in.Datapath = "private-token" }, "invalid datapath"},
 		{"datapath-whitespace", func(in *CompileInput) { in.Datapath = " routed-tun" }, "invalid datapath"},
 		{"datapath-case", func(in *CompileInput) { in.Datapath = "Routed-TUN" }, "invalid datapath"},
-		{"missing-config", func(in *CompileInput) { in.RoutedTUN = nil }, "requires explicit configuration"},
-		{"default-with-config", func(in *CompileInput) { in.Datapath = "" }, "requires routed-tun datapath"},
-		{"tproxy-with-config", func(in *CompileInput) { in.Datapath = DatapathTPROXY }, "requires routed-tun datapath"},
+		{"tproxy-with-config", func(in *CompileInput) { in.Datapath = DatapathTPROXY }, "tproxy datapath is no longer supported"},
 		{"empty-config", func(in *CompileInput) { in.RoutedTUN = &RoutedTUNConfig{} }, "interface"},
 		{"ipv6-follow", func(in *CompileInput) { in.IPv6 = IPv6Follow }, "routed-tun supports only IPv6 direct"},
 		{"ipv6-block", func(in *CompileInput) { in.IPv6 = IPv6Block }, "routed-tun supports only IPv6 direct"},
@@ -169,11 +206,8 @@ func TestNativeRoutedTUNRejectsInvalidSelectionAndConfiguration(t *testing.T) {
 		{"management-network", func(in *CompileInput) { in.ManagementIPs = []string{"172.31.255.252"} }, "overlaps router management"},
 		{"management-broadcast", func(in *CompileInput) { in.ManagementIPs = []string{"172.31.255.255"} }, "overlaps router management"},
 		{"mixed-zero", func(in *CompileInput) { in.Ports = Ports{Mixed: 0, TProxy: 7893, DNS: 1053} }, "listener ports"},
-		{"tproxy-zero", func(in *CompileInput) { in.Ports = Ports{Mixed: 2080, TProxy: 0, DNS: 1053} }, "listener ports"},
 		{"dns-zero", func(in *CompileInput) { in.Ports = Ports{Mixed: 2080, TProxy: 7893, DNS: 0} }, "listener ports"},
-		{"duplicate-mixed-tproxy", func(in *CompileInput) { in.Ports = Ports{Mixed: 2080, TProxy: 2080, DNS: 1053} }, "listener ports"},
 		{"duplicate-mixed-DNS", func(in *CompileInput) { in.Ports = Ports{Mixed: 2080, TProxy: 7893, DNS: 2080} }, "listener ports"},
-		{"duplicate-tproxy-DNS", func(in *CompileInput) { in.Ports = Ports{Mixed: 2080, TProxy: 7893, DNS: 7893} }, "listener ports"},
 		{"failure-block", func(in *CompileInput) { in.Failure = FailureBlockProxy }, "not supported"},
 		{"failure-unknown", func(in *CompileInput) { in.Failure = "private-token" }, "invalid failure policy"},
 		{"unstaged-ruleset", func(in *CompileInput) {
@@ -256,10 +290,15 @@ func TestNativeRoutedTUNAcceptsOwnedInterfaceAndPrivateHost(t *testing.T) {
 		if listener["interface_name"] != tc.name || !reflect.DeepEqual(listener["address"], []any{tc.address}) {
 			t.Fatal("configured TUN interface/host address ignored or masked to its network")
 		}
+		in.Datapath = ""
+		defaultOutput, err := CompileNative(in)
+		if err != nil || !reflect.DeepEqual(out, defaultOutput) {
+			t.Fatalf("default datapath ignored explicit TUN configuration: %v", err)
+		}
 	}
 }
 
-func TestNativeRoutedTUNIgnoresUnusedTProxyBindOnly(t *testing.T) {
+func TestNativeRoutedTUNIgnoresUnusedTProxyBind(t *testing.T) {
 	in := routedTUNFixture(t)
 	in.Ports = Ports{Mixed: 12080, TProxy: 17893, DNS: 11053}
 	in.MixedListenAddress, in.DNSListenAddress = "127.0.0.2", "::1"
@@ -277,8 +316,8 @@ func TestNativeRoutedTUNIgnoresUnusedTProxyBindOnly(t *testing.T) {
 		t.Fatal("TUN changed actual mixed/DNS listener binds")
 	}
 	in.Datapath, in.RoutedTUN = DatapathTPROXY, nil
-	if _, err := CompileNative(in); err == nil {
-		t.Fatal("legacy TPROXY listener address validation removed")
+	if _, err := CompileNative(in); err == nil || !strings.Contains(err.Error(), "tproxy datapath is no longer supported") {
+		t.Fatalf("retired backend accepted or rejected for the wrong reason: %v", err)
 	}
 }
 
@@ -338,9 +377,9 @@ func TestNativeRoutedTUNRejectsKnownLiteralPrefixCollisions(t *testing.T) {
 				if err == nil || len(out.Config) != 0 || !strings.Contains(err.Error(), "address prefix overlaps") || strings.Contains(err.Error(), address) {
 					t.Fatalf("known literal address colliding with the connected TUN prefix accepted or leaked: %v", err)
 				}
-				in.Datapath, in.RoutedTUN = DatapathTPROXY, nil
-				if _, err := CompileNative(in); err != nil {
-					t.Fatalf("TUN-only collision check changed accepted TPROXY configuration: %v", err)
+				in.Datapath, in.RoutedTUN = "", nil
+				if _, err := CompileNative(in); err == nil || !strings.Contains(err.Error(), "address prefix overlaps") {
+					t.Fatalf("default routed TUN missed a known prefix collision: %v", err)
 				}
 			})
 		}

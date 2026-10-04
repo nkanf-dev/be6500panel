@@ -28,10 +28,19 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	if in.IPv6 != IPv6Direct && in.IPv6 != IPv6Follow && in.IPv6 != IPv6Block {
 		return out, fmt.Errorf("invalid IPv6 policy")
 	}
+	if in.Datapath == "" {
+		in.Datapath = DatapathRoutedTUN
+	}
+	if in.Datapath == DatapathRoutedTUN {
+		config := defaultRoutedTUNConfig()
+		if in.RoutedTUN != nil {
+			config = *in.RoutedTUN
+		}
+		in.RoutedTUN = &config
+	}
 	if err := validateNativeDatapath(in); err != nil {
 		return out, err
 	}
-	routedTUN := in.Datapath == DatapathRoutedTUN
 	if in.Failure == "" {
 		in.Failure = FailureDirect
 	}
@@ -41,10 +50,12 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	if in.Failure != FailureDirect {
 		return out, fmt.Errorf("invalid failure policy")
 	}
-	if in.Ports == (Ports{}) {
-		in.Ports = Ports{Mixed: 2080, TProxy: 7893, DNS: 1053}
+	if in.Ports.Mixed == 0 && in.Ports.DNS == 0 {
+		in.Ports.Mixed, in.Ports.DNS = 2080, 1053
 	}
-	if in.Ports.Mixed == 0 || in.Ports.TProxy == 0 || in.Ports.DNS == 0 || in.Ports.Mixed == in.Ports.TProxy || in.Ports.Mixed == in.Ports.DNS || in.Ports.TProxy == in.Ports.DNS {
+	// Kept for old ownership journals only; no native listener uses this port.
+	in.Ports.TProxy = 7893
+	if in.Ports.Mixed == 0 || in.Ports.DNS == 0 || in.Ports.Mixed == in.Ports.DNS {
 		return out, fmt.Errorf("listener ports must be nonzero and distinct")
 	}
 	if in.MixedListenAddress == "" {
@@ -53,46 +64,20 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	if in.MixedListenAddress == "" {
 		in.MixedListenAddress = "127.0.0.1"
 	}
-	if in.TProxyListenAddress == "" {
-		in.TProxyListenAddress = in.ListenAddress
-	}
-	if in.TProxyListenAddress == "" {
-		in.TProxyListenAddress = "127.0.0.1"
-		if in.IPv6 == IPv6Follow {
-			in.TProxyListenAddress = "::"
-		}
-	}
 	if in.DNSListenAddress == "" {
 		in.DNSListenAddress = in.ListenAddress
 	}
 	if in.DNSListenAddress == "" {
 		in.DNSListenAddress = "127.0.0.1"
 	}
-	listenAddresses := []string{in.MixedListenAddress, in.TProxyListenAddress, in.DNSListenAddress}
-	if routedTUN {
-		// TUN has no TPROXY socket. Keep its reserved port contract, but validate
-		// only the mixed and DNS listeners that this backend actually emits.
-		listenAddresses = []string{in.MixedListenAddress, in.DNSListenAddress}
-	}
-	for _, s := range listenAddresses {
+	for _, s := range []string{in.MixedListenAddress, in.DNSListenAddress} {
 		listen, err := netip.ParseAddr(s)
 		if err != nil || listen.Zone() != "" || listen.IsMulticast() {
 			return out, fmt.Errorf("invalid listener address")
 		}
 	}
-	if !routedTUN && in.IPv6 == IPv6Follow {
-		listen, _ := netip.ParseAddr(in.TProxyListenAddress)
-		if !listen.Is6() {
-			return out, fmt.Errorf("IPv6 follow requires a dual-stack IPv6 TPROXY listener address")
-		}
-	}
-	clientIngressTag := "tproxy-in"
-	clientInbound := map[string]any{"type": "tproxy", "tag": clientIngressTag, "listen": in.TProxyListenAddress, "listen_port": in.Ports.TProxy, "udp_timeout": "2m", "udp_nat_max": 1024}
-	if routedTUN {
-		clientIngressTag = "tun-in"
-		clientInbound = nativeRoutedTUNInbound(*in.RoutedTUN)
-	}
-	clientInbounds := []string{"mixed-in", clientIngressTag}
+	clientInbound := nativeRoutedTUNInbound(*in.RoutedTUN)
+	clientInbounds := []string{"mixed-in", "tun-in"}
 	var err error
 
 	if in.DirectDNS == (DNSEndpoint{}) {
@@ -114,10 +99,8 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	if len(in.Rules)+len(in.Overrides) > MaxRules || len(in.Endpoints) > 256 || len(in.BootstrapDomains) > 256 || len(in.ManagementIPs) > 128 {
 		return out, fmt.Errorf("compiler input limit exceeded")
 	}
-	if routedTUN {
-		if err := validateNativeRoutedTUNCollisions(in, localDNS); err != nil {
-			return out, err
-		}
+	if err := validateNativeRoutedTUNCollisions(in, localDNS); err != nil {
+		return out, err
 	}
 	for _, d := range in.Diagnostics {
 		// Do not echo caller-supplied diagnostic text, which can contain private data.
@@ -189,12 +172,7 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 		resolve["action"], resolve["server"], resolve["timeout"], resolve["disable_cache"] = "resolve", "dns-local", "5s", true
 		routeRules = append(routeRules, resolve, routeAction(match, TargetDirect))
 	}
-	if in.IPv6 == IPv6Direct {
-		routeRules = append(routeRules, map[string]any{"ip_version": 6, "outbound": "direct"})
-	}
-	if in.IPv6 == IPv6Block {
-		routeRules = append(routeRules, map[string]any{"ip_version": 6, "action": "reject"})
-	}
+	routeRules = append(routeRules, map[string]any{"ip_version": 6, "outbound": "direct"})
 	routeRules = append(routeRules, map[string]any{"inbound": clientInbounds, "action": "sniff", "sniffer": []string{"http", "tls", "dns", "quic"}, "timeout": "300ms"})
 	dnsRules := []map[string]any{}
 	if len(bootstrap) > 0 {
@@ -207,12 +185,7 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	// Reverse LAN lookups must reach dnsmasq lease/hosts records as well. Match
 	// only private reverse namespaces, never all public in-addr.arpa/ip6.arpa.
 	dnsRules = append(dnsRules, map[string]any{"query_type": []string{"PTR"}, "domain_suffix": localReverseSuffixes(), "server": "dns-local", "disable_cache": true})
-	if in.IPv6 == IPv6Block {
-		dnsRules = append(dnsRules, map[string]any{"query_type": []string{"AAAA"}, "action": "predefined", "rcode": "NOERROR"})
-	}
-	if in.IPv6 == IPv6Direct {
-		dnsRules = append(dnsRules, map[string]any{"query_type": []string{"AAAA"}, "server": "dns-direct", "rewrite_ttl": 300})
-	}
+	dnsRules = append(dnsRules, map[string]any{"query_type": []string{"AAAA"}, "server": "dns-direct", "rewrite_ttl": 300})
 	defaultTarget := TargetProxy
 	fallbackAdded := false
 	addFallback := func() {
@@ -265,16 +238,10 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	servers := []map[string]any{dnsServer("dns-direct", in.DirectDNS, "direct"), dnsServer("dns-proxy", in.ProxyDNS, "proxy"), {"type": "udp", "tag": "dns-local", "server": localDNS.Server, "server_port": localDNS.Port, "detour": "direct"}}
 	if in.FakeIP {
 		fake := map[string]any{"type": "fakeip", "tag": "dns-fake", "inet4_range": "198.18.0.0/15"}
-		if in.IPv6 == IPv6Follow {
-			fake["inet6_range"] = "fc00::/18"
-		}
 		servers = append(servers, fake)
 		out.Diagnostics = append(out.Diagnostics, Diagnostic{"config", -1, "fakeip-memory", "fake-IP identities use an unbounded native RAM map; restart or direct-failure withdrawal needs coordinated stale DNS cleanup before recapture"})
 	}
 	strategy := "prefer_ipv4"
-	if in.IPv6 == IPv6Block {
-		strategy = "ipv4_only"
-	}
 	resolver := func() map[string]any {
 		return map[string]any{"server": "dns-direct", "timeout": "5s", "strategy": strategy}
 	}
@@ -301,11 +268,7 @@ func CompileNative(in CompileInput) (CompileOutput, error) {
 	out.SHA256 = hex.EncodeToString(hash[:])
 	out.CoreVersion = CoreVersion
 	out.EndpointHosts = sortedUnique(append(append([]string{in.Node.Server}, in.Endpoints...), bootstrap...))
-	clientFeature := "tproxy_tcp_udp"
-	if routedTUN {
-		clientFeature = "system_tun_tcp_udp"
-	}
-	out.RequiredFeatures = []string{"with_utls", "badlinkname", "tcp_fast_open", clientFeature, "tls_dns"}
+	out.RequiredFeatures = []string{"with_utls", "badlinkname", "tcp_fast_open", "system_tun_tcp_udp", "tls_dns"}
 	out.IPv6 = in.IPv6
 	out.Failure = in.Failure
 	return out, nil
@@ -342,7 +305,7 @@ func compileLocalDNS(in CompileInput) (LocalDNSConfig, error) {
 			return LocalDNSConfig{}, fmt.Errorf("local DNS address must belong to router ManagementIPs")
 		}
 	}
-	if local.Port == in.Ports.DNS || local.Port == in.Ports.Mixed || local.Port == in.Ports.TProxy {
+	if local.Port == in.Ports.DNS || local.Port == in.Ports.Mixed {
 		return LocalDNSConfig{}, fmt.Errorf("local DNS must not point to a core listener port")
 	}
 	if len(local.Domains) > 32 || len(local.Hostnames) > 64 {
