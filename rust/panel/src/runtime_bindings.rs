@@ -1,10 +1,12 @@
-//! Trusted local release command bindings. Loading only reads and admits fixed
-//! command binaries; it never executes, fetches, adopts a core or repairs paths.
+//! Trusted local release command and optional core bindings. Loading reads the
+//! private manifest and admits fixed command binaries; it never executes,
+//! fetches, adopts a core or repairs paths.
 use crate::{
     artifact_source::SourcePolicy,
     capture_executor::{Binaries, TrustedBinary},
     capture_kernel::{self, TableNames},
     readiness_tun::FileIdentity,
+    runtime_manager::{ArtifactBinding, ArtifactBindings, ArtifactProvenance, ServiceId},
 };
 use serde::{
     Deserialize, Deserializer,
@@ -28,6 +30,7 @@ pub struct Bindings {
     pub binaries: Binaries,
     pub names: TableNames,
     pub source: SourcePolicy,
+    pub artifacts: ArtifactBindings,
 }
 impl fmt::Debug for Bindings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -63,6 +66,10 @@ struct Manifest {
     dns_bootstrap: String,
     #[serde(default)]
     route_tables: String,
+    #[serde(default, deserialize_with = "optional_command_object")]
+    sing_box: Option<Command>,
+    #[serde(default, deserialize_with = "optional_command_object")]
+    frpc: Option<Command>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,6 +90,45 @@ fn command_object<'de, D: Deserializer<'de>>(d: D) -> Result<Command, D::Error> 
     }
     d.deserialize_map(V)
 }
+fn optional_command_object<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Command>, D::Error> {
+    command_object(d).map(Some)
+}
+
+// The private manifest supplies release trust. Manager admits the private root;
+// its existing checker/start path verifies the exact executable against this SHA.
+// Do not hash a core twice or execute it while loading bindings.
+fn local_artifact(
+    service: ServiceId,
+    command: Option<Command>,
+) -> Result<Option<ArtifactBinding>, BindingError> {
+    let Some(command) = command else {
+        return Ok(None);
+    };
+    let sha256 = digest(&command.sha256)?;
+    let path = Path::new(&command.path);
+    if !path.is_absolute()
+        || path.as_os_str().as_bytes().contains(&0)
+        || path.as_os_str().as_bytes().split(|b| *b == b'/')
+            .any(|c| c == b"." || c == b"..")
+        || path.file_name().is_none()
+    {
+        return Err(BindingError::Binary);
+    }
+    let root = path.parent().ok_or(BindingError::Binary)?;
+    if root == Path::new("/") {
+        return Err(BindingError::Binary);
+    }
+    Ok(Some(ArtifactBinding::trusted_local(
+        service,
+        root,
+        path,
+        sha256,
+        ArtifactProvenance::TrustedLocalModule,
+    )))
+}
+
 struct Object(Manifest);
 impl<'de> Deserialize<'de> for Object {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -246,6 +292,10 @@ impl Bindings {
         // Validate all syntax before any potentially large executable hashing.
         let ip_sha = digest(&manifest.ip.sha256)?;
         let iptables_sha = digest(&manifest.iptables.sha256)?;
+        let artifacts = ArtifactBindings {
+            sing_box: local_artifact(ServiceId::SingBox, manifest.sing_box)?,
+            frpc: local_artifact(ServiceId::Frpc, manifest.frpc)?,
+        };
         let bootstrap: SocketAddr = manifest
             .dns_bootstrap
             .parse()
@@ -262,6 +312,7 @@ impl Bindings {
             binaries: Binaries { ip, iptables },
             names,
             source,
+            artifacts,
         })
     }
 }
@@ -300,6 +351,66 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.root).unwrap();
         }
+    }
+    #[test]
+    fn optional_local_release_bindings_default_none_and_load_without_execution() {
+        use sha2::{Digest, Sha256};
+        let f = Fixture::new();
+        let command = f.root.join("command");
+        let marker = f.root.join("executed");
+        let source = format!("#!/bin/sh\nprintf executed > '{}'\nexit 9\n", marker.display());
+        fs::write(&command, source.as_bytes()).unwrap();
+        fs::set_permissions(&command, fs::Permissions::from_mode(0o700)).unwrap();
+        let sha = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let core = f.root.join("core");
+        fs::write(&core, source.as_bytes()).unwrap();
+        fs::set_permissions(&core, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut manifest = serde_json::json!({
+            "ip": {"path": command, "sha256": sha},
+            "iptables": {"path": command, "sha256": sha},
+            "dnsBootstrap": "127.0.0.1:53"
+        });
+        fs::write(&f.path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let defaults = Bindings::load(&f.path).unwrap();
+        assert!(defaults.artifacts.sing_box.is_none());
+        assert!(defaults.artifacts.frpc.is_none());
+        manifest["singBox"] = serde_json::json!({"path": core, "sha256": sha});
+        manifest["frpc"] = manifest["singBox"].clone();
+        fs::write(&f.path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let bound = Bindings::load(&f.path).unwrap();
+        assert!(bound.artifacts.sing_box.is_some());
+        assert!(bound.artifacts.frpc.is_some());
+        assert!(!marker.exists());
+    }
+    #[test]
+    fn optional_core_commands_require_objects_and_valid_release_paths_and_sha() {
+        let base = serde_json::json!({
+            "ip": {"path": "/private/ip", "sha256": "00".repeat(32)},
+            "iptables": {"path": "/private/iptables", "sha256": "00".repeat(32)},
+            "dnsBootstrap": "127.0.0.1:53"
+        });
+        for invalid in [
+            serde_json::Value::Null,
+            serde_json::json!(["/private/core", "00".repeat(32)]),
+            serde_json::json!({"path": "/private/core"}),
+            serde_json::json!({"path": "/private/core", "sha256": "00".repeat(32), "argv": []}),
+        ] {
+            for field in ["singBox", "frpc"] {
+                let mut raw = base.clone();
+                raw[field] = invalid.clone();
+                assert!(serde_json::from_value::<Object>(raw).is_err());
+            }
+        }
+        for path in ["relative/core", "/private/../core", "/private/./core", "/core", "/"] {
+            assert!(local_artifact(ServiceId::SingBox, Some(Command {
+                path: path.into(), sha256: "00".repeat(32),
+            })).is_err());
+        }
+        assert!(local_artifact(ServiceId::Frpc, Some(Command {
+            path: "/private/core".into(), sha256: "invalid".into(),
+        })).is_err());
+        let duplicate = r#"{"ip":{"path":"/private/ip","sha256":""},"iptables":{"path":"/private/iptables","sha256":""},"dnsBootstrap":"127.0.0.1:53","singBox":{},"singBox":{}}"#;
+        assert!(serde_json::from_str::<Object>(duplicate).is_err());
     }
     #[test]
     fn pinned_manifest_refuses_replacement_and_permission_change() {

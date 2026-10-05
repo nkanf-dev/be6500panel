@@ -177,6 +177,20 @@ impl NativeOwner {
         source: SourcePolicy,
         cancel: Rc<AtomicBool>,
     ) -> Result<Self, OpenError> {
+        Self::open_with_artifacts(
+            options, binaries, names, source, ArtifactBindings::default(), cancel,
+        )
+    }
+    /// Attach only caller-supplied trusted local release bindings. Loading does
+    /// not check, fetch or start a core; explicit initialization owns startup.
+    pub fn open_with_artifacts(
+        options: Options,
+        binaries: Binaries,
+        names: TableNames,
+        source: SourcePolicy,
+        artifacts: ArtifactBindings,
+        cancel: Rc<AtomicBool>,
+    ) -> Result<Self, OpenError> {
         let data = private_root(&options.data_dir)?;
         let run = private_root(&options.run_dir)?;
         let dm = data.metadata().map_err(|_| OpenError::Roots)?;
@@ -209,7 +223,7 @@ impl NativeOwner {
         let manager = Manager::open(
             services,
             &options.run_dir,
-            ArtifactBindings::default(),
+            artifacts,
             hooks,
             Limits::default(),
         )
@@ -309,6 +323,91 @@ mod tests {
         thread,
     };
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    #[test]
+    fn explicit_local_bindings_and_saved_on_are_load_only_until_initialize() {
+        use crate::runtime_manager::{ArtifactBinding, ArtifactProvenance};
+        let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!(
+            "native-owner-local-{}-{}", std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        for part in ["data", "run"] {
+            fs::DirBuilder::new().mode(0o700).create(root.join(part)).unwrap();
+        }
+        let marker = root.join("executed");
+        let source = format!("#!/bin/sh\nprintf executed > '{}'\nexit 9\n", marker.display());
+        let command = root.join("command");
+        fs::write(&command, source.as_bytes()).unwrap();
+        fs::set_permissions(&command, fs::Permissions::from_mode(0o700)).unwrap();
+        let digest = Sha256::digest(source.as_bytes()).into();
+        for explicit in [false, true] {
+            let mut artifacts = ArtifactBindings::default();
+            if explicit {
+                for service in [ServiceId::SingBox, ServiceId::Frpc] {
+                    let directory = root.join("run").join(service.as_str());
+                    // The default constructor already creates service run roots.
+                    let path = directory.join(".artifact-release");
+                    fs::write(&path, source.as_bytes()).unwrap();
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+                    let binding = ArtifactBinding::trusted_local(
+                        service, directory, path, digest,
+                        ArtifactProvenance::TrustedLocalModule,
+                    );
+                    match service {
+                        ServiceId::SingBox => artifacts.sing_box = Some(binding),
+                        ServiceId::Frpc => artifacts.frpc = Some(binding),
+                    }
+                }
+                let intent = root.join("data/desired-services.json");
+                fs::write(&intent, br#"{"sing-box":true,"frpc":true}"#).unwrap();
+                fs::set_permissions(&intent, fs::Permissions::from_mode(0o600)).unwrap();
+            }
+            let binaries = Binaries {
+                ip: TrustedBinary::admit(&command, digest).unwrap(),
+                iptables: TrustedBinary::admit(&command, digest).unwrap(),
+            };
+            let options = Options { data_dir: root.join("data"), run_dir: root.join("run") };
+            let source = SourcePolicy::native("127.0.0.1:53".parse().unwrap()).unwrap();
+            let cancel = Rc::new(AtomicBool::new(false));
+            let mut owner = if explicit {
+                NativeOwner::open_with_artifacts(
+                    options, binaries, capture_kernel::table_names(b"").unwrap(),
+                    source, artifacts, cancel,
+                )
+            } else {
+                NativeOwner::open(
+                    options, binaries, capture_kernel::table_names(b"").unwrap(), source, cancel,
+                )
+            }.unwrap();
+            assert!(!marker.exists());
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let peer = thread::spawn(move || {
+                let mut stream = TcpStream::connect(address).unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                stream.write_all(b"GET /api/runtime HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+                stream.shutdown(Shutdown::Write).unwrap();
+                let mut response = Vec::new();
+                stream.read_to_end(&mut response).unwrap();
+                response
+            });
+            Service::new("/proc".into()).with_auth(Auth::new(""))
+                .handle_with_runtime(listener.accept().unwrap().0, owner.runtime_mut()).unwrap();
+            let response = peer.join().unwrap();
+            assert!(response.starts_with(b"HTTP/1.1 200 "));
+            let body = response.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+            let status: serde_json::Value = serde_json::from_slice(&response[body..]).unwrap();
+            for service in status["services"].as_array().unwrap() {
+                assert_eq!(service["artifactAvailable"], explicit);
+                assert_eq!(service["configured"], false);
+                assert!(service["pid"].is_null());
+            }
+            assert!(!marker.exists());
+            owner.close().unwrap();
+            drop(owner);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn cancellation_at_withdrawal_completion_keeps_api_startup_gate_until_retry() {
         let root = fs::canonicalize(std::env::temp_dir())
