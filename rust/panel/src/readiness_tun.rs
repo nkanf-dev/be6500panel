@@ -919,6 +919,52 @@ pub fn check_startup_once(
     listener_result?;
     Ok(final_observation)
 }
+
+/// Wait only for this retained child to create its TUN and listeners. Config or
+/// identity failures are terminal; transient startup observations use the same
+/// absolute budget and never adopt another PID or start a replacement child.
+#[allow(clippy::too_many_arguments)]
+pub fn wait_startup_readiness(
+    raw: &[u8],
+    identity: &OwnedIdentity,
+    observer: &mut impl Observer,
+    deadline: Instant,
+    cancel: &AtomicBool,
+    status: &mut impl FnMut() -> Result<OwnedStatus, TunError>,
+    listener: &mut ListenerProbe<'_>,
+) -> Result<OwnedObservation, TunError> {
+    let budget = Budget { deadline, cancel };
+    loop {
+        budget.check()?;
+        match check_startup_once(
+            raw,
+            identity,
+            observer,
+            deadline,
+            cancel,
+            status,
+            Some(listener),
+        ) {
+            Ok(proof) => return Ok(proof),
+            Err(
+                TunError::Interface
+                | TunError::ReversePath
+                | TunError::Descriptor
+                | TunError::Socket
+                | TunError::Unavailable
+                | TunError::Observation,
+            ) => {
+                identity.unchanged(observer, &budget, status)?;
+                std::thread::sleep(
+                    std::time::Duration::from_millis(20)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 pub fn check_prestart_once(
     raw: &[u8],
     observer: &mut impl Observer,

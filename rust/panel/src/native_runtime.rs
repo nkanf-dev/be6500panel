@@ -115,14 +115,14 @@ impl<O: Observer + 'static> NativeReadiness<O> {
                         _ => TunError::Observation,
                     })
             };
-            readiness_tun::check_startup_once(
+            readiness_tun::wait_startup_readiness(
                 &raw,
                 &identity,
                 &mut self.observer,
                 context.deadline,
                 &self.cancel,
                 &mut status,
-                Some(&mut listeners),
+                &mut listeners,
             )
             .map_err(tun_error)?;
         } else {

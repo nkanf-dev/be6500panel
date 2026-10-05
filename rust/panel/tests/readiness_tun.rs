@@ -105,6 +105,7 @@ struct Fixture {
     reads: Vec<PathBuf>,
     list_override: Option<Vec<String>>,
     oversized: bool,
+    pending_interface_reads: usize,
 }
 impl Fixture {
     fn new() -> Self {
@@ -167,6 +168,7 @@ impl Fixture {
             reads: vec![],
             list_override: None,
             oversized: false,
+            pending_interface_reads: 0,
         }
     }
     fn owner() -> OwnedStatus {
@@ -239,6 +241,10 @@ impl Observer for Fixture {
     }
     fn interfaces(&mut self, b: &Budget<'_>) -> Result<Vec<Interface>, TunError> {
         b.check()?;
+        if self.pending_interface_reads > 0 {
+            self.pending_interface_reads -= 1;
+            return Ok(vec![]);
+        }
         Ok(self.interfaces.clone())
     }
     fn ipv4_routes(&mut self, b: &Budget<'_>) -> Result<Vec<Ipv4Prefix>, TunError> {
@@ -868,5 +874,65 @@ fn unrelated_vendor_control_interface_with_zero_mtu_is_observed_not_rejected() {
     assert_eq!(
         check_prestart_interfaces(&target, &[same_name]),
         Err(TunError::Collision)
+    );
+}
+
+#[test]
+fn startup_waits_for_same_owned_child_resources_without_weakening_current_proof() {
+    let mut f = Fixture::new();
+    let id = f.bind().unwrap();
+    f.pending_interface_reads = 2;
+    assert_eq!(f.observe(&id), Err(TunError::Interface));
+    let mut calls = 0;
+    let mut listener = |_: &[u8], b: &Budget<'_>| {
+        calls += 1;
+        b.check()
+    };
+    assert_eq!(
+        wait_startup_readiness(
+            CONFIG.as_bytes(),
+            &id,
+            &mut f,
+            Instant::now() + Duration::from_secs(1),
+            &AtomicBool::new(false),
+            &mut || Ok(Fixture::owner()),
+            &mut listener
+        ),
+        Ok(OwnedObservation::TunOwned)
+    );
+    assert_eq!(calls, 1);
+}
+#[test]
+fn startup_wait_deadline_and_identity_change_never_promote_missing_resources() {
+    let mut f = Fixture::new();
+    let id = f.bind().unwrap();
+    f.pending_interface_reads = usize::MAX;
+    let mut listener = |_: &[u8], b: &Budget<'_>| b.check();
+    assert_eq!(
+        wait_startup_readiness(
+            CONFIG.as_bytes(),
+            &id,
+            &mut f,
+            Instant::now() + Duration::from_millis(30),
+            &AtomicBool::new(false),
+            &mut || Ok(Fixture::owner()),
+            &mut listener
+        ),
+        Err(TunError::Deadline)
+    );
+    let mut f = Fixture::new();
+    let id = f.bind().unwrap();
+    f.write("4321/stat", stat(654321, "S"));
+    assert_eq!(
+        wait_startup_readiness(
+            CONFIG.as_bytes(),
+            &id,
+            &mut f,
+            Instant::now() + Duration::from_secs(1),
+            &AtomicBool::new(false),
+            &mut || Ok(Fixture::owner()),
+            &mut listener
+        ),
+        Err(TunError::IdentityChanged)
     );
 }
