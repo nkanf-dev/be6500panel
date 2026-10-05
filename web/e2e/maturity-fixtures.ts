@@ -41,6 +41,10 @@ import {
   ImportStageSchema,
 } from "../src/components/maintenance/contracts";
 import { readFrpcDocument } from "../src/modules/frpc-document";
+import {
+  NODE_PROBE_TARGET,
+  NodeProbeSnapshotSchema,
+} from "../src/modules/proxy/node-probe-contracts";
 
 /** Entirely synthetic source fixtures. No router captures, files or real credentials. */
 export const fixtureMAC = {
@@ -582,14 +586,33 @@ export function createMaturityFixture(now = Date.now()) {
         return metrics();
       case "/api/proxy/nodes":
         return checked(ProxyNodesSchema, {
+          revision: "fixture-empty-nodes-revision-1",
           nodes: [],
           diagnostics: [],
           selectedNodeId: "",
         });
+      case "/api/proxy/node-probes":
+        if (url.search) throw new Error("Node-probe GET must not have a query");
+        return checked(NodeProbeSnapshotSchema, {
+          revision: "fixture-empty-nodes-revision-1",
+          available: false,
+          unavailableCode: "empty_subscription",
+          target: NODE_PROBE_TARGET,
+          running: false,
+          results: [],
+          limits: { maxNodes: 256, concurrency: 1, timeoutMs: 3000 },
+        });
       case "/api/proxy/capture":
+        if (url.search) throw new Error("Capture GET must not have a query");
         return checked(ProxyCaptureSchema, {
           active: false,
+          scope: "gateway",
           desired: false,
+          state: "inactive",
+          scopeState: "current",
+          lanIPv4Prefixes: ["192.0.2.0/24"],
+          installedLanIPv4Prefixes: [],
+          ipv6: "direct",
           clients: [],
           commands: 0,
         });
@@ -734,7 +757,79 @@ export function createMaturityFixture(now = Date.now()) {
   };
 }
 
+/** Playwright fulfills a finite body, not an open SSE connection. Keep the
+ * synthetic stream open after that snapshot instead of inventing EOF failures
+ * and triggering reconnect renders unrelated to these table/selection cases.
+ * The request still reaches the strict fixture route and its read ledger.
+ */
+export async function installSnapshotStreamFixture(page: Page) {
+  await page.addInitScript(() => {
+    class FixtureEventSource extends EventTarget {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSED = 2;
+      readonly CONNECTING = 0;
+      readonly OPEN = 1;
+      readonly CLOSED = 2;
+      readonly url: string;
+      readonly withCredentials = true;
+      readyState = 0;
+      onopen: ((event: Event) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      private controller = new AbortController();
+      constructor(url: string | URL) {
+        super();
+        this.url = new URL(String(url), location.href).href;
+        void fetch(this.url, {
+          credentials: "same-origin",
+          signal: this.controller.signal,
+        })
+          .then(async (response) => {
+            if (!response.ok)
+              throw new Error("Synthetic stream request failed");
+            const body = await response.text();
+            if (this.readyState === 2) return;
+            this.readyState = 1;
+            const open = new Event("open");
+            this.dispatchEvent(open);
+            this.onopen?.(open);
+            for (const frame of body.split("\n\n")) {
+              const event =
+                frame
+                  .split("\n")
+                  .find((line) => line.startsWith("event:"))
+                  ?.slice(6)
+                  .trim() ?? "message";
+              const data = frame
+                .split("\n")
+                .filter((line) => line.startsWith("data:"))
+                .map((line) => line.slice(5).trimStart())
+                .join("\n");
+              if (!data) continue;
+              const message = new MessageEvent(event, { data });
+              this.dispatchEvent(message);
+              if (event === "message") this.onmessage?.(message);
+            }
+          })
+          .catch(() => {
+            if (this.readyState === 2) return;
+            const error = new Event("error");
+            this.dispatchEvent(error);
+            this.onerror?.(error);
+          });
+      }
+      close() {
+        this.readyState = 2;
+        this.controller.abort();
+      }
+    }
+    window.EventSource = FixtureEventSource as unknown as typeof EventSource;
+  });
+}
+
 export async function installMaturityFixture(page: Page, baseURL: string) {
+  await installSnapshotStreamFixture(page);
   const origin = new URL(baseURL).origin;
   const source = createMaturityFixture();
   const reads: string[] = [];
@@ -827,6 +922,7 @@ export function validateMaturityFixtures() {
     "devices/annotations",
     "proxy/metrics",
     "proxy/nodes",
+    "proxy/node-probes",
     "proxy/capture",
     "proxy/request-traces",
     "system/services",

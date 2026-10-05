@@ -11,7 +11,14 @@ import {
   DeviceActivityHistorySchema,
 } from "../src/lib/device-activity-contracts";
 import { nodeConfigInputs } from "../src/modules/proxy/node-selector-config";
-import { createMaturityFixture } from "./maturity-fixtures";
+import {
+  createMaturityFixture,
+  installSnapshotStreamFixture,
+} from "./maturity-fixtures";
+import {
+  NODE_PROBE_TARGET,
+  NodeProbeSnapshotSchema,
+} from "../src/modules/proxy/node-probe-contracts";
 
 /** All identities, endpoints, counters and times are generated; no router data or credentials. */
 export const SCALE_NODE_COUNT = 220;
@@ -32,6 +39,7 @@ export function createScaleFixture(now = Date.now()) {
   const ordinary = createMaturityFixture(now);
   const bucketEnd = Math.floor(now / 120_000) * 120_000;
   const nodes = checked(ProxyNodesSchema, {
+    revision: "fixture-scale-nodes-revision-1",
     nodes: Array.from({ length: SCALE_NODE_COUNT }, (_, index) => ({
       id: scaleNodeID(index + 1),
       label: scaleNodeLabel(index + 1),
@@ -158,6 +166,17 @@ export function createScaleFixture(now = Date.now()) {
   };
   const get = (url: URL): unknown => {
     if (url.pathname === "/api/proxy/nodes") return nodes;
+    if (url.pathname === "/api/proxy/node-probes") {
+      if (url.search) throw new Error("Node-probe GET must not have a query");
+      return checked(NodeProbeSnapshotSchema, {
+        revision: nodes.revision,
+        available: true,
+        target: NODE_PROBE_TARGET,
+        running: false,
+        results: [],
+        limits: { maxNodes: 256, concurrency: 1, timeoutMs: 3000 },
+      });
+    }
     if (url.pathname === "/api/devices/activity") return activity(url);
     if (url.pathname === "/api/router") {
       const base = ordinary.get(url) as typeof RouterSchema.Type;
@@ -191,6 +210,7 @@ export function createScaleFixture(now = Date.now()) {
 }
 
 export async function installScaleFixture(page: Page, baseURL: string) {
+  await installSnapshotStreamFixture(page);
   const origin = new URL(baseURL).origin;
   const source = createScaleFixture();
   const reads: string[] = [];

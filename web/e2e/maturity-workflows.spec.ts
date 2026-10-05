@@ -87,7 +87,8 @@ test.describe("maturity workflows · synthetic source fixture", () => {
     await expect(rows.nth(0).locator("th, td").nth(3)).toHaveText("—");
     await expect(rows.nth(0).locator("th, td").nth(4)).toHaveText("—");
     await expect(rows.nth(0)).toContainText("未采样");
-    await expect(rows.nth(1).locator("th, td").nth(3)).toHaveText("1200");
+    await expect(rows.nth(1).locator("th, td").nth(3)).toHaveText("1.2 KB");
+    await expect(rows.nth(1).locator("th, td").nth(4)).toHaveText("600 B");
     await expect(rows.nth(1)).toContainText("部分采样");
     await heatmap.getByLabel("字节方向", { exact: true }).selectOption("rx");
     const before = readCount(fixture, "/api/proxy/request-traces");
@@ -269,6 +270,10 @@ test.describe("maturity workflows · synthetic source fixture", () => {
   }) => {
     const fixture = await apiFixture(page, baseURL);
     await page.goto("/#/proxy");
+    await page
+      .locator("summary")
+      .filter({ hasText: /^高级设置与诊断$/ })
+      .click();
     await page.getByRole("tab", { name: "网络诊断", exact: true }).click();
     const run = page.getByRole("button", { name: "发起诊断测试", exact: true });
     await expect(run).toBeEnabled();

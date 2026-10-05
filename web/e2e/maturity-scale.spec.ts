@@ -28,9 +28,18 @@ const expectReadOnly = (fixture: Fixture) => {
   expect(fixture.unexpected).toEqual([]);
   expect(fixture.writes).toEqual([]);
   expect(fixture.browserUBus).toEqual([]);
+  // The gateway card now observes these exact passive snapshots, never query-driven probes.
+  expect(
+    fixture.reads.filter(
+      (read) =>
+        /^\/api\/proxy\/(?:capture|node-probes)(?:[/?]|$)/.test(read) &&
+        read !== "/api/proxy/capture" &&
+        read !== "/api/proxy/node-probes",
+    ),
+  ).toEqual([]);
   expect(
     fixture.reads.some((read) =>
-      /\/api\/(?:proxy\/(?:capture|request-traces|probe)|system\/services)/.test(
+      /\/api\/(?:proxy\/(?:request-traces|probe)(?:[/?]|$)|system\/services)/.test(
         read,
       ),
     ),
@@ -70,6 +79,9 @@ const expectBaseline = async (
 ) => {
   const trend = detail.getByRole("region", { name: title, exact: true });
   await expect(trend).toContainText("缺测与重置保持空隙，不补零");
+  // The chart host must enter the viewport before its lazy EChart initializes.
+  await trend.locator(".viz-canvas").scrollIntoViewIfNeeded();
+  await expect(trend.locator("canvas")).toHaveCount(1);
   const table = trend.locator(".viz-table-details");
   const rows = table.locator("tbody tr");
   const total = 288 * deviceNumbers.length;
@@ -91,19 +103,27 @@ const expectBaseline = async (
     previous += 1
   )
     await pager.getByLabel(`${title} 数据表上一页`, { exact: true }).click();
+  // Display values use decimal byte units, while rates in this fixture stay below 1 KB/s.
+  // Keep this expected projection independent of the product formatter.
+  const byteText = (bytes: number | null) =>
+    bytes === null
+      ? "—"
+      : bytes < 1000
+        ? `${bytes} B`
+        : `${Number((bytes / 1000).toFixed(2))} KB`;
   const expected = deviceNumbers.flatMap((number) =>
     fixture.allDevices[number - 1].samples.map((sample) => [
       scaleDeviceName(number),
       scaleDeviceMAC(number),
-      sample.rxBytes === null ? "缺测" : String(sample.rxBytes),
-      sample.txBytes === null ? "缺测" : String(sample.txBytes),
+      byteText(sample.rxBytes),
+      byteText(sample.txBytes),
       String(sample.coverageSeconds),
       sample.rxBytes === null || sample.coverageSeconds === 0
         ? "—"
-        : String(sample.rxBytes / sample.coverageSeconds),
+        : `${sample.rxBytes / sample.coverageSeconds} B/s`,
       sample.txBytes === null || sample.coverageSeconds === 0
         ? "—"
-        : String(sample.txBytes / sample.coverageSeconds),
+        : `${sample.txBytes / sample.coverageSeconds} B/s`,
     ]),
   );
   const observed: string[][] = [];
@@ -156,6 +176,11 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
   }) => {
     const fixture = await install(page, baseURL);
     await page.goto("/#/proxy");
+    // The picker mounts only after the user opens its disclosure.
+    await page
+      .locator("summary")
+      .filter({ hasText: /^更换节点$/ })
+      .click();
     const selector = page.locator(".node-selector");
     const cards = selector.locator(".node-selector-card");
     const summary = selector.getByRole("region", {
@@ -172,7 +197,7 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
     await expect(cards).toHaveCount(20);
     await expect(summary).toContainText("与当前配置一致");
     await expect(
-      summary.getByRole("button", { name: "保存节点配置", exact: true }),
+      summary.getByRole("button", { name: "保存配置", exact: true }),
     ).toBeEnabled();
     await expect(
       selector.getByLabel(`选择节点 ${scaleNodeLabel(1)}`, { exact: true }),
@@ -262,6 +287,8 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
     page,
     baseURL,
   }) => {
+    // Two complete 288-record paging journeys plus server-side name/MAC search.
+    test.setTimeout(60_000);
     const fixture = await install(page, baseURL);
     await page.goto("/#/devices");
     const workspace = page.locator(".device-workspace");
@@ -347,6 +374,9 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
     page,
     baseURL,
   }) => {
+    // This journey visits every row of 2x288 and 8x288 buckets twice.
+    // Its per-case budget includes real 23-page user navigation, not API latency.
+    test.setTimeout(90_000);
     const fixture = await install(page, baseURL);
     await page.goto("/#/devices");
     const workspace = page.locator(".device-workspace");

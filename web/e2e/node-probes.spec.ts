@@ -37,9 +37,18 @@ const expectWrites = (
   expect(fixture.writes).toEqual(expected);
   expect(fixture.unconsumed()).toBeUndefined();
   expect(fixture.nodes().selectedNodeId).toBe(probeNodeID(1));
+  // The compact gateway card observes canonical inactive capture and probe snapshots.
+  expect(
+    fixture.reads.filter(
+      (read) =>
+        /^\/api\/proxy\/(?:capture|node-probes)(?:[/?]|$)/.test(read) &&
+        read !== "/api/proxy/capture" &&
+        read !== PROBE_PATH,
+    ),
+  ).toEqual([]);
   expect(
     fixture.reads.filter((read) =>
-      /\/api\/(?:proxy\/(?:capture|request-traces|metrics|probe)(?:[/?]|$)|system\/services)/.test(
+      /\/api\/(?:proxy\/(?:request-traces|metrics|probe)(?:[/?]|$)|system\/services)/.test(
         read,
       ),
     ),
@@ -107,7 +116,7 @@ const expectSelected = async (selector: Locator) => {
     summary.locator(".node-selector-node-summary").last(),
   ).toContainText(probeNodeLabel(1));
   await expect(
-    summary.getByRole("button", { name: "保存节点配置", exact: true }),
+    summary.getByRole("button", { name: "保存配置", exact: true }),
   ).toBeEnabled();
 };
 const refresh = async (controls: Locator, fixture: Fixture) => {
@@ -138,6 +147,10 @@ test.describe("one-click node probes · isolated220-node browser acceptance", ()
   }) => {
     const fixture = await install(page, baseURL);
     await page.goto("/#/proxy");
+    await page
+      .locator("summary")
+      .filter({ hasText: /^更换节点$/ })
+      .click();
     const selector = page.locator(".node-selector");
     const controls = selector.getByRole("region", {
       name: "节点延迟测速",
@@ -294,6 +307,10 @@ test.describe("one-click node probes · isolated220-node browser acceptance", ()
   }) => {
     const fixture = await install(page, baseURL, true);
     await page.goto("/#/proxy");
+    await page
+      .locator("summary")
+      .filter({ hasText: /^更换节点$/ })
+      .click();
     const selector = page.locator(".node-selector");
     const controls = selector.getByRole("region", {
       name: "节点延迟测速",
@@ -369,6 +386,11 @@ test.describe("one-click node probes · isolated220-node browser acceptance", ()
 
     const nodeReads = readCount(fixture, "/api/proxy/nodes");
     fixture.setNodesRevision("fixture-node-probes-revision-2");
+    // This GET-only action is in the separate advanced disclosure, not the picker.
+    await page
+      .locator("summary")
+      .filter({ hasText: /^高级设置与诊断$/ })
+      .click();
     await page
       .getByRole("button", { name: "刷新代理状态", exact: true })
       .click();
