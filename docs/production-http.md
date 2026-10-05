@@ -1,7 +1,7 @@
 # Production HTTP integration
 
 The full native product uses the existing authenticated API and static browser
-tree. `rust/panel/src/server.rs` and `server_loop.rs` own HTTP admission and the
+tree. `src/server.rs` and `server_loop.rs` own HTTP admission and the
 single native-owner lane. `product_gateway.rs` assembles the management modules;
 `runtime_http.rs`, `rules_http.rs` and `capture_http.rs` use that same owner.
 There is no second management server, per-HTTP-client thread or Tokio runtime.
@@ -60,4 +60,4 @@ The former Go `RuntimeDataDir` / `EnableControl` integration seam and
 reference only. Their frozen implementation remains in `mature-integration`
 outside this tree. Current ownership is in the Rust paths above. Project Go
 source is retired; all four golden compatibility JSON files in
-`rust/panel/tests/fixtures/` remain. Build/test tooling is Rust and Bun only.
+`tests/fixtures/` remain. Build/test tooling is Rust and Bun only.

@@ -2,7 +2,7 @@
 .NOTPARALLEL:
 
 CARGO ?= cargo
-CARGO_MANIFEST := rust/panel/Cargo.toml
+CARGO_MANIFEST := Cargo.toml
 RUST_TARGET_DIR ?= $(CURDIR)/.build/rust
 export CARGO_TARGET_DIR := $(RUST_TARGET_DIR)
 export CARGO_BUILD_JOBS := 1

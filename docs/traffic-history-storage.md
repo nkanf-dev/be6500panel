@@ -1,6 +1,6 @@
 # WAN traffic history storage
 
-`rust/panel/src/product_telemetry.rs` records one real WAN series and preserves
+`src/product_telemetry.rs` records one real WAN series and preserves
 the WANRING disk layout. `product_gateway.rs` owns one telemetry instance;
 `server_loop.rs` invokes cooperative ticks on the single native-owner lane,
 nominally once per second. Long requests can delay ticks. There is no independent
@@ -28,7 +28,7 @@ silently relabeled as persistent RAM history.
 The former `internal/traffic`, `router.NewWANSource`, `traffic.Options`,
 `Start(ctx)` and `httpapi.TrafficHistory` names are historical/reference-only in
 the frozen `mature-integration` tree outside this tree. Project Go source is
-retired. Keep all four golden JSON fixtures in `rust/panel/tests/fixtures/`.
+retired. Keep all four golden JSON fixtures in `tests/fixtures/`.
 
 ## Measurement rules
 
@@ -138,7 +138,7 @@ fresh recording can start.
 
 ## Verification
 
-Current Rust coverage is in `rust/panel/tests/product_telemetry.rs` and the
+Current Rust coverage is in `tests/product_telemetry.rs` and the
 module-local telemetry tests. It covers compatible ring layout/readback,
 counter totals and gaps, tier/query bounds, persistence/corruption and visible
 source/storage failures. The old Go traffic/httpapi test, race, vet and Go ARM

@@ -8,7 +8,7 @@ For sing-box, `GPL-3.0-or-later` notices and fixed source/build recipe accompany
 
 ## Native artifact admission
 
-`rust/panel/src/artifact_source.rs`, `artifact_http.rs`, `artifact_stage.rs` and
+`src/artifact_source.rs`, `artifact_http.rs`, `artifact_stage.rs` and
 `runtime_bindings.rs` own bounded native acquisition and release admission.
 Certificate verification, artifact size bounds and SHA256 checks remain required.
 No TLS verification is disabled. Acquisition uses the existing authenticated
@@ -23,6 +23,6 @@ commands. FRPC is currently unconfigured; no external tunnel is claimed.
 The old Go deployment flag `--artifact-transport curl` and its stock-curl budgets
 are historical reference only in the frozen `mature-integration` tree outside this
 tree. They are not Rust CLI options. Go project source is retired; the four
-Go-derived golden JSON fixtures under `rust/panel/tests/fixtures/` remain required
+Go-derived golden JSON fixtures under `tests/fixtures/` remain required
 compatibility evidence. Shared Cargo output stays in `.build/rust`, serialized
 with one build job.

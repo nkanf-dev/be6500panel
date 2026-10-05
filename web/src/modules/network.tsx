@@ -94,7 +94,7 @@ export function NetworkPage() {
             <Panel>
               <PanelHeader
                 title="网络接口"
-                subtitle="当前宿主 · Go net observation"
+                subtitle="当前宿主 · 原生网络观察"
                 action={<Badge>{interfaces.length} 个接口</Badge>}
               />
               {loading && !data ? (

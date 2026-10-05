@@ -8,7 +8,7 @@ Its original Go source paths, timings, RAM figures and test results below are
 `mature-integration` tree outside this tree remains the reference; project Go
 source (`cmd/`, Go files under `internal/`, `go.mod`, `go.sum`) is retired.
 
-Current production source is `rust/panel/src/`:
+Current production source is `src/`:
 
 | Historical source | Current native source |
 | --- | --- |
@@ -22,7 +22,7 @@ The native owner lane invokes cooperative ticks without HTTP client threads or
 Tokio. It preserves WANRING layout, range contracts and device annotation format;
 it does not retain the old Go worker/RAM implementation. No year of observations
 is created by migration. All four Go-derived golden JSON fixtures under
-`rust/panel/tests/fixtures/` remain required compatibility evidence.
+`tests/fixtures/` remain required compatibility evidence.
 
 ## Historical range-extension scope
 
@@ -244,7 +244,7 @@ fills 405 simulated days, exercises all ring capacities/wrap-around, verifies
 This is retention-capacity evidence, not proof that the live router has already
 collected a year's history. Restart, corruption, coverage and storage failure
 checks from that reference are historical evidence; current Rust coverage is in
-`rust/panel/tests/product_telemetry.rs` and the module-local telemetry tests.
+`tests/product_telemetry.rs` and the module-local telemetry tests.
 
 Frontend range tests cover exact order/seconds/labels, Effect schema decoding,
 all GET range requests, automatic selector options, a single 24-hour label,
@@ -259,7 +259,7 @@ make test
 ```
 
 Cargo output is shared in `.build/rust`, serialized with one build job. Scoped
-traffic tests now live in `rust/panel/tests/product_telemetry.rs`; frontend range
+traffic tests now live in `tests/product_telemetry.rs`; frontend range
 coverage remains under `web/src/lib/traffic-history-api.test.ts` and
 `web/src/components/traffic-history/`. Go test/race/vet commands from the original
 batch are not project verification commands.
