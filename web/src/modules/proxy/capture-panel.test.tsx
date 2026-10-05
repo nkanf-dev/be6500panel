@@ -253,7 +253,7 @@ describe("observed device capture", () => {
     );
     expect(mutations("POST")).toHaveLength(1);
     expect(
-      screen.getByText(/接管规则已生效（不代表互联网连通性已验证）/),
+      screen.getByText(/接管规则已生效/),
     ).toBeInTheDocument();
   });
   it("invalidates confirmation when selection, policy, restore or refresh changes", async () => {
@@ -595,7 +595,7 @@ describe("saved versus live capture", () => {
     await ready();
     expect(screen.getByText("部分已生效")).toBeInTheDocument();
     expect(
-      screen.getByText(/仅已解析设备的接管规则已生效；其余设备等待当前地址/),
+      screen.getByText(/已解析设备的接管规则已生效，其余设备等待地址更新/),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/未解析设备不会接管，也不会使用过期 IP/),
@@ -918,5 +918,24 @@ describe("device observation failures", () => {
       screen.getByRole("region", { name: "已保存的接管选择" }),
     ).toHaveTextContent("192.0.2.31");
     expect(screen.queryByText(/实时规则已生效/)).not.toBeInTheDocument();
+  });
+});
+
+describe("truthful current capture display", () => {
+  it("shows a normal inactive capture as stopped without an uncertainty message", async () => {
+    setup({capture:{...initialCapture,state:"inactive",scopeState:"current"}});
+    await ready();
+    expect(screen.getByText(/实时接管：已停用/)).toBeInTheDocument();
+    expect(screen.queryByText(/实时接管：未确认生效/)).not.toBeInTheDocument();
+  });
+  it.each([
+    {state:"unknown",error:undefined,cleanupPending:false},
+    {state:"inactive",error:"capture_observation_failed",cleanupPending:false},
+    {state:"inactive",error:undefined,cleanupPending:true},
+  ])("does not call an unresolved or failed capture stopped: %j", async (status) => {
+    setup({capture:{...initialCapture,...status}});
+    await ready();
+    expect(screen.getByText(/实时接管：未确认生效/)).toBeInTheDocument();
+    expect(screen.queryByText(/实时接管：已停用/)).not.toBeInTheDocument();
   });
 });

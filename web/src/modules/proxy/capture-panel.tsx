@@ -304,12 +304,14 @@ export function CapturePanel({
             : capture?.active &&
                 !capture.cleanupPending &&
                 capture.state === "partial"
-              ? "仅已解析设备的接管规则已生效；其余设备等待当前地址（不代表互联网连通性已验证）"
+              ? "已解析设备的接管规则已生效，其余设备等待地址更新"
               : capture?.active && !capture.cleanupPending && !capture.error
-                ? "接管规则已生效（不代表互联网连通性已验证）"
-                : capture
-                  ? "未确认生效"
-                  : "状态未知"}
+                ? "接管规则已生效"
+                : capture?.state === "inactive" && !capture.cleanupPending && !capture.error
+                  ? "已停用"
+                  : capture
+                    ? "未确认生效"
+                    : "状态未知"}
         </p>
         {capture?.state === "scope-changed" &&
         capture.installedClients?.length ? (
