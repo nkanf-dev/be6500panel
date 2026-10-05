@@ -6,6 +6,8 @@ RUN_DIR=${BE6500PANEL_RUN_DIR:-/tmp/be6500panel}
 ARCHIVE="$DATA_DIR/panel.tar.gz"
 PID_FILE="$RUN_DIR/panel.pid"
 mkdir -p "$RUN_DIR"
+exec 9>"$RUN_DIR/.bootstrap.lock"
+flock -n 9 || exit 0
 if [ -f "$PID_FILE" ]; then
     pid=$(cat "$PID_FILE")
     if [ -r "/proc/$pid/comm" ]; then
@@ -38,5 +40,5 @@ chmod 600 "$RUN_DIR/native-bindings.json"
 mkdir -p "$RUN_DIR/native-run"
 chmod 700 "$RUN_DIR/native-run"
 trap '' HUP
-"$candidate/be6500-panel" --native-runtime --listen 192.168.31.1:8787 --web-dir "$candidate/web" --data-dir "$DATA_DIR" --run-dir "$RUN_DIR/native-run" --command-manifest "$RUN_DIR/native-bindings.json" </dev/null >"$RUN_DIR/panel.log" 2>&1 &
+"$candidate/be6500-panel" --native-runtime --listen 192.168.31.1:8787 --web-dir "$candidate/web" --data-dir "$DATA_DIR" --run-dir "$RUN_DIR/native-run" --command-manifest "$RUN_DIR/native-bindings.json" 9>&- </dev/null >"$RUN_DIR/panel.log" 2>&1 &
 printf '%s\n' "$!" >"$PID_FILE"
