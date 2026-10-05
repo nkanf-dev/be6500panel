@@ -291,7 +291,8 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
     baseURL,
   }) => {
     // Two complete 288-record paging journeys plus server-side name/MAC search.
-    test.setTimeout(60_000);
+    // CI's shared runner needs more time for the exhaustive rendered history.
+    test.setTimeout(process.env.CI ? 180_000 : 60_000);
     const fixture = await install(page, baseURL);
     await page.goto("/#/devices");
     const workspace = page.locator(".device-workspace");
@@ -379,7 +380,8 @@ test.describe("modern scale · 220 nodes / 128 retained trafficd identities", ()
   }) => {
     // This journey visits every row of 2x288 and 8x288 buckets twice.
     // Its per-case budget includes real 23-page user navigation, not API latency.
-    test.setTimeout(90_000);
+    // Preserve all 2304 source-record assertions on slower shared CI CPUs.
+    test.setTimeout(process.env.CI ? 300_000 : 90_000);
     const fixture = await install(page, baseURL);
     await page.goto("/#/devices");
     const workspace = page.locator(".device-workspace");
