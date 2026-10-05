@@ -850,3 +850,23 @@ fn fixed_frpc_identity_can_be_rechecked_but_never_authorizes_tun_resources() {
         Err(TunError::IdentityChanged)
     );
 }
+
+#[test]
+fn unrelated_vendor_control_interface_with_zero_mtu_is_observed_not_rejected() {
+    let target = native_target(CONFIG.as_bytes()).unwrap().unwrap();
+    let vendor = Interface {
+        name: "miireg".into(),
+        up: false,
+        mtu: 0,
+        addresses: vec![],
+    };
+    assert!(check_prestart_interfaces(&target, std::slice::from_ref(&vendor)).is_ok());
+    let same_name = Interface {
+        name: target.interface_name().to_owned(),
+        ..vendor
+    };
+    assert_eq!(
+        check_prestart_interfaces(&target, &[same_name]),
+        Err(TunError::Collision)
+    );
+}

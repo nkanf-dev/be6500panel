@@ -1200,7 +1200,9 @@ fn native_interfaces(b: &Budget<'_>) -> Result<Vec<Interface>, TunError> {
                 return Err(TunError::Unavailable);
             }
             let mtu = unsafe { req.ifr_ifru.ifru_mtu };
-            if mtu <= 0 {
+            // Vendor control interfaces can report MTU 0. Keep their names
+            // and addresses for collision checks; owned TUN requires 1500 below.
+            if mtu < 0 {
                 return Err(TunError::Interface);
             }
             map.insert(
