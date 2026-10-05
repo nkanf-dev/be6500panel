@@ -445,6 +445,7 @@ impl FileIdentity {
             changed: (m.ctime(), m.ctime_nsec()),
         }
     }
+    #[allow(clippy::useless_conversion)] // mode_t is u16 on Darwin and u32 on Linux/ARM.
     fn private_file(self) -> bool {
         self.mode & u32::from(libc::S_IFMT) == u32::from(libc::S_IFREG)
             && self.mode & 0o7777 == 0o700
@@ -454,6 +455,7 @@ impl FileIdentity {
             && self.size > 0
             && self.size <= 40 << 20
     }
+    #[allow(clippy::useless_conversion)] // mode_t is u16 on Darwin and u32 on Linux/ARM.
     fn private_directory(self) -> bool {
         self.mode & u32::from(libc::S_IFMT) == u32::from(libc::S_IFDIR)
             && self.mode & 0o7777 == 0o700

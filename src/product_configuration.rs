@@ -413,7 +413,9 @@ impl Directory {
         // libc statvfs widths differ on ARM32 and Darwin.
         #[allow(clippy::unnecessary_cast)]
         let block = stat.f_frsize as u64;
-        Ok((stat.f_bavail as u64).saturating_mul(block))
+        #[allow(clippy::unnecessary_cast)] // libc word width differs on ARM32/Darwin/Linux.
+        let available = stat.f_bavail as u64;
+        Ok(available.saturating_mul(block))
     }
     fn admit(&self, size: u64) -> Result<(), ApiError> {
         if self.free()? < FREE_HEADROOM_BYTES.saturating_add(size) {

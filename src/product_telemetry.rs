@@ -176,6 +176,7 @@ fn admit(dir: &Path, growth: u64) -> Result<(), ApiError> {
     let stat = unsafe { stat.assume_init() };
     #[allow(clippy::unnecessary_cast)] // ARM32 statvfs word, Darwin u64.
     let block = (stat.f_frsize as u64).max(1);
+    #[allow(clippy::unnecessary_cast)] // libc word width differs on ARM32/Darwin/Linux.
     let free = (stat.f_bavail as u64)
         .checked_mul(block)
         .ok_or_else(storage)?;
