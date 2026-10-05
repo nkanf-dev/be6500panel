@@ -21,6 +21,7 @@ pub enum Program {
     Ip6tables,
     Service,
     Curl,
+    Vendor,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -183,6 +184,22 @@ fn selector(program: Program, args: &[String]) -> Result<(PathBuf, &[String]), E
         Program::Iptables => "/usr/sbin/iptables",
         Program::Ip6tables => "/usr/sbin/ip6tables",
         Program::Curl => "/usr/bin/curl",
+        Program::Vendor => {
+            if args.len() != 2
+                || !matches!(
+                    args[0].as_str(),
+                    "xqnetwork" | "xqsystem" | "misystem" | "misns" | "anti_attack" | "sysutil"
+                )
+                || args[1].is_empty()
+                || args[1].len() > 64
+                || !args[1]
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            {
+                return Err(Error::Invalid);
+            }
+            "/usr/bin/lua"
+        }
         Program::Service => {
             let name = args.first().ok_or(Error::Invalid)?;
             if name.is_empty()
@@ -192,6 +209,39 @@ fn selector(program: Program, args: &[String]) -> Result<(PathBuf, &[String]), E
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
             {
                 return Err(Error::Invalid);
+            }
+            if name == "parentalctl" {
+                if args.len() != 2 || args[1] != "apply" {
+                    return Err(Error::Invalid);
+                }
+                return Ok((PathBuf::from("/usr/sbin/parentalctl.sh"), &args[2..]));
+            }
+            if name == "led_ctl" {
+                let rest = &args[1..];
+                let group = |s: &str| matches!(s, "xled" | "ethled");
+                let valid = match rest.first().map(String::as_str) {
+                    Some("led_on" | "led_off" | "timer_off") => {
+                        rest.len() == 1 || (rest.len() == 2 && group(&rest[1]))
+                    }
+                    Some("event_toggle") => {
+                        rest.len() == 2 && matches!(rest[1].as_str(), "0" | "1")
+                    }
+                    Some("timer_on") => {
+                        matches!(rest.len(), 5 | 6)
+                            && rest[1..5].iter().enumerate().all(|(i, s)| {
+                                s.len() <= 2
+                                    && s.bytes().all(|b| b.is_ascii_digit())
+                                    && s.parse::<u8>()
+                                        .is_ok_and(|n| n <= if i % 2 == 0 { 23 } else { 59 })
+                            })
+                            && (rest.len() == 5 || group(&rest[5]))
+                    }
+                    _ => false,
+                };
+                if !valid {
+                    return Err(Error::Invalid);
+                }
+                return Ok((PathBuf::from("/usr/sbin/led_ctl"), rest));
             }
             if args.len() != 2
                 || !matches!(
@@ -211,6 +261,8 @@ fn selector(program: Program, args: &[String]) -> Result<(PathBuf, &[String]), E
             return Ok((
                 if name == "wifi" {
                     PathBuf::from("/sbin/wifi")
+                } else if name == "port_service" && args[1] == "restart" {
+                    PathBuf::from("/usr/sbin/port_service")
                 } else {
                     Path::new("/etc/init.d").join(name)
                 },
@@ -309,6 +361,14 @@ impl Backend for Native {
         }
         let (path, args) = selector(program, args)?;
         let mut command = Command::new(path);
+        if program == Program::Vendor {
+            let executable = std::env::current_exe().map_err(native_error)?;
+            let bridge = executable
+                .parent()
+                .ok_or(Error::Invalid)?
+                .join("router-native.lua");
+            command.arg(bridge);
+        }
         command
             .args(args)
             .stdin(if stdin.is_some() {

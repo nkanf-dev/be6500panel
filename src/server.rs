@@ -167,6 +167,21 @@ impl Service {
         )));
         self
     }
+    pub fn set_management_listener(&self, address: std::net::SocketAddr) {
+        if let Some(product) = &self.product
+            && let Ok(mut product) = product.lock()
+        {
+            product.set_management_listener(address);
+        }
+    }
+    pub(crate) fn management_rebind_address(&self) -> Option<std::net::SocketAddr> {
+        self.product.as_ref().and_then(|product| {
+            product
+                .lock()
+                .ok()
+                .and_then(|product| product.management_rebind_address())
+        })
+    }
     pub(crate) fn product_tick(&self, mut runtime: Option<&mut crate::runtime_http::RuntimeHttp>) {
         if let Some(product) = &self.product
             && let Ok(mut product) = product.lock()

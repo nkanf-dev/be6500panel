@@ -27,7 +27,7 @@ fn exchange(address: std::net::SocketAddr, request: &[u8]) -> Vec<u8> {
 }
 #[test]
 fn diagnostic_loop_keeps_exact_health_body_and_cancels_without_scheduler() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let cancel = Arc::new(AtomicBool::new(false));
     let stop = cancel.clone();
@@ -52,19 +52,19 @@ fn diagnostic_loop_keeps_exact_health_body_and_cancels_without_scheduler() {
     });
     let service = Service::new("/proc".into());
     let started = Instant::now();
-    serve(&listener, &service, None, &cancel).unwrap();
+    serve(&mut listener, &service, None, &cancel).unwrap();
     caller.join().unwrap();
     assert!(started.elapsed() < Duration::from_secs(2));
 }
 #[test]
 fn nonloopback_listener_needs_auth_before_any_request() {
-    let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+    let mut listener = TcpListener::bind("0.0.0.0:0").unwrap();
     let cancel = AtomicBool::new(true);
     let service = Service::new("/proc".into());
     assert_eq!(
-        serve(&listener, &service, None, &cancel),
+        serve(&mut listener, &service, None, &cancel),
         Err(LoopError::Authentication)
     );
     let authenticated = Service::new("/proc".into()).with_auth(Auth::new("test-only"));
-    assert_eq!(serve(&listener, &authenticated, None, &cancel), Ok(()));
+    assert_eq!(serve(&mut listener, &authenticated, None, &cancel), Ok(()));
 }

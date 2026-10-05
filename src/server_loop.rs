@@ -4,7 +4,7 @@
 use crate::{runtime_http::RuntimeHttp, runtime_manager::ManagerError, server::Service};
 use std::{
     fmt, io,
-    net::TcpListener,
+    net::{SocketAddr, TcpListener},
     os::fd::AsRawFd,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
@@ -39,11 +39,29 @@ fn close(
     }
     result
 }
+/// The caller owns one listener throughout serve and any cleanup retries.
+/// The old FD is dropped only after the new exact-address bind is ready.
+fn rebind(listener: &mut TcpListener, target: SocketAddr) -> io::Result<()> {
+    let current = listener.local_addr()?;
+    if target.ip().is_unspecified() || target.port() != current.port() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid management bind",
+        ));
+    }
+    if target == current {
+        return Ok(());
+    }
+    let next = TcpListener::bind(target)?;
+    next.set_nonblocking(true)?;
+    *listener = next;
+    Ok(())
+}
 /// Does not restore startup intent. The caller explicitly loads/restores the
 /// existing owned runtime before serving; recovery ticks are not GET effects.
 /// A non-loopback listener and every attached owner require nonempty auth.
 pub fn serve(
-    listener: &TcpListener,
+    listener: &mut TcpListener,
     service: &Service,
     mut runtime: Option<&mut RuntimeHttp>,
     cancel: &AtomicBool,
@@ -58,6 +76,7 @@ pub fn serve(
     if listener.set_nonblocking(true).is_err() {
         return close(&mut runtime, Err(LoopError::Listener));
     }
+    service.set_management_listener(address);
     let mut next_recovery = Instant::now() + RECOVERY_INTERVAL;
     loop {
         if stopped(cancel) {
@@ -70,6 +89,15 @@ pub fn serve(
                 let _ = owner.poll_recovery(now);
             }
             service.product_tick(runtime.as_deref_mut());
+            if service.authentication_required()
+                && let Some(target) = service.management_rebind_address()
+            {
+                // Bind failure is a retryable management-path problem, not a
+                // runtime shutdown. Keep serving the old listener and owner.
+                if rebind(listener, target).is_ok() {
+                    service.set_management_listener(target);
+                }
+            }
             next_recovery = Instant::now() + RECOVERY_INTERVAL;
         }
         if stopped(cancel) {
@@ -187,5 +215,55 @@ pub fn serve_cleanup(
         if runtime.cleanup_sequence() != cleanup_sequence {
             return Ok(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpStream;
+
+    #[test]
+    fn rebind_same_process_keeps_port_and_closes_old_listener_only_after_success() {
+        let mut listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let old = listener.local_addr().unwrap();
+        let next = SocketAddr::new("::1".parse().unwrap(), old.port());
+        rebind(&mut listener, next).unwrap();
+        assert_eq!(listener.local_addr().unwrap(), next);
+        assert!(TcpStream::connect(next).is_ok());
+        assert!(TcpStream::connect(old).is_err());
+        // A free old address proves the old FD was dropped, not held by a clone.
+        let old_again = TcpListener::bind(old).unwrap();
+        assert_eq!(old_again.local_addr().unwrap(), old);
+    }
+
+    #[test]
+    fn busy_rebind_keeps_old_entry_and_can_retry_without_shutdown() {
+        let mut listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let old = listener.local_addr().unwrap();
+        let next = SocketAddr::new("::1".parse().unwrap(), old.port());
+        let busy = TcpListener::bind(next).unwrap();
+        assert!(rebind(&mut listener, next).is_err());
+        assert_eq!(listener.local_addr().unwrap(), old);
+        assert!(TcpStream::connect(old).is_ok());
+        drop(busy);
+        rebind(&mut listener, next).unwrap();
+        assert_eq!(listener.local_addr().unwrap(), next);
+        assert!(TcpStream::connect(next).is_ok());
+    }
+
+    #[test]
+    fn rebind_never_widens_to_wildcard_or_changes_port() {
+        let mut listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let old = listener.local_addr().unwrap();
+        assert!(
+            rebind(
+                &mut listener,
+                SocketAddr::new("0.0.0.0".parse().unwrap(), old.port())
+            )
+            .is_err()
+        );
+        assert!(rebind(&mut listener, SocketAddr::new(old.ip(), 0)).is_err());
+        assert_eq!(listener.local_addr().unwrap(), old);
     }
 }

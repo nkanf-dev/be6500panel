@@ -39,6 +39,10 @@ fi
 chmod 600 "$RUN_DIR/native-bindings.json"
 mkdir -p "$RUN_DIR/native-run"
 chmod 700 "$RUN_DIR/native-run"
+# Use the LAN bridge's current address, including upstream DHCP in AP mode.
+lan_ip=$(/usr/sbin/ip -4 -o address show dev br-lan scope global | awk '{split($4,a,"/"); print a[1]; exit}')
+[ -n "$lan_ip" ] || lan_ip=$(/sbin/uci -q get network.lan.ipaddr)
+[ -n "$lan_ip" ] || exit 1
 trap '' HUP
-"$candidate/be6500-panel" --native-runtime --listen 192.168.31.1:8787 --web-dir "$candidate/web" --data-dir "$DATA_DIR" --run-dir "$RUN_DIR/native-run" --command-manifest "$RUN_DIR/native-bindings.json" 9>&- </dev/null >"$RUN_DIR/panel.log" 2>&1 &
+"$candidate/be6500-panel" --native-runtime --listen "$lan_ip:8787" --web-dir "$candidate/web" --data-dir "$DATA_DIR" --run-dir "$RUN_DIR/native-run" --command-manifest "$RUN_DIR/native-bindings.json" 9>&- </dev/null >"$RUN_DIR/panel.log" 2>&1 &
 printf '%s\n' "$!" >"$PID_FILE"

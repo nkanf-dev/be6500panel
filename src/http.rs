@@ -212,6 +212,14 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
     if method == Method::Post
         && !matches!(
             request.path(),
+            "/api/features/network/apply"
+                | "/api/features/wireless/apply"
+                | "/api/features/services/apply"
+                | "/api/features/confirm"
+                | "/api/features/rollback"
+        )
+        && !matches!(
+            request.path(),
             "/api/session/login"
                 | "/api/session/logout"
                 | "/api/proxy/local-rules"

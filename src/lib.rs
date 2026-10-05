@@ -79,3 +79,17 @@ pub mod static_files;
 pub mod subscription;
 #[cfg(unix)]
 pub mod subscription_store;
+
+pub mod features;
+
+pub mod features_gateway;
+
+pub mod features_network;
+
+pub mod features_wireless;
+
+pub mod features_services;
+
+pub mod features_maintenance;
+
+pub mod features_recovery;

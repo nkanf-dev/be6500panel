@@ -142,7 +142,7 @@ fn run(options: Options) -> Result<(), &'static str> {
         None
     };
     // Busy/invalid listener never performs startup cleanup or saved-on restore.
-    let listener = TcpListener::bind(options.listen).map_err(|_| "listener unavailable")?;
+    let mut listener = TcpListener::bind(options.listen).map_err(|_| "listener unavailable")?;
     let _signals = be6500_panel::shutdown::SignalGuard::install()
         .map_err(|_| "shutdown signal setup unavailable")?;
     if let Some(bindings) = bindings {
@@ -169,11 +169,12 @@ fn run(options: Options) -> Result<(), &'static str> {
         )
         .map_err(|_| "native owner unavailable")?;
         service = service.with_product_data_dir(&product_data, &product_run);
+        service.set_management_listener(options.listen);
         if owner.initialize().is_err() {
             eprintln!("be6500-panel: native startup recovery pending");
         }
         let served = be6500_panel::server_loop::serve(
-            &listener,
+            &mut listener,
             &service,
             Some(owner.runtime_mut()),
             be6500_panel::shutdown::flag(),
@@ -218,8 +219,13 @@ fn run(options: Options) -> Result<(), &'static str> {
             Err(_) => Err("listener failed"),
         }
     } else {
-        be6500_panel::server_loop::serve(&listener, &service, None, be6500_panel::shutdown::flag())
-            .map_err(|_| "listener failed")
+        be6500_panel::server_loop::serve(
+            &mut listener,
+            &service,
+            None,
+            be6500_panel::shutdown::flag(),
+        )
+        .map_err(|_| "listener failed")
     }
 }
 

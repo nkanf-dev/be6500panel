@@ -79,6 +79,7 @@ pub struct Product<B = Native> {
     diagnostic_accepted: Option<(u64, u32)>,
     plans: Plans,
     logs: Logs,
+    features: crate::features_gateway::Features,
 }
 impl Product<Native> {
     pub fn open(path: &Path) -> Self {
@@ -124,6 +125,7 @@ impl<B: Backend> Product<B> {
             diagnostic_accepted: None,
             plans: Plans::new(),
             logs: Logs::new(),
+            features: crate::features_gateway::Features::open(path),
         }
     }
     pub fn close(&mut self) -> bool {
@@ -235,6 +237,12 @@ impl<B: Backend> Product<B> {
             }
         }
     }
+    pub fn set_management_listener(&mut self, address: std::net::SocketAddr) {
+        self.features.set_management_listener(address);
+    }
+    pub fn management_rebind_address(&self) -> Option<std::net::SocketAddr> {
+        self.features.management_rebind_address()
+    }
     pub fn now(&self) -> u64 {
         self.io.now_unix()
     }
@@ -245,6 +253,7 @@ impl<B: Backend> Product<B> {
             cancel: &cancel,
         };
         let mut runtime = runtime;
+        self.features.tick(&mut self.io, &budget);
         if let Ok(configuration) = &mut self.configuration {
             let mut before = |_: &mut B, network: bool| {
                 if network && let Some(owner) = runtime.as_deref() {
@@ -358,6 +367,62 @@ impl<B: Backend> Product<B> {
         {
             return Err(unavailable("runtime_shutting_down"));
         }
+        if path.starts_with("/api/features/") {
+            if method == Method::Post {
+                let status = self
+                    .configuration
+                    .as_mut()
+                    .map_err(|e| *e)?
+                    .handle(
+                        "/api/configuration/status",
+                        Method::Get,
+                        "",
+                        b"",
+                        &mut self.io,
+                        budget,
+                    )
+                    .map_err(|e| ApiError {
+                        status: e.status,
+                        code: e.code,
+                        message: e.message,
+                    })?;
+                if status.get("pendingCommit").is_some() || status.get("errorCode").is_some() {
+                    return Err(ApiError {
+                        status: 409,
+                        code: "configuration_pending",
+                        message: "先完成当前配置变更，再修改功能设置。",
+                    });
+                }
+            }
+            let mut before = |impact: crate::features::Impact| {
+                if matches!(
+                    impact,
+                    crate::features::Impact::Network | crate::features::Impact::Wireless
+                ) && let Some(owner) = runtime.as_deref()
+                {
+                    owner
+                        .product_withdraw(Instant::now() + Duration::from_secs(30))
+                        .map_err(|_| crate::features::Error {
+                            status: 409,
+                            code: "capture_cleanup_failed",
+                            message: "接管撤回未完成，请重试。",
+                        })?;
+                }
+                Ok(())
+            };
+            let value = self
+                .features
+                .handle(path, method, query, body, &mut self.io, budget, &mut before)
+                .map_err(|e| ApiError {
+                    status: e.status,
+                    code: e.code,
+                    message: e.message,
+                })?;
+            if method == Method::Post {
+                self.observations.invalidate();
+            }
+            return Ok(Response::Json { status: 200, value });
+        }
         let value = match path {
             "/api/system"
             | "/api/router"
@@ -432,6 +497,19 @@ impl<B: Backend> Product<B> {
                 value
             }
             p if p.starts_with("/api/configuration") => {
+                if method == Method::Post
+                    && matches!(
+                        path,
+                        "/api/configuration/commit" | "/api/configuration/rollback"
+                    )
+                    && self.features.busy()
+                {
+                    return Err(ApiError {
+                        status: 409,
+                        code: "feature_operation_pending",
+                        message: "功能设置正在生效，请稍候再提交配置。",
+                    });
+                }
                 if method == Method::Post {
                     self.observations.invalidate();
                 }
@@ -789,39 +867,40 @@ pub enum Response {
     Backup(Vec<u8>),
 }
 pub fn is_product_path(path: &str) -> bool {
-    matches!(
-        path,
-        "/api/system"
-            | "/api/router"
-            | "/api/network"
-            | "/api/devices"
-            | "/api/frpc"
-            | "/api/modules"
-            | "/api/system/services"
-            | "/api/system/services/action"
-            | "/api/proxy/metrics"
-            | "/api/proxy/probe"
-            | "/api/traffic/history"
-            | "/api/devices/activity"
-            | "/api/devices/annotations"
-            | "/api/proxy/request-traces"
-            | "/api/proxy/node-probes"
-            | "/api/proxy/node-probes/history"
-            | "/api/proxy/plan"
-            | "/api/frpc/plan"
-            | "/api/operations/apply"
-            | "/api/logs"
-            | "/api/maintenance/backup"
-            | "/api/maintenance/import/preview"
-            | "/api/maintenance/import/stage"
-            | "/api/configuration"
-            | "/api/configuration/stage"
-            | "/api/configuration/commit"
-            | "/api/configuration/drafts"
-            | "/api/configuration/confirm"
-            | "/api/configuration/rollback"
-            | "/api/configuration/status"
-    )
+    path.starts_with("/api/features/")
+        || matches!(
+            path,
+            "/api/system"
+                | "/api/router"
+                | "/api/network"
+                | "/api/devices"
+                | "/api/frpc"
+                | "/api/modules"
+                | "/api/system/services"
+                | "/api/system/services/action"
+                | "/api/proxy/metrics"
+                | "/api/proxy/probe"
+                | "/api/traffic/history"
+                | "/api/devices/activity"
+                | "/api/devices/annotations"
+                | "/api/proxy/request-traces"
+                | "/api/proxy/node-probes"
+                | "/api/proxy/node-probes/history"
+                | "/api/proxy/plan"
+                | "/api/frpc/plan"
+                | "/api/operations/apply"
+                | "/api/logs"
+                | "/api/maintenance/backup"
+                | "/api/maintenance/import/preview"
+                | "/api/maintenance/import/stage"
+                | "/api/configuration"
+                | "/api/configuration/stage"
+                | "/api/configuration/commit"
+                | "/api/configuration/drafts"
+                | "/api/configuration/confirm"
+                | "/api/configuration/rollback"
+                | "/api/configuration/status"
+        )
 }
 
 struct Count(usize);

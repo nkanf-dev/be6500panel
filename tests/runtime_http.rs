@@ -1125,12 +1125,17 @@ fn owned_server_loop_borrows_one_manager_authenticates_and_cleans_on_cancel() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let fixture = Fixture::new();
     let mut owner = fixture.saved_runtime();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let cancel = Arc::new(AtomicBool::new(false));
     let diagnostic = Service::new(fixture.root.clone());
     assert_eq!(
-        serve(&listener, &diagnostic, Some(&mut owner.runtime), &cancel),
+        serve(
+            &mut listener,
+            &diagnostic,
+            Some(&mut owner.runtime),
+            &cancel
+        ),
         Err(LoopError::Authentication)
     );
     assert!(!fixture.root.join("run/sing-box/started").exists());
@@ -1206,7 +1211,7 @@ fn owned_server_loop_borrows_one_manager_authenticates_and_cleans_on_cancel() {
         stop.store(true, Ordering::Release);
         pid
     });
-    serve(&listener, &service, Some(&mut owner.runtime), &cancel).unwrap();
+    serve(&mut listener, &service, Some(&mut owner.runtime), &cancel).unwrap();
     let pid = client.join().unwrap();
     assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
     assert!(
@@ -1246,10 +1251,10 @@ fn owned_server_close_failure_returns_borrowed_live_handle_for_retry() {
         200,
     );
     fixture.reject.set(true);
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let cancel = AtomicBool::new(true);
     assert!(matches!(
-        serve(&listener, &service, Some(&mut owner.runtime), &cancel),
+        serve(&mut listener, &service, Some(&mut owner.runtime), &cancel),
         Err(LoopError::Shutdown(_))
     ));
     let pid = running["pid"].as_u64().unwrap();
@@ -1282,7 +1287,7 @@ fn owned_loop_observes_exit_and_recovers_without_get_start_side_effects() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let fixture = Fixture::new();
     let mut owner = fixture.saved_runtime();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let service = Service::new(fixture.root.clone()).with_auth(Auth::new("isolated-secret"));
     let cancel = Arc::new(AtomicBool::new(false));
@@ -1376,7 +1381,7 @@ fn owned_loop_observes_exit_and_recovers_without_get_start_side_effects() {
         stop.store(true, Ordering::Release);
         replacement
     });
-    let result = serve(&listener, &service, Some(&mut owner.runtime), &cancel);
+    let result = serve(&mut listener, &service, Some(&mut owner.runtime), &cancel);
     let replacement = client.join().unwrap();
     result.unwrap();
     assert_eq!(unsafe { libc::kill(replacement as i32, 0) }, -1);

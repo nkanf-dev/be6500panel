@@ -11,6 +11,7 @@ import {
 } from "./router-frame";
 import { moduleById, type PageId } from "./registry";
 import { RouterWifi } from "./router-wifi";
+import { WirelessFeaturesPanel } from "./features";
 
 const observationPages = {
   devices: {
@@ -63,6 +64,8 @@ export function UnavailablePage({ id }: { id: PageId }) {
           key={configurationModule}
           module={configurationModule}
         />
+      ) : id === "wifi" && view === "features" ? (
+        <WirelessFeaturesPanel />
       ) : (
         <>
           <RouterToolbar observation={observation} />

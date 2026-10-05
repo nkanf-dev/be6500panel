@@ -1,0 +1,4690 @@
+{
+  "domains": [
+    {
+      "actions": [
+        {
+          "configs": [
+            "network",
+            "ipv6",
+            "dhcp",
+            "firewall",
+            "port_service",
+            "port_map",
+            "mwan3"
+          ],
+          "fields": [
+            {
+              "key": "wan_name",
+              "kind": "select",
+              "label": "逻辑 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1",
+                "WAN2"
+              ],
+              "required": false
+            },
+            {
+              "key": "wanType",
+              "kind": "select",
+              "label": "IPv4 连接方式",
+              "max": null,
+              "min": null,
+              "options": [
+                "dhcp",
+                "pppoe",
+                "static"
+              ],
+              "required": true
+            },
+            {
+              "key": "pppoeName",
+              "kind": "secret",
+              "label": "PPPoE 账号",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "pppoePwd",
+              "kind": "secret",
+              "label": "PPPoE 密码",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "staticIp",
+              "kind": "ipv4",
+              "label": "静态 IPv4 地址",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "staticMask",
+              "kind": "ipv4",
+              "label": "静态 IPv4 掩码",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "staticGateway",
+              "kind": "ipv4",
+              "label": "静态 IPv4 网关",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "dns1",
+              "kind": "ipv4",
+              "label": "WAN 上游 DNS 1",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "dns2",
+              "kind": "ipv4",
+              "label": "WAN 上游 DNS 2",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "autoset",
+              "kind": "select",
+              "label": "自动 DNS",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            },
+            {
+              "key": "special",
+              "kind": "select",
+              "label": "PPPoE 特殊拨号",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            },
+            {
+              "key": "mtu",
+              "kind": "integer",
+              "label": "PPPoE MRU",
+              "max": 1492,
+              "min": 576,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "service",
+              "kind": "text",
+              "label": "PPPoE 服务名",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "set_wan",
+          "impact": "network",
+          "readback": "wan_info",
+          "title": "设置 WAN IPv4 / DNS"
+        },
+        {
+          "configs": [
+            "network"
+          ],
+          "fields": [
+            {
+              "key": "wan_name",
+              "kind": "select",
+              "label": "逻辑 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1",
+                "WAN2"
+              ],
+              "required": false
+            }
+          ],
+          "id": "pppoe_start",
+          "impact": "network",
+          "readback": "pppoe_status",
+          "title": "连接 PPPoE"
+        },
+        {
+          "configs": [
+            "network"
+          ],
+          "fields": [
+            {
+              "key": "wan_name",
+              "kind": "select",
+              "label": "逻辑 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1",
+                "WAN2"
+              ],
+              "required": false
+            }
+          ],
+          "id": "pppoe_stop",
+          "impact": "network",
+          "readback": "pppoe_status",
+          "title": "断开 PPPoE"
+        },
+        {
+          "configs": [
+            "network"
+          ],
+          "fields": [],
+          "id": "wan_up",
+          "impact": "network",
+          "readback": "pppoe_status",
+          "title": "连接 WAN1"
+        },
+        {
+          "configs": [
+            "network"
+          ],
+          "fields": [],
+          "id": "wan_down",
+          "impact": "network",
+          "readback": "pppoe_status",
+          "title": "断开 WAN1"
+        },
+        {
+          "configs": [
+            "network",
+            "ipv6",
+            "dhcp",
+            "firewall",
+            "port_service",
+            "port_map",
+            "mwan3"
+          ],
+          "fields": [
+            {
+              "key": "wan_name",
+              "kind": "select",
+              "label": "逻辑 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1",
+                "WAN2"
+              ],
+              "required": false
+            },
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "WAN MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "mac_clone",
+          "impact": "network",
+          "readback": "wan_info",
+          "title": "设置 WAN MAC"
+        },
+        {
+          "configs": [
+            "xiaoqiang",
+            "port_service",
+            "port_map",
+            "network"
+          ],
+          "fields": [
+            {
+              "key": "wan_name",
+              "kind": "select",
+              "label": "逻辑 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1"
+              ],
+              "required": false
+            },
+            {
+              "key": "speed",
+              "kind": "integer",
+              "label": "速率（0自动/100/1000/2500）",
+              "max": 2500,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "set_wan_speed",
+          "impact": "network",
+          "readback": "wan_speed",
+          "title": "设置 WAN1 协商速率"
+        },
+        {
+          "configs": [
+            "network",
+            "dhcp",
+            "macbind",
+            "firewall",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "ip",
+              "kind": "ipv4",
+              "label": "LAN IPv4",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "mask",
+              "kind": "ipv4",
+              "label": "LAN 掩码",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "set_lan_ip",
+          "impact": "maintenance",
+          "readback": "lan_info",
+          "title": "更改 LAN 管理地址"
+        },
+        {
+          "configs": [
+            "dhcp",
+            "network",
+            "macbind",
+            "firewall",
+            "port_service",
+            "port_map"
+          ],
+          "fields": [
+            {
+              "key": "ignore",
+              "kind": "select",
+              "label": "禁用 DHCP",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            },
+            {
+              "key": "start",
+              "kind": "integer",
+              "label": "地址池起始主机号",
+              "max": 254,
+              "min": 2,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "end",
+              "kind": "integer",
+              "label": "地址池结束主机号",
+              "max": 254,
+              "min": 2,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "startip",
+              "kind": "ipv4",
+              "label": "地址池起始 IPv4",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "endip",
+              "kind": "ipv4",
+              "label": "地址池结束 IPv4",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "leasetime",
+              "kind": "text",
+              "label": "租期（2–2880m / 1–48h）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "router",
+              "kind": "ipv4",
+              "label": "向客户端下发网关",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "dns1",
+              "kind": "ipv4",
+              "label": "向客户端下发 DNS 1",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "dns2",
+              "kind": "ipv4",
+              "label": "向客户端下发 DNS 2",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "set_lan_dhcp",
+          "impact": "network",
+          "readback": "lan_dhcp",
+          "title": "设置 DHCP / 客户端 DNS"
+        },
+        {
+          "configs": [
+            "macbind",
+            "dhcp",
+            "firewall",
+            "devicelist"
+          ],
+          "fields": [
+            {
+              "key": "data",
+              "kind": "json",
+              "label": "绑定列表（mac/ip/name/instance）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "mac_bind",
+          "impact": "network",
+          "readback": "macbind_info",
+          "title": "添加或更新静态地址绑定"
+        },
+        {
+          "configs": [
+            "macbind",
+            "dhcp",
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "text",
+              "label": "MAC（多个用逗号分隔）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "mac_unbind",
+          "impact": "network",
+          "readback": "macbind_info",
+          "title": "删除静态地址绑定"
+        },
+        {
+          "configs": [
+            "firewall",
+            "macbind",
+            "dhcp"
+          ],
+          "fields": [
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "安全检查",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "ipmac_check_enable",
+          "impact": "network",
+          "readback": "ipmac_check",
+          "title": "IP / MAC 安全检查"
+        },
+        {
+          "configs": [
+            "ipv6",
+            "network",
+            "dhcp",
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "enabled",
+              "kind": "select",
+              "label": "IPv6",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_wan6_switch",
+          "impact": "network",
+          "readback": "wan6_switch",
+          "title": "IPv6 总开关"
+        },
+        {
+          "configs": [
+            "ipv6",
+            "network",
+            "dhcp",
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "wan6_name",
+              "kind": "select",
+              "label": "逻辑 IPv6 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "wan6",
+                "wan6_2"
+              ],
+              "required": false
+            },
+            {
+              "key": "ipv6_mode",
+              "kind": "select",
+              "label": "IPv6 方式",
+              "max": null,
+              "min": null,
+              "options": [
+                "off",
+                "native",
+                "dhcpv6",
+                "pppoev6",
+                "static",
+                "pi_relay"
+              ],
+              "required": true
+            },
+            {
+              "key": "automode",
+              "kind": "integer",
+              "label": "自动检测",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "dns1",
+              "kind": "ipv6",
+              "label": "IPv6 上游 DNS 1",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "dns2",
+              "kind": "ipv6",
+              "label": "IPv6 上游 DNS 2",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "nat6_enabled",
+              "kind": "integer",
+              "label": "NAT6",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "ip6prefix",
+              "kind": "ipv6",
+              "label": "LAN IPv6 前缀",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "ip6prefixlen",
+              "kind": "integer",
+              "label": "LAN 前缀长度",
+              "max": 128,
+              "min": 1,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "use_pppoev4",
+              "kind": "integer",
+              "label": "复用 IPv4 PPPoE",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "ipv6DialAccount",
+              "kind": "secret",
+              "label": "IPv6 PPPoE 账号",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "ipv6DialPassword",
+              "kind": "secret",
+              "label": "IPv6 PPPoE 密码",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "ip6addr",
+              "kind": "text",
+              "label": "静态 IPv6 地址",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "ip6gw",
+              "kind": "ipv6",
+              "label": "静态 IPv6 网关",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "set_wan6",
+          "impact": "network",
+          "readback": "wan6_config",
+          "title": "设置 IPv6 WAN v2 / DNS"
+        },
+        {
+          "configs": [
+            "ipv6",
+            "network",
+            "dhcp"
+          ],
+          "fields": [
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "IPv6 LAN 原厂模式（0–3）",
+              "max": 3,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "ip6assign",
+              "kind": "integer",
+              "label": "LAN IPv6 前缀长度",
+              "max": 128,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "set_lan6",
+          "impact": "network",
+          "readback": "lan6_config",
+          "title": "设置 IPv6 LAN"
+        },
+        {
+          "configs": [
+            "ipv6",
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "mode",
+              "kind": "select",
+              "label": "防火墙",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_ipv6_firewall",
+          "impact": "network",
+          "readback": "ipv6_firewall",
+          "title": "IPv6 入站防火墙"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "enable",
+              "kind": "select",
+              "label": "双 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_multiwan_enable",
+          "impact": "network",
+          "readback": "multiwan_info",
+          "title": "切换双 WAN 策略"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "policy",
+              "kind": "integer",
+              "label": "策略（0均衡/1主备/2备主/3仅WAN1/4仅WAN2）",
+              "max": 4,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "set_multiwan_policy",
+          "impact": "network",
+          "readback": "multiwan_info",
+          "title": "双 WAN 出口策略"
+        },
+        {
+          "configs": [
+            "mwan3"
+          ],
+          "fields": [
+            {
+              "key": "bandwidth_wan1",
+              "kind": "integer",
+              "label": "WAN1 带宽",
+              "max": 2500,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "bandwidth_wan2",
+              "kind": "integer",
+              "label": "WAN2 带宽",
+              "max": 2500,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "set_multiwan_weight",
+          "impact": "network",
+          "readback": "multiwan_info",
+          "title": "按出口带宽分配权重"
+        },
+        {
+          "configs": [
+            "mwan3"
+          ],
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "text",
+              "label": "设备 MAC（多个用逗号分隔）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "wan",
+              "kind": "select",
+              "label": "出口",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1",
+                "WAN2"
+              ],
+              "required": true
+            },
+            {
+              "key": "oname",
+              "kind": "text",
+              "label": "设备名称",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "manual",
+              "kind": "select",
+              "label": "手动设备",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            },
+            {
+              "key": "opt",
+              "kind": "select",
+              "label": "操作（0设置/1删除）",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_multiwan_dev_policy",
+          "impact": "network",
+          "readback": "multiwan_policies",
+          "title": "设备固定 WAN 出口"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "service",
+              "kind": "select",
+              "label": "端口服务",
+              "max": null,
+              "min": null,
+              "options": [
+                "wan"
+              ],
+              "required": true
+            },
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "角色（1固定WAN/2自动/3全LAN）",
+              "max": 3,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "wan_port",
+              "kind": "text",
+              "label": "物理口",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "ps_wan",
+          "impact": "network",
+          "readback": "port_service",
+          "title": "WAN 物理口 / 自动识别 / LAN"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "service",
+              "kind": "select",
+              "label": "端口服务",
+              "max": null,
+              "min": null,
+              "options": [
+                "wandt"
+              ],
+              "required": true
+            },
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "自动识别",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "wan_port",
+              "kind": "text",
+              "label": "固定 WAN 物理口",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "ps_wandt",
+          "impact": "network",
+          "readback": "port_service",
+          "title": "自动识别 WAN 口"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "service",
+              "kind": "select",
+              "label": "端口服务",
+              "max": null,
+              "min": null,
+              "options": [
+                "multiwan"
+              ],
+              "required": true
+            },
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "双 WAN",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "port_map%5B0%5D%5Bname%5D",
+              "kind": "select",
+              "label": "第一个逻辑出口",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1"
+              ],
+              "required": false
+            },
+            {
+              "key": "port_map%5B0%5D%5Bport%5D",
+              "kind": "text",
+              "label": "WAN1 物理口",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "port_map%5B1%5D%5Bname%5D",
+              "kind": "select",
+              "label": "第二个逻辑出口",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN2"
+              ],
+              "required": false
+            },
+            {
+              "key": "port_map%5B1%5D%5Bport%5D",
+              "kind": "text",
+              "label": "WAN2 物理口",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "policy%5Bmode%5D",
+              "kind": "integer",
+              "label": "出口策略（0均衡/1主备/2备主/3仅WAN1/4仅WAN2）",
+              "max": 4,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "policy%5Bbandwidth_wan1%5D",
+              "kind": "integer",
+              "label": "WAN1 带宽",
+              "max": 2500,
+              "min": 1,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "policy%5Bbandwidth_wan2%5D",
+              "kind": "integer",
+              "label": "WAN2 带宽",
+              "max": 2500,
+              "min": 1,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "ps_multiwan",
+          "impact": "network",
+          "readback": "port_service",
+          "title": "双 WAN 物理口与策略"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "service",
+              "kind": "select",
+              "label": "端口服务",
+              "max": null,
+              "min": null,
+              "options": [
+                "lag"
+              ],
+              "required": true
+            },
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "聚合",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "原厂 LAG 模式",
+              "max": 65535,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "ports",
+              "kind": "text",
+              "label": "两个物理口（空格分隔）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "ps_lag",
+          "impact": "network",
+          "readback": "port_service",
+          "title": "LAN 链路聚合"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "service",
+              "kind": "select",
+              "label": "端口服务",
+              "max": null,
+              "min": null,
+              "options": [
+                "game"
+              ],
+              "required": true
+            },
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "游戏口",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "ports",
+              "kind": "text",
+              "label": "物理口",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "ps_game",
+          "impact": "network",
+          "readback": "port_service",
+          "title": "游戏专用 LAN 口"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "service",
+              "kind": "select",
+              "label": "端口服务",
+              "max": null,
+              "min": null,
+              "options": [
+                "iptv"
+              ],
+              "required": true
+            },
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "IPTV",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "profile",
+              "kind": "integer",
+              "label": "IPTV 档案（0自定义/1桥接）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "vid",
+              "kind": "integer",
+              "label": "VLAN ID（桥接为0）",
+              "max": 4094,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "priority",
+              "kind": "integer",
+              "label": "802.1p",
+              "max": 7,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "ports",
+              "kind": "text",
+              "label": "IPTV 物理口",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "ps_iptv",
+          "impact": "network",
+          "readback": "port_service",
+          "title": "IPTV 口 / VLAN / 802.1p"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "service",
+              "kind": "select",
+              "label": "端口服务",
+              "max": null,
+              "min": null,
+              "options": [
+                "wantag"
+              ],
+              "required": true
+            },
+            {
+              "key": "interface",
+              "kind": "select",
+              "label": "逻辑 WAN 接口",
+              "max": null,
+              "min": null,
+              "options": [
+                "wan",
+                "wan_2"
+              ],
+              "required": true
+            },
+            {
+              "key": "profile",
+              "kind": "integer",
+              "label": "Internet 档案（0禁用/1自定义）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "vid",
+              "kind": "integer",
+              "label": "Internet VLAN ID",
+              "max": 4094,
+              "min": 1,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "priority",
+              "kind": "integer",
+              "label": "802.1p",
+              "max": 7,
+              "min": 0,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "ps_wantag",
+          "impact": "network",
+          "readback": "port_service",
+          "title": "Internet VLAN / 802.1p"
+        },
+        {
+          "configs": [
+            "port_service",
+            "port_map",
+            "network",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "mwan3",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "opt",
+              "kind": "select",
+              "label": "操作",
+              "max": null,
+              "min": null,
+              "options": [
+                "init",
+                "set",
+                "clean"
+              ],
+              "required": true
+            },
+            {
+              "key": "internet_profile",
+              "kind": "integer",
+              "label": "Internet 档案（0禁用/1自定义）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "internet_vid",
+              "kind": "integer",
+              "label": "Internet VLAN ID",
+              "max": 4094,
+              "min": 1,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "internet_priority",
+              "kind": "integer",
+              "label": "802.1p",
+              "max": 7,
+              "min": 0,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "set_vlan_internet",
+          "impact": "network",
+          "readback": "vlan_internet",
+          "title": "设置 Internet VLAN"
+        },
+        {
+          "configs": [
+            "xiaoqiang",
+            "backup",
+            "network",
+            "wireless",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "port_service",
+            "port_map",
+            "mwan3",
+            "miqos",
+            "macfilter",
+            "wifiblist",
+            "wifiwlist"
+          ],
+          "fields": [],
+          "id": "set_lan_ap",
+          "impact": "maintenance",
+          "readback": "mode",
+          "title": "切换到有线 AP"
+        },
+        {
+          "configs": [
+            "xiaoqiang",
+            "backup",
+            "network",
+            "wireless",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "port_service",
+            "port_map",
+            "mwan3",
+            "miqos",
+            "macfilter",
+            "wifiblist",
+            "wifiwlist"
+          ],
+          "fields": [],
+          "id": "disable_lan_ap",
+          "impact": "maintenance",
+          "readback": "mode",
+          "title": "有线 AP 恢复路由模式"
+        },
+        {
+          "configs": [
+            "xiaoqiang",
+            "backup",
+            "network",
+            "wireless",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "port_service",
+            "port_map",
+            "mwan3",
+            "miqos",
+            "macfilter",
+            "wifiblist",
+            "wifiwlist"
+          ],
+          "fields": [
+            {
+              "key": "ssid",
+              "kind": "text",
+              "label": "上联 SSID",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "password",
+              "kind": "secret",
+              "label": "上联密码（开放网络填空字符串）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "set_wifi_ap",
+          "impact": "maintenance",
+          "readback": "mode",
+          "title": "切换到无线中继"
+        },
+        {
+          "configs": [
+            "xiaoqiang",
+            "backup",
+            "network",
+            "wireless",
+            "dhcp",
+            "firewall",
+            "ipv6",
+            "port_service",
+            "port_map",
+            "mwan3",
+            "miqos",
+            "macfilter",
+            "wifiblist",
+            "wifiwlist"
+          ],
+          "fields": [],
+          "id": "disable_wifi_ap",
+          "impact": "maintenance",
+          "readback": "mode",
+          "title": "无线中继恢复路由模式"
+        }
+      ],
+      "id": "network",
+      "reads": [
+        {
+          "fields": [
+            {
+              "key": "wan_name",
+              "kind": "select",
+              "label": "逻辑 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1",
+                "WAN2"
+              ],
+              "required": false
+            }
+          ],
+          "id": "wan_info",
+          "title": "WAN IPv4 / 上游 DNS"
+        },
+        {
+          "fields": [],
+          "id": "wan_status",
+          "title": "WAN IPv4 / IPv6 运行状态"
+        },
+        {
+          "fields": [
+            {
+              "key": "wan_name",
+              "kind": "select",
+              "label": "逻辑 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1",
+                "WAN2"
+              ],
+              "required": false
+            }
+          ],
+          "id": "pppoe_status",
+          "title": "PPPoE 连接状态"
+        },
+        {
+          "fields": [],
+          "id": "wan_speed",
+          "title": "WAN1 保存的协商速率"
+        },
+        {
+          "fields": [
+            {
+              "key": "wan_sec",
+              "kind": "select",
+              "label": "逻辑 WAN 接口",
+              "max": null,
+              "min": null,
+              "options": [
+                "wan",
+                "wan_2"
+              ],
+              "required": false
+            }
+          ],
+          "id": "wan_link",
+          "title": "WAN 物理链路"
+        },
+        {
+          "fields": [],
+          "id": "lan_info",
+          "title": "LAN 地址与链路"
+        },
+        {
+          "fields": [],
+          "id": "lan_dhcp",
+          "title": "DHCP 地址池 / 下发 DNS"
+        },
+        {
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "筛选 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "macbind_info",
+          "title": "静态地址与 MAC 绑定"
+        },
+        {
+          "fields": [],
+          "id": "ipmac_check",
+          "title": "IP / MAC 安全绑定"
+        },
+        {
+          "fields": [],
+          "id": "wan6_switch",
+          "title": "IPv6 总开关"
+        },
+        {
+          "fields": [
+            {
+              "key": "wan6_name",
+              "kind": "select",
+              "label": "逻辑 IPv6 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "wan6",
+                "wan6_2"
+              ],
+              "required": false
+            }
+          ],
+          "id": "wan6_config",
+          "title": "IPv6 WAN v2 配置"
+        },
+        {
+          "fields": [
+            {
+              "key": "wan6_name",
+              "kind": "select",
+              "label": "逻辑 IPv6 WAN",
+              "max": null,
+              "min": null,
+              "options": [
+                "wan6",
+                "wan6_2"
+              ],
+              "required": false
+            }
+          ],
+          "id": "wan6_status",
+          "title": "IPv6 WAN / PD 运行状态"
+        },
+        {
+          "fields": [],
+          "id": "lan6_config",
+          "title": "IPv6 LAN / RA / DHCPv6"
+        },
+        {
+          "fields": [],
+          "id": "ipv6_firewall",
+          "title": "IPv6 入站防火墙"
+        },
+        {
+          "fields": [],
+          "id": "multiwan_info",
+          "title": "双 WAN 策略与权重"
+        },
+        {
+          "fields": [],
+          "id": "multiwan_devices",
+          "title": "可分配出口的设备"
+        },
+        {
+          "fields": [],
+          "id": "multiwan_policies",
+          "title": "设备固定出口"
+        },
+        {
+          "fields": [],
+          "id": "port_map",
+          "title": "RN02 四口映射"
+        },
+        {
+          "fields": [
+            {
+              "key": "service",
+              "kind": "select",
+              "label": "端口服务",
+              "max": null,
+              "min": null,
+              "options": [
+                "wandt",
+                "lag",
+                "iptv",
+                "wan",
+                "multiwan",
+                "game",
+                "wantag"
+              ],
+              "required": true
+            },
+            {
+              "key": "interface",
+              "kind": "select",
+              "label": "Internet VLAN 接口",
+              "max": null,
+              "min": null,
+              "options": [
+                "wan",
+                "wan_2"
+              ],
+              "required": false
+            }
+          ],
+          "id": "port_service",
+          "title": "端口角色 / IPTV / VLAN / LAG"
+        },
+        {
+          "fields": [],
+          "id": "vlan_internet",
+          "title": "Internet VLAN"
+        },
+        {
+          "fields": [],
+          "id": "vlan_iptv",
+          "title": "IPTV 与 LAN 口"
+        },
+        {
+          "fields": [],
+          "id": "mode",
+          "title": "路由 / 有线 AP / 无线中继模式"
+        },
+        {
+          "fields": [],
+          "id": "netmode",
+          "title": "CAP / RE 网络模式"
+        },
+        {
+          "fields": [],
+          "id": "bridge_lan",
+          "title": "AP / 中继上联地址"
+        }
+      ],
+      "title": "网络、地址与端口"
+    },
+    {
+      "actions": [
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "wifiIndex",
+              "kind": "integer",
+              "label": "频段索引",
+              "max": 2,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "ssid",
+              "kind": "text",
+              "label": "Wi-Fi 名称",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "pwd",
+              "kind": "secret",
+              "label": "新密码",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "encryption",
+              "kind": "select",
+              "label": "加密方式",
+              "max": null,
+              "min": null,
+              "options": [
+                "none",
+                "psk",
+                "mixed-psk",
+                "psk2",
+                "psk2+ccmp",
+                "ccmp",
+                "wep-open"
+              ],
+              "required": false
+            },
+            {
+              "key": "channel",
+              "kind": "integer",
+              "label": "信道（0：自动）",
+              "max": 165,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "bandwidth",
+              "kind": "select",
+              "label": "带宽（0：自动）",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "20",
+                "40",
+                "80",
+                "160"
+              ],
+              "required": false
+            },
+            {
+              "key": "txpwr",
+              "kind": "select",
+              "label": "发射功率",
+              "max": null,
+              "min": null,
+              "options": [
+                "min",
+                "mid",
+                "max"
+              ],
+              "required": false
+            },
+            {
+              "key": "hidden",
+              "kind": "select",
+              "label": "隐藏名称",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            },
+            {
+              "key": "on",
+              "kind": "select",
+              "label": "启用",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            },
+            {
+              "key": "txbf",
+              "kind": "select",
+              "label": "MU-MIMO / 波束赋形",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "3"
+              ],
+              "required": false
+            },
+            {
+              "key": "weakenable",
+              "kind": "select",
+              "label": "弱信号限制",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            },
+            {
+              "key": "weakthreshold",
+              "kind": "integer",
+              "label": "拒绝关联阈值（dBm）",
+              "max": 0,
+              "min": -100,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "kickthreshold",
+              "kind": "integer",
+              "label": "断开阈值（dBm）",
+              "max": 0,
+              "min": -100,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "wifimode",
+              "kind": "select",
+              "label": "协议模式",
+              "max": null,
+              "min": null,
+              "options": [
+                "11bgn",
+                "11n",
+                "11an",
+                "11ac",
+                "11ax",
+                "11axg",
+                "11axa",
+                "11beg",
+                "11bea"
+              ],
+              "required": false
+            }
+          ],
+          "id": "set_wifi",
+          "impact": "wireless",
+          "readback": "wifi_detail_all",
+          "title": "配置单频段 Wi-Fi"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "bsd",
+              "kind": "select",
+              "label": "多频合一",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            },
+            {
+              "key": "ver",
+              "kind": "select",
+              "label": "原厂显式频段设置版本",
+              "max": null,
+              "min": null,
+              "options": [
+                "1"
+              ],
+              "required": true
+            },
+            {
+              "key": "user_confirm",
+              "kind": "select",
+              "label": "确认 DFS 等待",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            },
+            {
+              "key": "on1",
+              "kind": "select",
+              "label": "2.4 GHz 启用",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            },
+            {
+              "key": "ssid1",
+              "kind": "text",
+              "label": "2.4 GHz 名称",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "pwd1",
+              "kind": "secret",
+              "label": "2.4 GHz 新密码",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "encryption1",
+              "kind": "select",
+              "label": "2.4 GHz 加密",
+              "max": null,
+              "min": null,
+              "options": [
+                "none",
+                "psk",
+                "mixed-psk",
+                "psk2",
+                "psk2+ccmp",
+                "ccmp",
+                "wep-open"
+              ],
+              "required": true
+            },
+            {
+              "key": "channel1",
+              "kind": "integer",
+              "label": "2.4 GHz 信道",
+              "max": 13,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "bandwidth1",
+              "kind": "select",
+              "label": "2.4 GHz 带宽",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "20",
+                "40"
+              ],
+              "required": false
+            },
+            {
+              "key": "txpwr1",
+              "kind": "select",
+              "label": "2.4 GHz 功率",
+              "max": null,
+              "min": null,
+              "options": [
+                "min",
+                "mid",
+                "max"
+              ],
+              "required": false
+            },
+            {
+              "key": "hidden1",
+              "kind": "select",
+              "label": "2.4 GHz 隐藏名称",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            },
+            {
+              "key": "wifimode1",
+              "kind": "select",
+              "label": "2.4 GHz 协议模式",
+              "max": null,
+              "min": null,
+              "options": [
+                "11bgn",
+                "11n",
+                "11ax",
+                "11axg",
+                "11beg"
+              ],
+              "required": false
+            },
+            {
+              "key": "on2",
+              "kind": "select",
+              "label": "5 GHz 启用",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            },
+            {
+              "key": "ssid2",
+              "kind": "text",
+              "label": "5 GHz 名称",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "pwd2",
+              "kind": "secret",
+              "label": "5 GHz 新密码",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "encryption2",
+              "kind": "select",
+              "label": "5 GHz 加密",
+              "max": null,
+              "min": null,
+              "options": [
+                "none",
+                "psk",
+                "mixed-psk",
+                "psk2",
+                "psk2+ccmp",
+                "ccmp",
+                "wep-open"
+              ],
+              "required": true
+            },
+            {
+              "key": "channel2",
+              "kind": "integer",
+              "label": "5 GHz 信道",
+              "max": 165,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "bandwidth2",
+              "kind": "select",
+              "label": "5 GHz 带宽",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "20",
+                "40",
+                "80",
+                "160"
+              ],
+              "required": false
+            },
+            {
+              "key": "txpwr2",
+              "kind": "select",
+              "label": "5 GHz 功率",
+              "max": null,
+              "min": null,
+              "options": [
+                "min",
+                "mid",
+                "max"
+              ],
+              "required": false
+            },
+            {
+              "key": "hidden2",
+              "kind": "select",
+              "label": "5 GHz 隐藏名称",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            },
+            {
+              "key": "wifimode2",
+              "kind": "select",
+              "label": "5 GHz 协议模式",
+              "max": null,
+              "min": null,
+              "options": [
+                "11n",
+                "11an",
+                "11ac",
+                "11ax",
+                "11axa",
+                "11bea"
+              ],
+              "required": false
+            },
+            {
+              "key": "txbf",
+              "kind": "select",
+              "label": "MU-MIMO / 波束赋形",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "3"
+              ],
+              "required": false
+            },
+            {
+              "key": "weakenable",
+              "kind": "select",
+              "label": "弱信号限制",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            },
+            {
+              "key": "weakthreshold",
+              "kind": "integer",
+              "label": "拒绝关联阈值（dBm）",
+              "max": 0,
+              "min": -100,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "kickthreshold",
+              "kind": "integer",
+              "label": "断开阈值（dBm）",
+              "max": 0,
+              "min": -100,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "set_all_wifi",
+          "impact": "wireless",
+          "readback": "wifi_detail_all",
+          "title": "配置双频与多频合一"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "txpwr",
+              "kind": "select",
+              "label": "发射功率",
+              "max": null,
+              "min": null,
+              "options": [
+                "min",
+                "mid",
+                "max"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_wifi_txpwr",
+          "impact": "wireless",
+          "readback": "wifi_txpwr_channel",
+          "title": "调整双频发射功率"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "ax",
+              "kind": "select",
+              "label": "AX 启用（0：兼容模式）",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            },
+            {
+              "key": "user_confirm",
+              "kind": "select",
+              "label": "确认 DFS 等待",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            }
+          ],
+          "id": "set_wifi_ax",
+          "impact": "wireless",
+          "readback": "wifi_detail_all",
+          "title": "Wi-Fi 5 兼容模式"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "txbf",
+              "kind": "select",
+              "label": "启用",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "3"
+              ],
+              "required": true
+            },
+            {
+              "key": "user_confirm",
+              "kind": "select",
+              "label": "确认 DFS 等待",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            }
+          ],
+          "id": "set_wifi_txbf",
+          "impact": "wireless",
+          "readback": "wifi_detail_all",
+          "title": "MU-MIMO / 波束赋形"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "mlo_enable",
+              "kind": "select",
+              "label": "启用 MLO",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_hostap_mlo",
+          "impact": "wireless",
+          "readback": "get_hostap_mlo",
+          "title": "设置 MLO"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "select",
+              "label": "启用",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_twt",
+          "impact": "wireless",
+          "readback": "get_twt",
+          "title": "设置 TWT 节能"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "network",
+            "dhcp",
+            "firewall",
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "wifiIndex",
+              "kind": "integer",
+              "label": "原厂访客索引",
+              "max": 3,
+              "min": 3,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "ssid",
+              "kind": "text",
+              "label": "访客 Wi-Fi 名称",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "pwd",
+              "kind": "secret",
+              "label": "访客新密码",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "encryption",
+              "kind": "select",
+              "label": "访客加密方式",
+              "max": null,
+              "min": null,
+              "options": [
+                "none",
+                "psk",
+                "mixed-psk",
+                "psk2",
+                "psk2+ccmp",
+                "ccmp",
+                "wep-open"
+              ],
+              "required": true
+            },
+            {
+              "key": "on",
+              "kind": "select",
+              "label": "访客 Wi-Fi 启用",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_guest_wifi",
+          "impact": "wireless",
+          "readback": "wifi_share_info",
+          "title": "配置访客 Wi-Fi"
+        },
+        {
+          "configs": [
+            "miqos"
+          ],
+          "fields": [
+            {
+              "key": "percent",
+              "kind": "text",
+              "label": "下载比例（0–1；0 为不限制）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "percent_up",
+              "kind": "text",
+              "label": "上传比例（0–1）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "qos_guest",
+          "impact": "network",
+          "readback": "guest_qos",
+          "title": "设置访客带宽比例"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "select",
+              "label": "启用",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "miotrelay_switch",
+          "impact": "wireless",
+          "readback": "get_miotrelay_switch",
+          "title": "设置 IoT relay 用户开关"
+        },
+        {
+          "configs": [
+            "miscan",
+            "wireless",
+            "misc"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "select",
+              "label": "启用",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "miscan_switch",
+          "impact": "wireless",
+          "readback": "get_miscan_switch",
+          "title": "设置 IoT 扫描"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang",
+            "network",
+            "dhcp",
+            "firewall"
+          ],
+          "fields": [],
+          "id": "scan_mesh_node",
+          "impact": "wireless",
+          "readback": "",
+          "title": "扫描可加入的 Mesh 节点"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang",
+            "network",
+            "dhcp",
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "节点 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "locate",
+              "kind": "text",
+              "label": "节点位置",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "add_mesh_node",
+          "impact": "wireless",
+          "readback": "get_addnode_status",
+          "title": "加入 Mesh 节点"
+        },
+        {
+          "configs": [
+            "xiaoqiang",
+            "wireless",
+            "misc"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "select",
+              "label": "启用",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_mesh_switch",
+          "impact": "wireless",
+          "readback": "get_mesh_switch",
+          "title": "设置 Mesh 开关"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "bhmode",
+              "kind": "select",
+              "label": "回程模式",
+              "max": null,
+              "min": null,
+              "options": [
+                "auto",
+                "wired"
+              ],
+              "required": true
+            }
+          ],
+          "id": "set_mesh_bh_mode",
+          "impact": "wireless",
+          "readback": "get_mesh_bh_mode",
+          "title": "设置 Mesh 回程模式"
+        },
+        {
+          "configs": [
+            "wireless",
+            "misc",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "wifiIndex",
+              "kind": "integer",
+              "label": "频段索引",
+              "max": 2,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "weakenable",
+              "kind": "select",
+              "label": "弱信号限制",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": true
+            },
+            {
+              "key": "weakthreshold",
+              "kind": "integer",
+              "label": "拒绝关联阈值（dBm）",
+              "max": 0,
+              "min": -100,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "kickthreshold",
+              "kind": "integer",
+              "label": "断开阈值（dBm）",
+              "max": 0,
+              "min": -100,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "set_wifi_weak",
+          "impact": "wireless",
+          "readback": "get_wifi_weak",
+          "title": "设置漫游弱信号阈值"
+        }
+      ],
+      "id": "wireless",
+      "reads": [
+        {
+          "fields": [],
+          "id": "wifi_detail_all",
+          "title": "无线配置与频段能力"
+        },
+        {
+          "fields": [
+            {
+              "key": "wifiIndex",
+              "kind": "integer",
+              "label": "频段索引（1：2.4 GHz；2：5 GHz）",
+              "max": 2,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "wifi_detail",
+          "title": "单频段配置"
+        },
+        {
+          "fields": [],
+          "id": "wifi_status",
+          "title": "无线运行状态"
+        },
+        {
+          "fields": [],
+          "id": "wifi_txpwr_channel",
+          "title": "信道与功率"
+        },
+        {
+          "fields": [],
+          "id": "wifi_connect_devices",
+          "title": "无线关联终端"
+        },
+        {
+          "fields": [],
+          "id": "get_hostap_mlo",
+          "title": "MLO 能力与配置"
+        },
+        {
+          "fields": [],
+          "id": "get_twt",
+          "title": "TWT 配置"
+        },
+        {
+          "fields": [],
+          "id": "get_wifi_weak",
+          "title": "弱信号阈值"
+        },
+        {
+          "fields": [],
+          "id": "get_miotrelay_switch",
+          "title": "IoT 用户开关"
+        },
+        {
+          "fields": [],
+          "id": "get_miscan_switch",
+          "title": "IoT 扫描开关"
+        },
+        {
+          "fields": [],
+          "id": "get_mesh_switch",
+          "title": "Mesh 开关与模式"
+        },
+        {
+          "fields": [
+            {
+              "key": "simplified",
+              "kind": "select",
+              "label": "简化拓扑",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1"
+              ],
+              "required": false
+            }
+          ],
+          "id": "topo_graph",
+          "title": "Mesh 拓扑"
+        },
+        {
+          "fields": [],
+          "id": "get_mesh_bh_mode",
+          "title": "Mesh 回程模式"
+        },
+        {
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "Mesh 节点 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "get_addnode_status",
+          "title": "Mesh 加入进度"
+        },
+        {
+          "fields": [
+            {
+              "key": "guest_index",
+              "kind": "integer",
+              "label": "访客频段索引",
+              "max": 2,
+              "min": 1,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "wifi_share_info",
+          "title": "访客配置与状态"
+        },
+        {
+          "fields": [],
+          "id": "guest_qos",
+          "title": "访客带宽比例"
+        }
+      ],
+      "title": "无线、Wi-Fi 7 与 Mesh"
+    },
+    {
+      "actions": [
+        {
+          "configs": [
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "name",
+              "kind": "text",
+              "label": "规则名称",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "ip",
+              "kind": "ipv4",
+              "label": "目标 IPv4",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "proto",
+              "kind": "integer",
+              "label": "协议（1 TCP / 2 UDP / 3 两者）",
+              "max": 3,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "sport",
+              "kind": "integer",
+              "label": "外部端口",
+              "max": 65535,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "dport",
+              "kind": "integer",
+              "label": "内部端口",
+              "max": 65535,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "forward_add",
+          "impact": "network",
+          "readback": "forwarding",
+          "title": "添加单端口转发"
+        },
+        {
+          "configs": [
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "name",
+              "kind": "text",
+              "label": "规则名称",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "ip",
+              "kind": "ipv4",
+              "label": "目标 IPv4",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "proto",
+              "kind": "integer",
+              "label": "协议（1 TCP / 2 UDP / 3 两者）",
+              "max": 3,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "fport",
+              "kind": "integer",
+              "label": "起始端口",
+              "max": 65535,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "tport",
+              "kind": "integer",
+              "label": "结束端口",
+              "max": 65535,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "forward_range_add",
+          "impact": "network",
+          "readback": "forwarding",
+          "title": "添加端口区间转发"
+        },
+        {
+          "configs": [
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "port",
+              "kind": "integer",
+              "label": "规则起始端口",
+              "max": 65535,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "proto",
+              "kind": "integer",
+              "label": "协议（1 TCP / 2 UDP / 3 两者）",
+              "max": 3,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "forward_delete",
+          "impact": "network",
+          "readback": "forwarding",
+          "title": "删除端口转发"
+        },
+        {
+          "configs": [
+            "firewall"
+          ],
+          "fields": [],
+          "id": "forward_apply",
+          "impact": "network",
+          "readback": "forwarding",
+          "title": "应用原厂端口转发规则"
+        },
+        {
+          "configs": [
+            "firewall",
+            "network",
+            "xiaoqiang",
+            "mwan3"
+          ],
+          "fields": [
+            {
+              "key": "ip",
+              "kind": "ipv4",
+              "label": "目标 IPv4",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "目标 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "原厂 DMZ 模式",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "dmz_set",
+          "impact": "network",
+          "readback": "dmz",
+          "title": "设置 DMZ 暴露目标"
+        },
+        {
+          "configs": [
+            "firewall",
+            "network",
+            "xiaoqiang",
+            "mwan3"
+          ],
+          "fields": [
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "原厂 DMZ 模式",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "dmz_off",
+          "impact": "network",
+          "readback": "dmz",
+          "title": "关闭 DMZ"
+        },
+        {
+          "configs": [
+            "firewall",
+            "network",
+            "xiaoqiang",
+            "mwan3"
+          ],
+          "fields": [
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "原厂 DMZ 模式",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "dmz_reload",
+          "impact": "network",
+          "readback": "dmz",
+          "title": "重载 DMZ"
+        },
+        {
+          "configs": [
+            "upnpd"
+          ],
+          "fields": [
+            {
+              "key": "switch",
+              "kind": "integer",
+              "label": "UPnP 开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "upnp_switch",
+          "impact": "network",
+          "readback": "upnp",
+          "title": "切换 UPnP"
+        },
+        {
+          "configs": [
+            "ddns"
+          ],
+          "fields": [
+            {
+              "key": "id",
+              "kind": "integer",
+              "label": "服务商 ID（1–9）",
+              "max": 9,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "实例开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "domain",
+              "kind": "text",
+              "label": "更新域名",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "username",
+              "kind": "secret",
+              "label": "服务商账号",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "password",
+              "kind": "secret",
+              "label": "服务商密码或令牌",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "wanindex",
+              "kind": "select",
+              "label": "地址来源",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1",
+                "WAN2"
+              ],
+              "required": true
+            },
+            {
+              "key": "iptype",
+              "kind": "select",
+              "label": "地址类型",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1",
+                "2"
+              ],
+              "required": true
+            },
+            {
+              "key": "checkinterval",
+              "kind": "integer",
+              "label": "检查间隔（分钟）",
+              "max": 10080,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "forceinterval",
+              "kind": "integer",
+              "label": "强制更新间隔（小时）",
+              "max": 8760,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "ddns_add",
+          "impact": "local",
+          "readback": "ddns_detail",
+          "title": "添加服务商实例"
+        },
+        {
+          "configs": [
+            "ddns"
+          ],
+          "fields": [
+            {
+              "key": "id",
+              "kind": "integer",
+              "label": "服务商 ID（1–9）",
+              "max": 9,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "domain",
+              "kind": "text",
+              "label": "更新域名",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "wanindex",
+              "kind": "select",
+              "label": "地址来源",
+              "max": null,
+              "min": null,
+              "options": [
+                "WAN1",
+                "WAN2"
+              ],
+              "required": true
+            },
+            {
+              "key": "iptype",
+              "kind": "select",
+              "label": "地址类型",
+              "max": null,
+              "min": null,
+              "options": [
+                "0",
+                "1",
+                "2"
+              ],
+              "required": true
+            },
+            {
+              "key": "username",
+              "kind": "secret",
+              "label": "新账号（留空保留）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "password",
+              "kind": "secret",
+              "label": "新密码或令牌（留空保留）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "checkinterval",
+              "kind": "integer",
+              "label": "检查间隔（分钟）",
+              "max": 10080,
+              "min": 1,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "forceinterval",
+              "kind": "integer",
+              "label": "强制更新间隔（小时）",
+              "max": 8760,
+              "min": 1,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "ddns_edit",
+          "impact": "local",
+          "readback": "ddns_detail",
+          "title": "修改服务商实例"
+        },
+        {
+          "configs": [
+            "ddns"
+          ],
+          "fields": [
+            {
+              "key": "id",
+              "kind": "integer",
+              "label": "服务商 ID（1–9）",
+              "max": 9,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "ddns_delete",
+          "impact": "local",
+          "readback": "ddns",
+          "title": "删除服务商实例"
+        },
+        {
+          "configs": [
+            "ddns"
+          ],
+          "fields": [
+            {
+              "key": "id",
+              "kind": "integer",
+              "label": "服务商 ID",
+              "max": 9,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "on",
+              "kind": "integer",
+              "label": "实例开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "ddns_switch",
+          "impact": "local",
+          "readback": "ddns",
+          "title": "切换服务商实例"
+        },
+        {
+          "configs": [
+            "ddns"
+          ],
+          "fields": [],
+          "id": "ddns_reload",
+          "impact": "local",
+          "readback": "ddns",
+          "title": "刷新原厂 DDNS 实例"
+        },
+        {
+          "configs": [
+            "miqos",
+            "hwnat"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "qos_switch",
+          "impact": "network",
+          "readback": "qos",
+          "title": "切换 QoS"
+        },
+        {
+          "configs": [
+            "miqos",
+            "hwnat"
+          ],
+          "fields": [
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "模式（0 自动 / 1 优先级 / 2 限速 / 3–6 应用）",
+              "max": 6,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "qos_mode",
+          "impact": "network",
+          "readback": "qos",
+          "title": "设置 QoS 模式"
+        },
+        {
+          "configs": [
+            "miqos",
+            "hwnat",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "upload",
+              "kind": "integer",
+              "label": "上行 Mbps",
+              "max": 100000,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "download",
+              "kind": "integer",
+              "label": "下行 Mbps",
+              "max": 100000,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "manual",
+              "kind": "integer",
+              "label": "手动带宽",
+              "max": 1,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "qos_band",
+          "impact": "network",
+          "readback": "qos",
+          "title": "设置上行与下行带宽"
+        },
+        {
+          "configs": [
+            "miqos",
+            "hwnat"
+          ],
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "设备 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "模式（1 优先级 / 2 限速）",
+              "max": 2,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "upload",
+              "kind": "integer",
+              "label": "上行级别 1–3 或 KB/s",
+              "max": 100000000,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "download",
+              "kind": "integer",
+              "label": "下行级别 1–3 或 KB/s",
+              "max": 100000000,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "qos_limit",
+          "impact": "network",
+          "readback": "qos_history",
+          "title": "设置设备优先级或限速"
+        },
+        {
+          "configs": [
+            "miqos",
+            "hwnat"
+          ],
+          "fields": [
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "模式（1 优先级 / 2 限速）",
+              "max": 2,
+              "min": 1,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "data",
+              "kind": "json",
+              "label": "设备列表（mac / maxup / maxdown）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "qos_limits",
+          "impact": "network",
+          "readback": "qos_history",
+          "title": "批量设置设备优先级或限速"
+        },
+        {
+          "configs": [
+            "miqos",
+            "hwnat"
+          ],
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "设备 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "upload",
+              "kind": "integer",
+              "label": "上行 KB/s",
+              "max": 100000000,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "download",
+              "kind": "integer",
+              "label": "下行 KB/s",
+              "max": 100000000,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "qos_device",
+          "impact": "network",
+          "readback": "qos_device",
+          "title": "设置设备固定限速"
+        },
+        {
+          "configs": [
+            "miqos",
+            "hwnat"
+          ],
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "设备 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "qos_offlimit",
+          "impact": "network",
+          "readback": "qos_device",
+          "title": "取消设备限速"
+        },
+        {
+          "configs": [
+            "miqos",
+            "hwnat"
+          ],
+          "fields": [
+            {
+              "key": "percent",
+              "kind": "text",
+              "label": "下行比例（0–1）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "percent_up",
+              "kind": "text",
+              "label": "上行比例（0–1）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "qos_guest",
+          "impact": "network",
+          "readback": "qos",
+          "title": "设置访客带宽比例"
+        },
+        {
+          "configs": [
+            "macfilter",
+            "wifiblist",
+            "wifiwlist",
+            "webfilter"
+          ],
+          "fields": [
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "model",
+              "kind": "integer",
+              "label": "名单（0 黑 / 1 白）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "access_switch",
+          "impact": "network",
+          "readback": "access",
+          "title": "切换无线访问名单"
+        },
+        {
+          "configs": [
+            "macfilter",
+            "wifiblist",
+            "wifiwlist",
+            "webfilter"
+          ],
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "设备 MAC（单个）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "model",
+              "kind": "integer",
+              "label": "名单（0 黑 / 1 白）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "option",
+              "kind": "integer",
+              "label": "操作（0 添加 / 1 移除）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "access_edit",
+          "impact": "network",
+          "readback": "access",
+          "title": "增删名单中的设备"
+        },
+        {
+          "configs": [
+            "macfilter",
+            "wifiblist",
+            "wifiwlist",
+            "webfilter"
+          ],
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "设备 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "name",
+              "kind": "text",
+              "label": "设备名称",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "model",
+              "kind": "integer",
+              "label": "名单（0 黑 / 1 白）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "access_add",
+          "impact": "network",
+          "readback": "access",
+          "title": "手动添加名单设备"
+        },
+        {
+          "configs": [
+            "webfilter"
+          ],
+          "fields": [
+            {
+              "key": "open",
+              "kind": "integer",
+              "label": "名单开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "设备 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "opt",
+              "kind": "integer",
+              "label": "操作（0 添加 / 1 移除）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "web_access",
+          "impact": "network",
+          "readback": "web_access",
+          "title": "管理入口名单开关与设备"
+        },
+        {
+          "configs": [
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "firewall_enable",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "firewall_switch",
+          "impact": "network",
+          "readback": "firewall",
+          "title": "切换防火墙"
+        },
+        {
+          "configs": [
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "spi_firewall",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "spi_switch",
+          "impact": "network",
+          "readback": "spi",
+          "title": "切换 SPI 防护"
+        },
+        {
+          "configs": [
+            "firewall",
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "dos_firewall",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "dos_switch",
+          "impact": "network",
+          "readback": "dos",
+          "title": "切换 DoS 防护"
+        },
+        {
+          "configs": [
+            "firewall"
+          ],
+          "fields": [
+            {
+              "key": "wanping_firewall",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "wan_ping_switch",
+          "impact": "network",
+          "readback": "wan_ping",
+          "title": "切换 WAN Ping 策略"
+        },
+        {
+          "configs": [
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "anti_rpfilter",
+          "impact": "network",
+          "readback": "anti_attack",
+          "title": "切换反向路径检查"
+        },
+        {
+          "configs": [
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "anti_dos",
+          "impact": "network",
+          "readback": "anti_attack",
+          "title": "切换原厂 DoS 防护"
+        },
+        {
+          "configs": [
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "enable",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "anti_scan",
+          "impact": "network",
+          "readback": "anti_attack",
+          "title": "切换扫描防护"
+        },
+        {
+          "configs": [
+            "nginx"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "https_switch",
+          "impact": "network",
+          "readback": "https",
+          "title": "切换强制 HTTPS"
+        },
+        {
+          "configs": [
+            "local_gw_security"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "gateway_security",
+          "impact": "network",
+          "readback": "gateway_security",
+          "title": "切换网关安全"
+        },
+        {
+          "configs": [
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "name",
+              "kind": "text",
+              "label": "名称（最多 27 字节）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "locale",
+              "kind": "text",
+              "label": "位置（最多 24 字节）",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "router_name",
+          "impact": "local",
+          "readback": "router_name",
+          "title": "修改路由器名称"
+        },
+        {
+          "configs": [
+            "system"
+          ],
+          "fields": [
+            {
+              "key": "time",
+              "kind": "text",
+              "label": "手动时间 YYYY-MM-DD HH:MM:SS",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "timezone",
+              "kind": "text",
+              "label": "时区显示名称",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "index",
+              "kind": "text",
+              "label": "原厂时区索引",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "time_set",
+          "impact": "local",
+          "readback": "time",
+          "title": "设置时区或手动时间"
+        },
+        {
+          "configs": [
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "integer",
+              "label": "指示灯开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "timer_on",
+              "kind": "integer",
+              "label": "定时开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "timer_open",
+              "kind": "text",
+              "label": "开启时间 HH:MM",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "timer_close",
+              "kind": "text",
+              "label": "关闭时间 HH:MM",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "led_set",
+          "impact": "local",
+          "readback": "led",
+          "title": "设置状态灯与时段"
+        },
+        {
+          "configs": [
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "integer",
+              "label": "指示灯开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "timer_on",
+              "kind": "integer",
+              "label": "定时开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "timer_open",
+              "kind": "text",
+              "label": "开启时间 HH:MM",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            },
+            {
+              "key": "timer_close",
+              "kind": "text",
+              "label": "关闭时间 HH:MM",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "eth_led_set",
+          "impact": "local",
+          "readback": "eth_led",
+          "title": "设置网口灯与时段"
+        },
+        {
+          "configs": [
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "on",
+              "kind": "integer",
+              "label": "开关",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "all_led_set",
+          "impact": "local",
+          "readback": "all_led",
+          "title": "设置全部指示灯"
+        },
+        {
+          "configs": [
+            "otapred"
+          ],
+          "fields": [
+            {
+              "key": "auto",
+              "kind": "integer",
+              "label": "自动 OTA",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "ota_set",
+          "impact": "maintenance",
+          "readback": "ota",
+          "title": "设置自动 OTA"
+        },
+        {
+          "configs": [
+            "system",
+            "xiaoqiang"
+          ],
+          "fields": [
+            {
+              "key": "client",
+              "kind": "select",
+              "label": "客户端标记",
+              "max": null,
+              "min": null,
+              "options": [
+                "web"
+              ],
+              "required": false
+            }
+          ],
+          "id": "reboot",
+          "impact": "maintenance",
+          "readback": "version",
+          "title": "重启路由器（维护任务）"
+        },
+        {
+          "configs": [
+            "system",
+            "network",
+            "wireless",
+            "dhcp",
+            "firewall",
+            "xiaoqiang",
+            "macfilter",
+            "miqos",
+            "ddns",
+            "nginx",
+            "webfilter"
+          ],
+          "fields": [
+            {
+              "key": "format",
+              "kind": "integer",
+              "label": "不格式化用户磁盘",
+              "max": 0,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "factory_reset",
+          "impact": "maintenance",
+          "readback": "version",
+          "title": "恢复出厂（独立维护任务）"
+        },
+        {
+          "configs": [
+            "system",
+            "network",
+            "wireless",
+            "dhcp",
+            "firewall",
+            "xiaoqiang",
+            "miqos",
+            "ddns",
+            "nginx"
+          ],
+          "fields": [],
+          "id": "official_upgrade",
+          "impact": "maintenance",
+          "readback": "upgrade_status",
+          "title": "下载并升级官方固件"
+        },
+        {
+          "configs": [
+            "system"
+          ],
+          "fields": [
+            {
+              "key": "server1",
+              "kind": "text",
+              "label": "NTP 主服务器",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "server2",
+              "kind": "text",
+              "label": "NTP 备用服务器",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "ntp_set",
+          "impact": "local",
+          "readback": "ntp",
+          "title": "设置 NTP 服务器"
+        },
+        {
+          "configs": [
+            "system"
+          ],
+          "fields": [
+            {
+              "key": "sync",
+              "kind": "integer",
+              "label": "立即对时",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "mode",
+              "kind": "integer",
+              "label": "模式（0 NTP / 1 手动）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "time_mode_set",
+          "impact": "local",
+          "readback": "time_mode",
+          "title": "切换自动对时模式"
+        },
+        {
+          "configs": [
+            "system"
+          ],
+          "fields": [
+            {
+              "key": "enabled",
+              "kind": "boolean",
+              "label": "启用计划",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "time",
+              "kind": "text",
+              "label": "本地时间 HH:MM",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            },
+            {
+              "key": "weekdays",
+              "kind": "json",
+              "label": "星期 0–6 列表",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "scheduled_reboot_set",
+          "impact": "maintenance",
+          "readback": "scheduled_reboot",
+          "title": "设置计划重启"
+        },
+        {
+          "configs": [
+            "mipctl_user",
+            "macfilter",
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "opt_list",
+              "kind": "json",
+              "label": "单项原厂 v2 操作：mipctl_add_user",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_user_add",
+          "impact": "network",
+          "readback": "parental_users",
+          "title": "添加家庭用户"
+        },
+        {
+          "configs": [
+            "mipctl_user",
+            "macfilter",
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "opt_list",
+              "kind": "json",
+              "label": "单项原厂 v2 操作：mipctl_edit_user",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_user_edit",
+          "impact": "network",
+          "readback": "parental_users",
+          "title": "修改家庭用户"
+        },
+        {
+          "configs": [
+            "mipctl_user",
+            "macfilter",
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "opt_list",
+              "kind": "json",
+              "label": "单项原厂 v2 操作：mipctl_del_user",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_user_delete",
+          "impact": "network",
+          "readback": "parental_users",
+          "title": "删除家庭用户"
+        },
+        {
+          "configs": [
+            "mipctl_user",
+            "macfilter",
+            "firewall_cpp",
+            "parentalctl"
+          ],
+          "fields": [
+            {
+              "key": "opt_list",
+              "kind": "json",
+              "label": "单项原厂 v2 操作：mipctl_set_device",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_devices_set",
+          "impact": "network",
+          "readback": "parental_devices",
+          "title": "设置家庭设备归属"
+        },
+        {
+          "configs": [
+            "mipctl_user",
+            "macfilter",
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "opt_list",
+              "kind": "json",
+              "label": "单项原厂 v2 操作：mipctl_set_deny_time",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_time_set",
+          "impact": "network",
+          "readback": "parental_time",
+          "title": "设置家庭禁网时段"
+        },
+        {
+          "configs": [
+            "mipctl_user",
+            "macfilter",
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "opt_list",
+              "kind": "json",
+              "label": "单项原厂 v2 操作：mipctl_set_app_antiaddict",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_apps_set",
+          "impact": "network",
+          "readback": "parental_apps",
+          "title": "设置家庭应用限时"
+        },
+        {
+          "configs": [
+            "mipctl_user",
+            "macfilter",
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "opt_list",
+              "kind": "json",
+              "label": "单项原厂 v2 操作：mipctl_set_filting_net",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_hosts_set",
+          "impact": "network",
+          "readback": "parental_hosts",
+          "title": "设置家庭域名过滤"
+        },
+        {
+          "configs": [
+            "mipctl_user",
+            "macfilter",
+            "firewall_cpp"
+          ],
+          "fields": [
+            {
+              "key": "opt_list",
+              "kind": "json",
+              "label": "单项原厂 v2 操作：mipctl_set_temp_deny",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_temporary_set",
+          "impact": "network",
+          "readback": "parental_temporary",
+          "title": "设置家庭临时禁网"
+        }
+      ],
+      "id": "services",
+      "reads": [
+        {
+          "fields": [
+            {
+              "key": "ftype",
+              "kind": "integer",
+              "label": "规则类型（0 全部 / 1 单端口 / 2 区间）",
+              "max": 2,
+              "min": 0,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "forwarding",
+          "title": "端口转发"
+        },
+        {
+          "fields": [],
+          "id": "dmz",
+          "title": "DMZ 入站暴露"
+        },
+        {
+          "fields": [],
+          "id": "upnp",
+          "title": "UPnP 映射"
+        },
+        {
+          "fields": [],
+          "id": "ddns",
+          "title": "DDNS 实例"
+        },
+        {
+          "fields": [
+            {
+              "key": "id",
+              "kind": "integer",
+              "label": "服务商 ID（1–9）",
+              "max": 9,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "ddns_detail",
+          "title": "DDNS 实例设置"
+        },
+        {
+          "fields": [],
+          "id": "qos",
+          "title": "QoS 模式、设备与访客"
+        },
+        {
+          "fields": [
+            {
+              "key": "mac",
+              "kind": "mac",
+              "label": "设备 MAC",
+              "max": null,
+              "min": null,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "qos_device",
+          "title": "设备限速"
+        },
+        {
+          "fields": [],
+          "id": "acceleration_setting",
+          "title": "原厂加速强制启用配置（不是实际引擎状态）"
+        },
+        {
+          "fields": [
+            {
+              "key": "model",
+              "kind": "integer",
+              "label": "名单（0 黑 / 1 白）",
+              "max": 1,
+              "min": 0,
+              "options": [],
+              "required": false
+            }
+          ],
+          "id": "access",
+          "title": "无线黑白名单"
+        },
+        {
+          "fields": [],
+          "id": "web_access",
+          "title": "管理入口访问名单"
+        },
+        {
+          "fields": [],
+          "id": "firewall",
+          "title": "防火墙总开关"
+        },
+        {
+          "fields": [],
+          "id": "spi",
+          "title": "SPI 防护"
+        },
+        {
+          "fields": [],
+          "id": "dos",
+          "title": "DoS 防护"
+        },
+        {
+          "fields": [],
+          "id": "wan_ping",
+          "title": "WAN Ping 策略"
+        },
+        {
+          "fields": [],
+          "id": "https",
+          "title": "强制 HTTPS"
+        },
+        {
+          "fields": [],
+          "id": "anti_attack",
+          "title": "反向路径、DoS 与扫描防护"
+        },
+        {
+          "fields": [],
+          "id": "gateway_security",
+          "title": "网关安全"
+        },
+        {
+          "fields": [],
+          "id": "parental_users",
+          "title": "家庭用户"
+        },
+        {
+          "fields": [],
+          "id": "parental_devices",
+          "title": "家庭设备归属"
+        },
+        {
+          "fields": [
+            {
+              "key": "user_id",
+              "kind": "integer",
+              "label": "家庭用户 ID",
+              "max": 65535,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_time",
+          "title": "家庭禁网时段"
+        },
+        {
+          "fields": [
+            {
+              "key": "user_id",
+              "kind": "integer",
+              "label": "家庭用户 ID",
+              "max": 65535,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_apps",
+          "title": "家庭应用限时"
+        },
+        {
+          "fields": [
+            {
+              "key": "user_id",
+              "kind": "integer",
+              "label": "家庭用户 ID",
+              "max": 65535,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_hosts",
+          "title": "家庭域名过滤"
+        },
+        {
+          "fields": [
+            {
+              "key": "user_id",
+              "kind": "integer",
+              "label": "家庭用户 ID",
+              "max": 65535,
+              "min": 1,
+              "options": [],
+              "required": true
+            }
+          ],
+          "id": "parental_temporary",
+          "title": "家庭临时禁网"
+        },
+        {
+          "fields": [],
+          "id": "router_name",
+          "title": "路由器名称"
+        },
+        {
+          "fields": [],
+          "id": "time",
+          "title": "系统时间与时区"
+        },
+        {
+          "fields": [],
+          "id": "led",
+          "title": "状态灯与时段"
+        },
+        {
+          "fields": [],
+          "id": "eth_led",
+          "title": "网口灯与时段"
+        },
+        {
+          "fields": [],
+          "id": "all_led",
+          "title": "全部指示灯"
+        },
+        {
+          "fields": [],
+          "id": "version",
+          "title": "型号与 ROM 版本"
+        },
+        {
+          "fields": [],
+          "id": "ota",
+          "title": "自动 OTA 设置"
+        },
+        {
+          "fields": [],
+          "id": "rom_update",
+          "title": "官方 ROM 更新状态"
+        },
+        {
+          "fields": [],
+          "id": "upgrade_status",
+          "title": "官方升级任务进度"
+        },
+        {
+          "fields": [],
+          "id": "ntp",
+          "title": "NTP 服务器"
+        },
+        {
+          "fields": [],
+          "id": "time_mode",
+          "title": "自动对时模式"
+        },
+        {
+          "fields": [],
+          "id": "scheduled_reboot",
+          "title": "计划重启"
+        },
+        {
+          "fields": [],
+          "id": "acceleration_status",
+          "title": "实际硬件加速引擎与计数"
+        },
+        {
+          "fields": [],
+          "id": "qos_history",
+          "title": "设备原厂 QoS 配置"
+        }
+      ],
+      "title": "服务、访问策略与系统维护"
+    }
+  ],
+  "generation": 1,
+  "writeReady": false
+}

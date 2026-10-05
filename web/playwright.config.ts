@@ -24,6 +24,7 @@ export default defineConfig({
     "node-probes.spec.ts",
     "maturity-scale.spec.ts",
     "maturity-workflows.spec.ts",
+    "features.spec.ts",
   ],
   webServer: {
     command: "bun run dev -- --port 5173 --strictPort",

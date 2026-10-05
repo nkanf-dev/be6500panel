@@ -5,8 +5,10 @@ import {
   Cpu,
   FileText,
   RefreshCw,
+  Server,
   Terminal,
 } from "lucide-react";
+import { ServicesFeaturesPanel } from "./features";
 import {
   Badge,
   Button,
@@ -54,6 +56,7 @@ export function SystemPage() {
         <div className="segmented" role="tablist" aria-label="系统视图">
           {[
             { id: "resources", label: "系统资源", icon: Cpu },
+            { id: "features", label: "高级服务", icon: Server },
             { id: "diagnostics", label: "诊断与日志", icon: FileText },
             { id: "services", label: "服务管理", icon: Terminal },
             { id: "backup", label: "备份与导入", icon: FileText },
@@ -80,7 +83,9 @@ export function SystemPage() {
       {systemError !== undefined && (
         <ErrorState message={errorMessage(systemError)} onRetry={refresh} />
       )}
-      {tab === "backup" ? (
+      {tab === "features" ? (
+        <ServicesFeaturesPanel />
+      ) : tab === "backup" ? (
         <MaintenanceBackupPanel onOpenConfiguration={() => setTab("changes")} />
       ) : tab === "services" ? (
         <ServiceStatusPanel />

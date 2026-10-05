@@ -16,6 +16,7 @@ import { useConsole } from "../app/console-context";
 import { RouterNetworkObservations } from "./router-network";
 import { ConfigurationEditor } from "../components/configuration";
 import { RouterViewTabs, type RouterView } from "./router-view-tabs";
+import { NetworkFeaturesPanel } from "./features";
 
 export function NetworkPage() {
   const { data, error, loading, reload } = useResource(api.network);
@@ -46,7 +47,9 @@ export function NetworkPage() {
       <div className="page-toolbar">
         <RouterViewTabs label="网络视图" value={view} onChange={setView} />
       </div>
-      {view === "configuration" ? (
+      {view === "features" ? (
+        <NetworkFeaturesPanel />
+      ) : view === "configuration" ? (
         <ConfigurationEditor module="network" />
       ) : (
         <>
