@@ -29,6 +29,12 @@ jobs:
       - name: ARMv7 linker
         run: sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf
       - run: make setup
+      - name: Installer and rescue scripts
+        run: |
+          python3 tests/enable_ssh_test.py
+          python3 tests/install_panel_test.py
+          python3 tests/rescue_install_test.py
+          pwsh -NoLogo -NoProfile -File tests/installer_powershell_test.ps1
       - run: make test
       - run: make build armv7
         env:

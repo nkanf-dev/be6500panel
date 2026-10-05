@@ -217,6 +217,14 @@ impl Service {
             }
         }
     }
+    /// Cheap caller-driven PTY IO; no session means no collection.
+    pub(crate) fn terminal_tick(&self) {
+        if let Some(product) = &self.product
+            && let Ok(mut product) = product.lock()
+        {
+            product.terminal_tick();
+        }
+    }
     pub fn product_close(&self) -> bool {
         let mut done = true;
         if let Some(product) = &self.product {
@@ -365,7 +373,8 @@ impl Service {
         let peer = stream.peer_addr()?.ip();
         let response_budget = if (crate::runtime_http::is_runtime_path(request.path())
             || matches!(request.path(), "/api/proxy/import" | "/api/proxy/select")
-            || crate::product_gateway::is_product_path(request.path()))
+            || (crate::product_gateway::is_product_path(request.path())
+                && !crate::product_terminal::is_terminal_path(request.path())))
             && request.method == Method::Post
         {
             write_budget.max(Duration::from_secs(90))
@@ -394,6 +403,19 @@ impl Service {
                 "Unauthorized",
                 "unauthenticated",
                 "Authentication required.",
+                head_only,
+                &[],
+            );
+        }
+        if crate::product_terminal::is_terminal_path(request.path())
+            && (!auth.required() || runtime.is_none() || self.product.is_none())
+        {
+            return api_error(
+                &mut writer,
+                503,
+                "Service Unavailable",
+                "terminal_native_only",
+                "Terminal requires authenticated native mode.",
                 head_only,
                 &[],
             );
@@ -450,6 +472,8 @@ impl Service {
                         "/api/configuration/commit" | "/api/configuration/rollback"
                     ) {
                         Duration::from_secs(90)
+                    } else if crate::product_terminal::is_terminal_path(request.path()) {
+                        Duration::from_secs(1)
                     } else {
                         Duration::from_secs(15)
                     },
@@ -615,9 +639,12 @@ impl Service {
             }
             "/api/session/logout" if request.method == Method::Post => {
                 if let Some(product) = &self.product
-                    && let Ok(product) = product.lock()
+                    && let Ok(mut product) = product.lock()
                 {
                     product.clear_previews();
+                    if auth.authenticated(request.cookie) {
+                        product.terminal_close();
+                    }
                 }
                 auth.logout(request.cookie);
                 session_response(

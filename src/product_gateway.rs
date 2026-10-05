@@ -80,6 +80,7 @@ pub struct Product<B = Native> {
     plans: Plans,
     logs: Logs,
     features: crate::features_gateway::Features,
+    terminal: crate::product_terminal::Terminal,
 }
 impl Product<Native> {
     pub fn open(path: &Path) -> Self {
@@ -126,6 +127,7 @@ impl<B: Backend> Product<B> {
             plans: Plans::new(),
             logs: Logs::new(),
             features: crate::features_gateway::Features::open(path),
+            terminal: crate::product_terminal::Terminal::new(),
         }
     }
     pub fn close(&mut self) -> bool {
@@ -142,7 +144,14 @@ impl<B: Backend> Product<B> {
                 "Traffic final durability needs retry.",
             );
         }
-        diagnostics_done
+        let terminal_done = self.terminal.close();
+        diagnostics_done && terminal_done
+    }
+    pub fn terminal_tick(&mut self) {
+        self.terminal.tick();
+    }
+    pub fn terminal_close(&mut self) -> bool {
+        self.terminal.close()
     }
     pub fn replace_configuration(&mut self, configuration: Configuration) {
         self.configuration = Ok(configuration);
@@ -360,6 +369,21 @@ impl<B: Backend> Product<B> {
             method
         };
         let mut runtime = runtime;
+        if path.starts_with("/api/terminal/") {
+            if runtime.is_none() {
+                return Err(unavailable("terminal_native_only"));
+            }
+            if !matches!(method, Method::Get | Method::Head)
+                && runtime
+                    .as_deref()
+                    .is_some_and(|owner| !owner.subscription_import_allowed())
+                && path != "/api/terminal/close"
+            {
+                return Err(unavailable("runtime_shutting_down"));
+            }
+            let value = self.terminal.handle(path, method, query, body, budget)?;
+            return Ok(Response::Json { status: 200, value });
+        }
         if !matches!(method, Method::Get | Method::Head)
             && runtime
                 .as_deref()
@@ -868,6 +892,7 @@ pub enum Response {
 }
 pub fn is_product_path(path: &str) -> bool {
     path.starts_with("/api/features/")
+        || crate::product_terminal::is_terminal_path(path)
         || matches!(
             path,
             "/api/system"

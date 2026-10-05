@@ -9,6 +9,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { ServicesFeaturesPanel } from "./features";
+import { TerminalPanel } from "./terminal";
 import {
   Badge,
   Button,
@@ -57,6 +58,7 @@ export function SystemPage() {
           {[
             { id: "resources", label: "系统资源", icon: Cpu },
             { id: "features", label: "高级服务", icon: Server },
+            { id: "terminal", label: "终端", icon: Terminal },
             { id: "diagnostics", label: "诊断与日志", icon: FileText },
             { id: "services", label: "服务管理", icon: Terminal },
             { id: "backup", label: "备份与导入", icon: FileText },
@@ -85,6 +87,8 @@ export function SystemPage() {
       )}
       {tab === "features" ? (
         <ServicesFeaturesPanel />
+      ) : tab === "terminal" ? (
+        <TerminalPanel />
       ) : tab === "backup" ? (
         <MaintenanceBackupPanel onOpenConfiguration={() => setTab("changes")} />
       ) : tab === "services" ? (

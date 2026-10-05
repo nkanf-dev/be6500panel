@@ -249,6 +249,10 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
                 | "/api/proxy/plan"
                 | "/api/frpc/plan"
                 | "/api/operations/apply"
+                | "/api/terminal/open"
+                | "/api/terminal/input"
+                | "/api/terminal/resize"
+                | "/api/terminal/close"
         )
     {
         return Err(error(ErrorKind::MethodNotAllowed, bytes));
@@ -262,6 +266,7 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
                 | "/api/configuration/drafts"
                 | "/api/maintenance/import/preview"
                 | "/api/proxy/node-probes"
+                | "/api/terminal/close"
         )
     {
         return Err(error(ErrorKind::MethodNotAllowed, bytes));
@@ -276,6 +281,10 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
     }
     let limit = match request.path() {
         "/api/session/login" => MAX_LOGIN_BODY_BYTES,
+        "/api/terminal/open"
+        | "/api/terminal/input"
+        | "/api/terminal/resize"
+        | "/api/terminal/close" => 12 << 10,
         "/api/proxy/local-rules" | "/api/proxy/local-rules/preview" => MAX_RULES_BODY_BYTES,
         "/api/runtime/configure" => MAX_RUNTIME_BODY_BYTES,
         "/api/proxy/import" => MAX_IMPORT_BODY_BYTES,

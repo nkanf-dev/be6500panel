@@ -413,10 +413,10 @@ fn descendant_dead(pid: u32) -> bool {
     }
     #[cfg(target_os = "linux")]
     {
-        return fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| {
+        fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| {
             s.split_once(") ")
                 .is_some_and(|(_, rest)| rest.starts_with('Z'))
-        });
+        })
     }
     #[cfg(not(target_os = "linux"))]
     false

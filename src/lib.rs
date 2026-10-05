@@ -51,6 +51,8 @@ pub mod product_plans;
 pub mod product_support;
 #[cfg(unix)]
 pub mod product_telemetry;
+#[cfg(unix)]
+pub mod product_terminal;
 pub mod readiness_dns;
 #[cfg(unix)]
 pub mod readiness_tun;
