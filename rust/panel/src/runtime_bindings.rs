@@ -90,9 +90,7 @@ fn command_object<'de, D: Deserializer<'de>>(d: D) -> Result<Command, D::Error> 
     }
     d.deserialize_map(V)
 }
-fn optional_command_object<'de, D: Deserializer<'de>>(
-    d: D,
-) -> Result<Option<Command>, D::Error> {
+fn optional_command_object<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Command>, D::Error> {
     command_object(d).map(Some)
 }
 
@@ -110,7 +108,10 @@ fn local_artifact(
     let path = Path::new(&command.path);
     if !path.is_absolute()
         || path.as_os_str().as_bytes().contains(&0)
-        || path.as_os_str().as_bytes().split(|b| *b == b'/')
+        || path
+            .as_os_str()
+            .as_bytes()
+            .split(|b| *b == b'/')
             .any(|c| c == b"." || c == b"..")
         || path.file_name().is_none()
     {
@@ -358,7 +359,10 @@ mod tests {
         let f = Fixture::new();
         let command = f.root.join("command");
         let marker = f.root.join("executed");
-        let source = format!("#!/bin/sh\nprintf executed > '{}'\nexit 9\n", marker.display());
+        let source = format!(
+            "#!/bin/sh\nprintf executed > '{}'\nexit 9\n",
+            marker.display()
+        );
         fs::write(&command, source.as_bytes()).unwrap();
         fs::set_permissions(&command, fs::Permissions::from_mode(0o700)).unwrap();
         let sha = format!("{:x}", Sha256::digest(source.as_bytes()));
@@ -401,14 +405,34 @@ mod tests {
                 assert!(serde_json::from_value::<Object>(raw).is_err());
             }
         }
-        for path in ["relative/core", "/private/../core", "/private/./core", "/core", "/"] {
-            assert!(local_artifact(ServiceId::SingBox, Some(Command {
-                path: path.into(), sha256: "00".repeat(32),
-            })).is_err());
+        for path in [
+            "relative/core",
+            "/private/../core",
+            "/private/./core",
+            "/core",
+            "/",
+        ] {
+            assert!(
+                local_artifact(
+                    ServiceId::SingBox,
+                    Some(Command {
+                        path: path.into(),
+                        sha256: "00".repeat(32),
+                    })
+                )
+                .is_err()
+            );
         }
-        assert!(local_artifact(ServiceId::Frpc, Some(Command {
-            path: "/private/core".into(), sha256: "invalid".into(),
-        })).is_err());
+        assert!(
+            local_artifact(
+                ServiceId::Frpc,
+                Some(Command {
+                    path: "/private/core".into(),
+                    sha256: "invalid".into(),
+                })
+            )
+            .is_err()
+        );
         let duplicate = r#"{"ip":{"path":"/private/ip","sha256":""},"iptables":{"path":"/private/iptables","sha256":""},"dnsBootstrap":"127.0.0.1:53","singBox":{},"singBox":{}}"#;
         assert!(serde_json::from_str::<Object>(duplicate).is_err());
     }

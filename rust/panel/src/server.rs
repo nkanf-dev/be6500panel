@@ -20,6 +20,7 @@ pub struct Service {
     // None means no data directory; Err isolates a failed rule feature.
     rules: Option<Mutex<Result<RulesState, rules_http::RulesError>>>,
     streams: Mutex<crate::product_events::Streams>,
+    product: Option<Mutex<crate::product_gateway::Product>>,
 }
 
 #[derive(Clone, Copy)]
@@ -136,6 +137,7 @@ impl Service {
             auth: Mutex::new(Auth::new("")),
             rules: None,
             streams: Mutex::new(crate::product_events::Streams::new()),
+            product: None,
         }
     }
 
@@ -159,6 +161,57 @@ impl Service {
         self
     }
 
+    pub fn with_product_data_dir(mut self, data: &Path, run: &Path) -> Self {
+        self.product = Some(Mutex::new(crate::product_gateway::Product::open_with_run(
+            data, run,
+        )));
+        self
+    }
+    pub(crate) fn product_tick(&self, mut runtime: Option<&mut crate::runtime_http::RuntimeHttp>) {
+        if let Some(product) = &self.product
+            && let Ok(mut product) = product.lock()
+        {
+            if let Some(rules) = &self.rules
+                && let Ok(state) = rules.lock()
+                && let Ok(state) = state.as_ref()
+            {
+                let cancel = std::sync::atomic::AtomicBool::new(false);
+                let budget = crate::readiness_tun::Budget {
+                    deadline: Instant::now() + Duration::from_secs(1),
+                    cancel: &cancel,
+                };
+                if let Some(owner) = runtime.as_deref_mut() {
+                    product.diagnostic_bindings(
+                        owner,
+                        state.product_revision(),
+                        state.product_source_identity(),
+                        state.product_nodes(),
+                        &budget,
+                    );
+                }
+                product.tick(runtime, state.product_nodes());
+            } else {
+                product.tick(runtime, &[]);
+            }
+            if self.stream_snapshot_due() {
+                let now = product.now();
+                let system = product
+                    .system()
+                    .map_err(|error| (error.code, error.message));
+                self.publish_system_stream(system, now);
+            }
+        }
+    }
+    pub fn product_close(&self) -> bool {
+        let mut done = true;
+        if let Some(product) = &self.product {
+            done = product.lock().is_ok_and(|mut product| product.close());
+        }
+        if let Ok(mut streams) = self.streams.lock() {
+            streams.close();
+        }
+        done
+    }
     pub fn stream_snapshot_due(&self) -> bool {
         self.streams.lock().is_ok_and(|streams| streams.due())
     }
@@ -227,7 +280,7 @@ impl Service {
         stream: &mut TcpStream,
         read_budget: Duration,
         write_budget: Duration,
-        runtime: Option<&mut crate::runtime_http::RuntimeHttp>,
+        mut runtime: Option<&mut crate::runtime_http::RuntimeHttp>,
         streaming: &mut bool,
     ) -> io::Result<()> {
         let deadline = Instant::now() + read_budget;
@@ -295,7 +348,8 @@ impl Service {
             };
         let peer = stream.peer_addr()?.ip();
         let response_budget = if (crate::runtime_http::is_runtime_path(request.path())
-            || matches!(request.path(), "/api/proxy/import" | "/api/proxy/select"))
+            || matches!(request.path(), "/api/proxy/import" | "/api/proxy/select")
+            || crate::product_gateway::is_product_path(request.path()))
             && request.method == Method::Post
         {
             write_budget.max(Duration::from_secs(90))
@@ -362,6 +416,69 @@ impl Service {
             streams.add(stream.try_clone()?, request.cookie)?;
             *streaming = true;
             return Ok(());
+        }
+
+        if crate::product_gateway::is_product_path(request.path()) && self.product.is_some() {
+            drop(auth);
+            let Some(product) = &self.product else {
+                unreachable!()
+            };
+            let mut product = product
+                .lock()
+                .map_err(|_| io::Error::other("product owner unavailable"))?;
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let budget = crate::readiness_tun::Budget {
+                deadline: Instant::now()
+                    + if matches!(
+                        request.path(),
+                        "/api/configuration/commit" | "/api/configuration/rollback"
+                    ) {
+                        Duration::from_secs(90)
+                    } else {
+                        Duration::from_secs(15)
+                    },
+                cancel: &cancel,
+            };
+            let (_, query) = request
+                .target
+                .split_once('?')
+                .unwrap_or((request.target, ""));
+            let result = if let Some(rules) = &self.rules
+                && let Ok(state) = rules.lock()
+                && let Ok(state) = state.as_ref()
+            {
+                if let Some(owner) = runtime.as_deref_mut() {
+                    product.diagnostic_bindings(
+                        owner,
+                        state.product_revision(),
+                        state.product_source_identity(),
+                        state.product_nodes(),
+                        &budget,
+                    );
+                }
+                product.handle(
+                    request.path(),
+                    request.method,
+                    query,
+                    &body,
+                    Some(peer),
+                    runtime,
+                    state.product_nodes(),
+                    &budget,
+                )
+            } else {
+                product.handle(
+                    request.path(),
+                    request.method,
+                    query,
+                    &body,
+                    Some(peer),
+                    runtime,
+                    &[],
+                    &budget,
+                )
+            };
+            return crate::product_gateway::write(&mut writer, result, head_only);
         }
         if crate::runtime_http::is_runtime_path(request.path())
             || request.path() == "/api/proxy/capture"
@@ -475,6 +592,11 @@ impl Service {
                 )
             }
             "/api/session/logout" if request.method == Method::Post => {
+                if let Some(product) = &self.product
+                    && let Ok(product) = product.lock()
+                {
+                    product.clear_previews();
+                }
                 auth.logout(request.cookie);
                 session_response(
                     &mut writer,
@@ -503,7 +625,7 @@ impl Service {
             "/api/health" if request.method != Method::Post => {
                 drop(auth);
                 let body = if runtime.is_some() {
-                    b"{\"status\":\"ok\",\"mode\":\"manager\",\"readOnly\":false,\"runtimeEnabled\":true}".as_slice()
+                    b"{\"status\":\"ok\",\"mode\":\"host\",\"readOnly\":false,\"runtimeEnabled\":true}".as_slice()
                 } else if self.draft_writes_available() {
                     b"{\"status\":\"ok\",\"mode\":\"host\",\"readOnly\":false}".as_slice()
                 } else {

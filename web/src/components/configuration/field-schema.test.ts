@@ -314,3 +314,9 @@ describe("module and section aware UCI metadata", () => {
     expect(fieldSchema("dropbear", "dropbear", "verbose").widget).toBe("text");
   });
 });
+
+it("accepts native cron verbosity without borrowing console log limits", () => {
+  expect(fieldSchema("system", "system", "cronloglevel")).toMatchObject({widget:"number", min:0});
+  expect(fieldSchema("system", "system", "cronloglevel")?.max).toBeUndefined();
+  expect(fieldSchema("system", "system", "conloglevel")?.max).toBe(8);
+});

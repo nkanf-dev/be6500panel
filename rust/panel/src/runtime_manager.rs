@@ -829,6 +829,12 @@ impl Manager {
     }
     /// The borrowed identity is only this manager's current owned handle.
     /// `status` observes exit; this accessor does not assert liveness/readiness.
+    pub(crate) fn product_artifact(&self, service: ServiceId) -> Option<(PathBuf, [u8; 32])> {
+        self.services[service.index()]
+            .binding
+            .as_ref()
+            .map(|binding| (binding.path.clone(), binding.sha256))
+    }
     pub fn current_run(&self, service: ServiceId) -> Option<&OwnedRunIdentity> {
         self.services[service.index()]
             .run

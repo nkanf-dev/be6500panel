@@ -145,6 +145,16 @@ fn run(options: Options) -> Result<(), &'static str> {
     let _signals = be6500_panel::shutdown::SignalGuard::install()
         .map_err(|_| "shutdown signal setup unavailable")?;
     if let Some(bindings) = bindings {
+        let product_data = options
+            .data_dir
+            .as_ref()
+            .expect("validated native option")
+            .clone();
+        let product_run = options
+            .run_dir
+            .as_ref()
+            .expect("validated native option")
+            .clone();
         let mut owner = be6500_panel::native_owner::NativeOwner::open_with_artifacts(
             be6500_panel::native_owner::Options {
                 data_dir: options.data_dir.expect("validated native option"),
@@ -157,6 +167,7 @@ fn run(options: Options) -> Result<(), &'static str> {
             std::rc::Rc::new(std::sync::atomic::AtomicBool::new(false)),
         )
         .map_err(|_| "native owner unavailable")?;
+        service = service.with_product_data_dir(&product_data, &product_run);
         if owner.initialize().is_err() {
             eprintln!("be6500-panel: native startup recovery pending");
         }
@@ -169,6 +180,7 @@ fn run(options: Options) -> Result<(), &'static str> {
         // Three bounded initial attempts. A failure MUST keep the creator
         // process, lock and owned handles alive; returning would kill a Linux
         // PDEATHSIG core while interception could still be installed.
+        let mut product_closed = service.product_close();
         let mut close_result = owner.close();
         for delay in [100, 200] {
             if close_result.is_ok() {
@@ -180,7 +192,7 @@ fn run(options: Options) -> Result<(), &'static str> {
         if close_result.is_err() {
             eprintln!("be6500-panel: native shutdown cleanup pending; owner retained");
         }
-        while close_result.is_err() {
+        while close_result.is_err() || !product_closed {
             let sequence = be6500_panel::shutdown::sequence();
             let retry = be6500_panel::server_loop::serve_cleanup(
                 &listener,
@@ -195,6 +207,7 @@ fn run(options: Options) -> Result<(), &'static str> {
                     be6500_panel::shutdown::wait_cleanup_retry(100);
                 }
             }
+            product_closed = service.product_close();
             close_result = owner.close();
         }
         // A prior cleanup refusal is resolved, not a current failure. A real

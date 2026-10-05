@@ -178,7 +178,12 @@ impl NativeOwner {
         cancel: Rc<AtomicBool>,
     ) -> Result<Self, OpenError> {
         Self::open_with_artifacts(
-            options, binaries, names, source, ArtifactBindings::default(), cancel,
+            options,
+            binaries,
+            names,
+            source,
+            ArtifactBindings::default(),
+            cancel,
         )
     }
     /// Attach only caller-supplied trusted local release bindings. Loading does
@@ -326,16 +331,25 @@ mod tests {
     #[test]
     fn explicit_local_bindings_and_saved_on_are_load_only_until_initialize() {
         use crate::runtime_manager::{ArtifactBinding, ArtifactProvenance};
-        let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!(
-            "native-owner-local-{}-{}", std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
+        let root = fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!(
+                "native-owner-local-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         for part in ["data", "run"] {
-            fs::DirBuilder::new().mode(0o700).create(root.join(part)).unwrap();
+            fs::DirBuilder::new()
+                .mode(0o700)
+                .create(root.join(part))
+                .unwrap();
         }
         let marker = root.join("executed");
-        let source = format!("#!/bin/sh\nprintf executed > '{}'\nexit 9\n", marker.display());
+        let source = format!(
+            "#!/bin/sh\nprintf executed > '{}'\nexit 9\n",
+            marker.display()
+        );
         let command = root.join("command");
         fs::write(&command, source.as_bytes()).unwrap();
         fs::set_permissions(&command, fs::Permissions::from_mode(0o700)).unwrap();
@@ -350,7 +364,10 @@ mod tests {
                     fs::write(&path, source.as_bytes()).unwrap();
                     fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
                     let binding = ArtifactBinding::trusted_local(
-                        service, directory, path, digest,
+                        service,
+                        directory,
+                        path,
+                        digest,
                         ArtifactProvenance::TrustedLocalModule,
                     );
                     match service {
@@ -366,33 +383,51 @@ mod tests {
                 ip: TrustedBinary::admit(&command, digest).unwrap(),
                 iptables: TrustedBinary::admit(&command, digest).unwrap(),
             };
-            let options = Options { data_dir: root.join("data"), run_dir: root.join("run") };
+            let options = Options {
+                data_dir: root.join("data"),
+                run_dir: root.join("run"),
+            };
             let source = SourcePolicy::native("127.0.0.1:53".parse().unwrap()).unwrap();
             let cancel = Rc::new(AtomicBool::new(false));
             let mut owner = if explicit {
                 NativeOwner::open_with_artifacts(
-                    options, binaries, capture_kernel::table_names(b"").unwrap(),
-                    source, artifacts, cancel,
+                    options,
+                    binaries,
+                    capture_kernel::table_names(b"").unwrap(),
+                    source,
+                    artifacts,
+                    cancel,
                 )
             } else {
                 NativeOwner::open(
-                    options, binaries, capture_kernel::table_names(b"").unwrap(), source, cancel,
+                    options,
+                    binaries,
+                    capture_kernel::table_names(b"").unwrap(),
+                    source,
+                    cancel,
                 )
-            }.unwrap();
+            }
+            .unwrap();
             assert!(!marker.exists());
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let address = listener.local_addr().unwrap();
             let peer = thread::spawn(move || {
                 let mut stream = TcpStream::connect(address).unwrap();
-                stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-                stream.write_all(b"GET /api/runtime HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                stream
+                    .write_all(b"GET /api/runtime HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    .unwrap();
                 stream.shutdown(Shutdown::Write).unwrap();
                 let mut response = Vec::new();
                 stream.read_to_end(&mut response).unwrap();
                 response
             });
-            Service::new("/proc".into()).with_auth(Auth::new(""))
-                .handle_with_runtime(listener.accept().unwrap().0, owner.runtime_mut()).unwrap();
+            Service::new("/proc".into())
+                .with_auth(Auth::new(""))
+                .handle_with_runtime(listener.accept().unwrap().0, owner.runtime_mut())
+                .unwrap();
             let response = peer.join().unwrap();
             assert!(response.starts_with(b"HTTP/1.1 200 "));
             let body = response.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;

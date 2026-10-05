@@ -419,7 +419,11 @@ impl Backend for Native {
                 let millis = b
                     .deadline
                     .saturating_duration_since(Instant::now())
-                    .min(Duration::from_millis(20))
+                    .min(Duration::from_millis(if out_done && err_done {
+                        1
+                    } else {
+                        20
+                    }))
                     .as_millis()
                     .max(1) as i32;
                 let polled = unsafe {

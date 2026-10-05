@@ -1165,7 +1165,6 @@ const definitions: Record<
         "定时任务日志级别",
         "填写 cron 的原生日志级别，数值越小越详细。",
         0,
-        8,
       ),
     }),
     timeserver: section("网络时间同步", "设置 NTP 客户端与服务器。", {

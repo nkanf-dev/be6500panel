@@ -72,6 +72,7 @@ fn transport_error(budget: &Budget<'_>, error: SourceError) -> SourceError {
 /// Trusted startup policy, not browser supplied roots/addresses. HTTPS is the
 /// native path. Plain HTTP may be allowed only for explicit numeric-loopback
 /// fixtures; a redirect from HTTPS still cannot downgrade.
+#[derive(Clone)]
 pub struct SourcePolicy {
     bootstrap: SocketAddr,
     tls: Arc<rustls::ClientConfig>,

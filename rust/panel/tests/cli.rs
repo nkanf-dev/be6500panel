@@ -446,7 +446,7 @@ exit 0
         value(&request(address, "GET", "/api/runtime", None, ""), 401);
         let cookie = login(address);
         let health = value(&request(address, "GET", "/api/health", None, &cookie), 200);
-        assert_eq!(health["mode"], "manager");
+        assert_eq!(health["mode"], "host");
         assert_eq!(health["runtimeEnabled"], true);
         let runtime = value(&request(address, "GET", "/api/runtime", None, &cookie), 200);
         assert_eq!(runtime["services"].as_array().unwrap().len(), 2);

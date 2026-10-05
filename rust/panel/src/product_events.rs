@@ -174,9 +174,15 @@ mod tests {
             .publish(Ok(json!({"mode":"host","sampledAt":timestamp(0)})), 0)
             .unwrap();
         streams.flush(&mut Auth::new(""));
-        let mut bytes = [0; 4096];
-        let n = peer.read(&mut bytes).unwrap();
-        let text = std::str::from_utf8(&bytes[..n]).unwrap();
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 4096];
+        while !String::from_utf8_lossy(&bytes).contains("\n\n") {
+            let n = peer.read(&mut chunk).unwrap();
+            assert!(n > 0);
+            bytes.extend_from_slice(&chunk[..n]);
+            assert!(bytes.len() <= 4096);
+        }
+        let text = std::str::from_utf8(&bytes).unwrap();
         assert!(
             text.contains("text/event-stream")
                 && text.contains("event: snapshot")

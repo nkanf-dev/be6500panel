@@ -216,6 +216,15 @@ impl RulesState {
             source_fake_ip,
         })
     }
+    pub(crate) fn product_source_identity(&self) -> Option<[u8; 32]> {
+        self.source_sha256
+    }
+    pub(crate) fn product_revision(&self) -> &str {
+        &self.summary.revision
+    }
+    pub(crate) fn product_nodes(&self) -> &[crate::native::Node] {
+        &self.nodes
+    }
     fn preview(&self, policy: &Policy) -> Result<EffectivePolicy, RulesError> {
         let mut preview = self.subscription.merge(policy).map_err(|_| RulesError)?;
         preview.diagnostics.extend(

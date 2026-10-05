@@ -494,6 +494,32 @@ impl RuntimeHttp {
     fn wire(&self, status: Status) -> WireStatus {
         let slot = index(status.service);
         let mut wire = WireStatus::from(status);
+        if let Some(pid) = wire.pid
+            && let Ok(raw) = std::fs::read_to_string(format!("/proc/{pid}/status"))
+            && raw.len() <= 16 << 10
+        {
+            let reported = raw
+                .lines()
+                .find_map(|line| line.strip_prefix("Pid:"))
+                .and_then(|value| value.trim().parse::<u32>().ok());
+            let rss = raw
+                .lines()
+                .find_map(|line| line.strip_prefix("VmRSS:"))
+                .and_then(|value| {
+                    let mut fields = value.split_whitespace();
+                    let kib = fields.next()?.parse::<u64>().ok()?;
+                    if fields.next() != Some("kB") || fields.next().is_some() {
+                        return None;
+                    }
+                    kib.checked_mul(1024)
+                });
+            if reported == Some(pid)
+                && let Some(bytes) = rss
+            {
+                wire.rss_bytes = bytes;
+                wire.rss_available = true;
+            }
+        }
         if !self.closing && (self.intent.is_some() || self.recovery_enabled) {
             wire.desired = self.desired[slot];
         }
@@ -561,6 +587,32 @@ impl RuntimeHttp {
             .ok_or(SourceError::Input)?
             .source
             .selection_endpoints(host, budget)
+    }
+    pub(crate) fn product_source(&self) -> Option<SourcePolicy> {
+        self.acquisition
+            .as_ref()
+            .map(|acquisition| acquisition.source.clone())
+    }
+    pub(crate) fn product_run(&self) -> Option<&crate::runtime_manager::OwnedRunIdentity> {
+        self.manager.current_run(ServiceId::SingBox)
+    }
+    pub(crate) fn product_artifact(&self) -> Option<(PathBuf, [u8; 32])> {
+        self.manager.product_artifact(ServiceId::SingBox)
+    }
+    pub(crate) fn product_config(
+        &self,
+        service: ServiceId,
+    ) -> Result<Option<crate::runtime_manager::ConfigSnapshot>, ManagerError> {
+        self.manager.config(service)
+    }
+    pub(crate) fn product_status(&mut self, service: ServiceId) -> Result<Status, ManagerError> {
+        self.manager.status(service)
+    }
+    pub(crate) fn product_withdraw(&self, deadline: Instant) -> Result<(), HookError> {
+        if let Some(capture) = self.capture.as_deref() {
+            capture.disable(deadline).map_err(|_| HookError::Failed)?;
+        }
+        Ok(())
     }
     pub(crate) fn rule_status(&mut self) -> Result<Status, ManagerError> {
         self.manager.status(ServiceId::SingBox)

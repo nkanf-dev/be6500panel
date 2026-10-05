@@ -1166,7 +1166,7 @@ fn owned_server_loop_borrows_one_manager_authenticates_and_cleans_on_cancel() {
             &loop_request(address, request("GET", "/api/health", None, cookie, "")),
             200,
         );
-        assert_eq!(health["mode"], "manager");
+        assert_eq!(health["mode"], "host");
         assert_eq!(health["runtimeEnabled"], true);
         assert_eq!(health["readOnly"], false);
         let state = body(

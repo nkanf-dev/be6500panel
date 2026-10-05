@@ -32,13 +32,25 @@ pub mod policy;
 #[cfg(unix)]
 pub mod policy_store;
 #[cfg(unix)]
+pub mod product_configuration;
+#[cfg(unix)]
+pub mod product_diagnostics;
+#[cfg(unix)]
 pub mod product_events;
 #[cfg(unix)]
+pub mod product_gateway;
+#[cfg(unix)]
 pub mod product_io;
+#[cfg(unix)]
+pub mod product_maintenance;
+#[cfg(unix)]
+pub mod product_observations;
 #[cfg(unix)]
 pub mod product_plans;
 #[cfg(unix)]
 pub mod product_support;
+#[cfg(unix)]
+pub mod product_telemetry;
 pub mod readiness_dns;
 #[cfg(unix)]
 pub mod readiness_tun;

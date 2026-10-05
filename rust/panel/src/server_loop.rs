@@ -69,6 +69,7 @@ pub fn serve(
             if let Some(owner) = runtime.as_deref_mut() {
                 let _ = owner.poll_recovery(now);
             }
+            service.product_tick(runtime.as_deref_mut());
             next_recovery = Instant::now() + RECOVERY_INTERVAL;
         }
         if stopped(cancel) {
