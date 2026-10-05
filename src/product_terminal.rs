@@ -560,6 +560,7 @@ impl Drop for Terminal {
         }
     }
 }
+#[allow(clippy::unnecessary_mut_passed)] // Darwin openpty requires a mutable winsize; Linux takes const.
 fn spawn(shell: &str, mut size: libc::winsize) -> Result<Session, ApiError> {
     let mut entropy = [0u8; 32];
     getrandom::fill(&mut entropy).map_err(|_| unavailable())?;
