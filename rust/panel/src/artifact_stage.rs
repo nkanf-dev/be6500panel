@@ -62,6 +62,9 @@ impl fmt::Display for StageError {
 }
 impl std::error::Error for StageError {}
 fn check(b: &Budget<'_>) -> Result<(), StageError> {
+    if crate::shutdown::requested() {
+        return Err(StageError::Cancelled);
+    }
     b.check().map_err(|e| match e {
         TunError::Deadline => StageError::Deadline,
         TunError::Cancelled => StageError::Cancelled,

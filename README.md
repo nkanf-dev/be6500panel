@@ -39,11 +39,40 @@ make build
 make armv7
 ```
 
-The Rust development service binds to `127.0.0.1:8790`. It implements authenticated rule draft read/save/preview and memory diagnostics. Runtime Apply and unrelated management APIs remain unavailable until their migration is complete. This is not yet a production replacement.
+The Rust development service defaults to loopback `127.0.0.1:8790` diagnostic mode. It serves rule draft read/save/preview and memory diagnostics without a runtime owner. An explicit `--native-runtime` mode attaches the one exclusive native owner. It requires a password, existing private data/run directories and a private verified command manifest. This mode supports authenticated core/FRPC acquisition, configuration, start/stop, rule Apply and scoped capture. Subscription import/node selection and other management modules are still being ported. It is not yet a production replacement.
+
+Native mode example (use isolated directories until handover is qualified):
+
+```text
+BE6500PANEL_PASSWORD=<private password from your secret store> \
+  cargo run --locked --manifest-path rust/panel/Cargo.toml -- \
+  --native-runtime --listen 127.0.0.1:8790 \
+  --data-dir /absolute/private/data --run-dir /absolute/private/run \
+  --command-manifest /absolute/private/command-bindings.json
+```
+
+The command manifest is a private `0600` JSON object, at most 4 KiB. Its fixed fields are `ip` and `iptables` objects with absolute `path` and release `sha256`, `dnsBootstrap` as a literal address with port, and optional `routeTables` text. It does not admit core boot files, shell commands, browser paths or certificate overrides. SIGTERM cancels new work. If withdrawal fails, the same authenticated entry and owner remain alive for explicit cleanup retry; the process does not claim a clean shutdown or abandon installed capture.
 
 All Cargo commands use `.build/rust`, one build job and no incremental cache. Do not pass a per-worker `--target-dir`. Separate source worktrees must set `CARGO_TARGET_DIR` to the integration worktree's `.build/rust` and share the existing `web/node_modules` directory.
 
-For ARMv7 cross-builds, install the Rust `armv7-unknown-linux-musleabihf` target and provide a compatible linker. The current macOS validation uses Rust's bundled `rust-lld` with `linker-flavor=ld.lld`, `target-feature=+crt-static` and `link-self-contained=yes`; Linux CI uses `arm-linux-gnueabihf-gcc`.
+For ARMv7 cross-builds, install the Rust `armv7-unknown-linux-musleabihf` target. Native TLS also needs an ARM-capable compiler and archiver, not just a linker. Linux CI uses `arm-linux-gnueabihf-gcc` and `arm-linux-gnueabihf-ar`.
+
+On this Apple Silicon host, install `llvm-tools-preview` for Rust 1.93.0. Set `RUST_TOOL_BIN` to the absolute `lib/rustlib/aarch64-apple-darwin/bin` directory inside that Rust toolchain, then run:
+
+```text
+make armv7 CARGO="cargo +1.93.0" ARM_CC=clang \
+  ARM_AR="$RUST_TOOL_BIN/llvm-ar" ARM_LINKER="$RUST_TOOL_BIN/rust-lld" \
+  ARM_CFLAGS="-ffreestanding -U__musl__ -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard" \
+  ARM_RUSTFLAGS="-C linker-flavor=ld.lld -C target-feature=+crt-static -C link-self-contained=yes"
+```
+
+Apple `ar` does not build the required ARM ELF crypto archive. If changing archivers after an earlier build, clean only the affected Ring ARM package before rebuilding:
+
+```text
+cargo +1.93.0 clean --manifest-path rust/panel/Cargo.toml --package ring --release --target armv7-unknown-linux-musleabihf
+```
+
+Inspect the complete native executable, not an earlier diagnostic binary whose unused TLS code was removed by the linker. Cross-build success does not prove device RSS, latency, process lifecycle or production readiness.
 
 ## Production migration boundary
 

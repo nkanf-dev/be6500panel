@@ -580,6 +580,9 @@ impl Manager {
     }
     fn operation_check(&self) -> Result<(), Failure> {
         if let Some((deadline, cancel)) = &self.operation {
+            if crate::shutdown::requested() {
+                return Err(Failure::Cancelled);
+            }
             if cancel.load(std::sync::atomic::Ordering::Acquire) {
                 return Err(Failure::Cancelled);
             }

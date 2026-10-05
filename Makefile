@@ -10,6 +10,14 @@ export CARGO_INCREMENTAL := 0
 # Process/fault fixtures share native ownership slots; run test cases serially.
 export RUST_TEST_THREADS := 1
 
+# Cross-native dependencies need an ARM-capable archiver as well as a linker.
+# Override these for macOS LLVM cross-builds; never use Apple ar on ELF objects.
+ARM_CC ?= arm-linux-gnueabihf-gcc
+ARM_AR ?= arm-linux-gnueabihf-ar
+ARM_LINKER ?= $(ARM_CC)
+ARM_CFLAGS ?=
+ARM_RUSTFLAGS ?= $(RUSTFLAGS)
+
 setup:
 	cd web && bun install --frozen-lockfile
 
@@ -34,7 +42,7 @@ build:
 	cd web && bun run build
 
 armv7:
-	$(CARGO) build --locked --release --manifest-path $(CARGO_MANIFEST) --target armv7-unknown-linux-musleabihf
+	env CC_armv7_unknown_linux_musleabihf="$(ARM_CC)" AR_armv7_unknown_linux_musleabihf="$(ARM_AR)" CFLAGS_armv7_unknown_linux_musleabihf="$(ARM_CFLAGS)" CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER="$(ARM_LINKER)" RUSTFLAGS="$(ARM_RUSTFLAGS)" $(CARGO) build --locked --release --manifest-path $(CARGO_MANIFEST) --target armv7-unknown-linux-musleabihf
 
 clean:
 	rm -rf .build dist web/dist

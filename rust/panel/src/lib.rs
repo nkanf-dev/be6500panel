@@ -39,6 +39,8 @@ pub mod rule_apply;
 #[cfg(unix)]
 pub mod rules_http;
 #[cfg(unix)]
+pub mod runtime_bindings;
+#[cfg(unix)]
 pub mod runtime_http;
 #[cfg(unix)]
 pub mod runtime_intent;
@@ -51,5 +53,7 @@ pub mod runtime_store;
 pub mod server;
 #[cfg(unix)]
 pub mod server_loop;
+#[cfg(unix)]
+pub mod shutdown;
 pub mod static_files;
 pub mod subscription;

@@ -136,6 +136,7 @@ pub struct RuntimeHttp {
     intent_uncertain: bool,
     acquisition: Option<Acquisition>,
     capture: Option<Box<dyn crate::capture_http::CaptureControl>>,
+    cleanup_requests: u64,
 }
 fn index(service: ServiceId) -> usize {
     match service {
@@ -154,6 +155,9 @@ impl RuntimeHttp {
     pub(crate) fn set_startup_blocked(&mut self, blocked: bool) {
         self.startup_blocked = blocked;
     }
+    pub(crate) fn cleanup_sequence(&self) -> u64 {
+        self.cleanup_requests
+    }
     pub fn new(manager: Manager) -> Self {
         Self {
             manager,
@@ -167,6 +171,7 @@ impl RuntimeHttp {
             intent_uncertain: false,
             acquisition: None,
             capture: None,
+            cleanup_requests: 0,
         }
     }
     pub fn load_capture<O: crate::readiness_tun::Observer + 'static>(
@@ -572,6 +577,13 @@ impl RuntimeHttp {
             );
         }
         if path == "/api/proxy/capture" {
+            if method == Method::Delete
+                && query.is_empty()
+                && body.is_empty()
+                && self.capture.is_some()
+            {
+                self.cleanup_requests = self.cleanup_requests.wrapping_add(1);
+            }
             return crate::capture_http::respond(
                 writer,
                 &mut self.manager,
@@ -703,6 +715,7 @@ impl RuntimeHttp {
                     Err(()) => return invalid_json(writer),
                 };
                 if path == "/api/runtime/stop" {
+                    self.cleanup_requests = self.cleanup_requests.wrapping_add(1);
                     let saved = self.save_intent(input.service, false);
                     let stopped = self.manager.stop(input.service);
                     if let Err(failed) = stopped {

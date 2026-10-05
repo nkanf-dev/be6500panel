@@ -249,7 +249,7 @@ impl NativeOwner {
         if self.closing || self.closed {
             return Err(InitError::Closed);
         }
-        if self.cancel.load(Ordering::Acquire) {
+        if crate::shutdown::requested() || self.cancel.load(Ordering::Acquire) {
             return Err(InitError::Cancelled);
         }
         if !self.startup_withdrawn {
@@ -263,7 +263,7 @@ impl NativeOwner {
             self.cancel_after_withdraw = false;
             self.cancel.store(true, Ordering::Release);
         }
-        if self.cancel.load(Ordering::Acquire) {
+        if crate::shutdown::requested() || self.cancel.load(Ordering::Acquire) {
             return Err(InitError::Cancelled);
         }
         // Completed withdrawal is remembered, but cancellation must not

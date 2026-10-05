@@ -942,7 +942,7 @@ pub fn dns_response_addresses(response: &[u8], query: &[u8]) -> Result<Vec<IpAdd
 }
 
 fn check(deadline: Instant, cancel: Option<&AtomicBool>) -> Result<()> {
-    if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+    if crate::shutdown::requested() || cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
         return Err(ReadinessError::Canceled);
     }
     if Instant::now() >= deadline {

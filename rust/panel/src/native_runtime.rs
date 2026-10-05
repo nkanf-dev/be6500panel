@@ -218,7 +218,7 @@ impl<O: Observer + 'static> NativeReadiness<O> {
         self.check(context)
     }
     fn check(&self, context: &HookContext<'_>) -> Result<(), HookError> {
-        if self.cancel.load(Ordering::Relaxed) {
+        if crate::shutdown::requested() || self.cancel.load(Ordering::Relaxed) {
             return Err(HookError::Cancelled);
         }
         if std::time::Instant::now() >= context.deadline {
@@ -283,7 +283,7 @@ fn read_accepted_until(
 ) -> Result<Vec<u8>, HookError> {
     use std::os::unix::fs::MetadataExt;
     let check = || {
-        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        if crate::shutdown::requested() || cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
             return Err(HookError::Cancelled);
         }
         if std::time::Instant::now() >= context.deadline {

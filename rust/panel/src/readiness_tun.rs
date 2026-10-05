@@ -75,7 +75,7 @@ pub struct Budget<'a> {
 }
 impl Budget<'_> {
     pub fn check(&self) -> Result<(), TunError> {
-        if self.cancel.load(Ordering::Relaxed) {
+        if crate::shutdown::requested() || self.cancel.load(Ordering::Relaxed) {
             Err(TunError::Cancelled)
         } else if Instant::now() >= self.deadline {
             Err(TunError::Deadline)

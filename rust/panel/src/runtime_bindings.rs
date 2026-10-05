@@ -6,11 +6,20 @@ use crate::{
     capture_kernel::{self, TableNames},
     readiness_tun::FileIdentity,
 };
-use serde::{Deserialize, Deserializer, de::{self, MapAccess, Visitor}};
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, MapAccess, Visitor},
+};
 use std::{
-    ffi::CString, fmt, fs::File, io::{self, Read},
+    ffi::CString,
+    fmt,
+    fs::File,
+    io::{self, Read},
     net::SocketAddr,
-    os::{fd::{AsRawFd, FromRawFd, OwnedFd}, unix::{ffi::OsStrExt, fs::MetadataExt}},
+    os::{
+        fd::{AsRawFd, FromRawFd, OwnedFd},
+        unix::{ffi::OsStrExt, fs::MetadataExt},
+    },
     path::{Component, Path},
 };
 const MAX_MANIFEST_BYTES: usize = 4096;
@@ -26,7 +35,12 @@ impl fmt::Debug for Bindings {
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BindingError { Manifest, Binary, Bootstrap, RouteTables }
+pub enum BindingError {
+    Manifest,
+    Binary,
+    Bootstrap,
+    RouteTables,
+}
 impl fmt::Display for BindingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -52,12 +66,17 @@ struct Manifest {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Command { path: String, sha256: String }
+struct Command {
+    path: String,
+    sha256: String,
+}
 fn command_object<'de, D: Deserializer<'de>>(d: D) -> Result<Command, D::Error> {
     struct V;
     impl<'de> Visitor<'de> for V {
         type Value = Command;
-        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("command binding object") }
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("command binding object")
+        }
         fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<Command, M::Error> {
             Command::deserialize(de::value::MapAccessDeserializer::new(map))
         }
@@ -70,7 +89,9 @@ impl<'de> Deserialize<'de> for Object {
         struct V;
         impl<'de> Visitor<'de> for V {
             type Value = Object;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("bindings manifest object") }
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("bindings manifest object")
+            }
             fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<Object, M::Error> {
                 Manifest::deserialize(de::value::MapAccessDeserializer::new(map)).map(Object)
             }
@@ -79,7 +100,9 @@ impl<'de> Deserialize<'de> for Object {
     }
 }
 fn digest(text: &str) -> Result<[u8; 32], BindingError> {
-    if text.len() != 64 { return Err(BindingError::Binary); }
+    if text.len() != 64 {
+        return Err(BindingError::Binary);
+    }
     let mut value = [0; 32];
     for (slot, pair) in value.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
         let nibble = |b: u8| match b {
@@ -93,37 +116,78 @@ fn digest(text: &str) -> Result<[u8; 32], BindingError> {
     }
     Ok(value)
 }
-struct PinnedManifest { file: File, directory: File, identity: FileIdentity, parent: FileIdentity }
+struct PinnedManifest {
+    file: File,
+    directory: File,
+    identity: FileIdentity,
+    parent: FileIdentity,
+}
 impl PinnedManifest {
     fn open(path: &Path) -> Result<Self, BindingError> {
-        if !path.is_absolute() || path.as_os_str().as_bytes().split(|b| *b == b'/').any(|c| c == b"." || c == b"..") {
+        if !path.is_absolute()
+            || path
+                .as_os_str()
+                .as_bytes()
+                .split(|b| *b == b'/')
+                .any(|c| c == b"." || c == b"..")
+        {
             return Err(BindingError::Manifest);
         }
         let mut components = path.components().peekable();
-        if components.next() != Some(Component::RootDir) { return Err(BindingError::Manifest); }
-        let fd = unsafe { libc::open(c"/".as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC) };
-        if fd < 0 { return Err(BindingError::Manifest); }
+        if components.next() != Some(Component::RootDir) {
+            return Err(BindingError::Manifest);
+        }
+        let fd = unsafe {
+            libc::open(
+                c"/".as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(BindingError::Manifest);
+        }
         let mut directory = unsafe { OwnedFd::from_raw_fd(fd) };
         while let Some(component) = components.next() {
-            let Component::Normal(name) = component else { return Err(BindingError::Manifest); };
+            let Component::Normal(name) = component else {
+                return Err(BindingError::Manifest);
+            };
             let name = CString::new(name.as_bytes()).map_err(|_| BindingError::Manifest)?;
             let last = components.peek().is_none();
-            let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC
-                | if last { libc::O_NONBLOCK } else { libc::O_DIRECTORY };
+            let flags = libc::O_RDONLY
+                | libc::O_NOFOLLOW
+                | libc::O_CLOEXEC
+                | if last {
+                    libc::O_NONBLOCK
+                } else {
+                    libc::O_DIRECTORY
+                };
             let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
-            if fd < 0 { return Err(BindingError::Manifest); }
+            if fd < 0 {
+                return Err(BindingError::Manifest);
+            }
             let next = unsafe { OwnedFd::from_raw_fd(fd) };
             if last {
                 let file = File::from(next);
                 let metadata = file.metadata().map_err(|_| BindingError::Manifest)?;
-                if !metadata.is_file() || metadata.mode() & 0o7777 != 0o600
-                    || metadata.uid() != unsafe { libc::geteuid() } || metadata.nlink() != 1
-                    || metadata.len() == 0 || metadata.len() > MAX_MANIFEST_BYTES as u64 {
+                if !metadata.is_file()
+                    || metadata.mode() & 0o7777 != 0o600
+                    || metadata.uid() != unsafe { libc::geteuid() }
+                    || metadata.nlink() != 1
+                    || metadata.len() == 0
+                    || metadata.len() > MAX_MANIFEST_BYTES as u64
+                {
                     return Err(BindingError::Manifest);
                 }
                 let directory = File::from(directory);
-                let parent = FileIdentity::from_metadata(&directory.metadata().map_err(|_| BindingError::Manifest)?);
-                return Ok(Self { file, directory, identity: FileIdentity::from_metadata(&metadata), parent });
+                let parent = FileIdentity::from_metadata(
+                    &directory.metadata().map_err(|_| BindingError::Manifest)?,
+                );
+                return Ok(Self {
+                    file,
+                    directory,
+                    identity: FileIdentity::from_metadata(&metadata),
+                    parent,
+                });
             }
             directory = next;
         }
@@ -131,10 +195,19 @@ impl PinnedManifest {
     }
     fn checked(&self, path: &Path) -> Result<(), BindingError> {
         let current = Self::open(path)?;
-        let retained = FileIdentity::from_metadata(&self.file.metadata().map_err(|_| BindingError::Manifest)?);
-        let parent = FileIdentity::from_metadata(&self.directory.metadata().map_err(|_| BindingError::Manifest)?);
-        if retained != self.identity || current.identity != self.identity
-            || parent != self.parent || current.parent != self.parent {
+        let retained =
+            FileIdentity::from_metadata(&self.file.metadata().map_err(|_| BindingError::Manifest)?);
+        let parent = FileIdentity::from_metadata(
+            &self
+                .directory
+                .metadata()
+                .map_err(|_| BindingError::Manifest)?,
+        );
+        if retained != self.identity
+            || current.identity != self.identity
+            || parent != self.parent
+            || current.parent != self.parent
+        {
             return Err(BindingError::Manifest);
         }
         Ok(())
@@ -143,16 +216,24 @@ impl PinnedManifest {
         let mut raw = Vec::with_capacity(MAX_MANIFEST_BYTES);
         let mut bytes = [0; 512];
         loop {
-            let size = bytes.len().min(MAX_MANIFEST_BYTES.saturating_sub(raw.len()) + 1);
+            let size = bytes
+                .len()
+                .min(MAX_MANIFEST_BYTES.saturating_sub(raw.len()) + 1);
             let n = match self.file.read(&mut bytes[..size]) {
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 result => result.map_err(|_| BindingError::Manifest)?,
             };
-            if n == 0 { break; }
-            if n > MAX_MANIFEST_BYTES.saturating_sub(raw.len()) { return Err(BindingError::Manifest); }
+            if n == 0 {
+                break;
+            }
+            if n > MAX_MANIFEST_BYTES.saturating_sub(raw.len()) {
+                return Err(BindingError::Manifest);
+            }
             raw.extend_from_slice(&bytes[..n]);
         }
-        if raw.len() as u64 != self.identity.size { return Err(BindingError::Manifest); }
+        if raw.len() as u64 != self.identity.size {
+            return Err(BindingError::Manifest);
+        }
         Ok(raw)
     }
 }
@@ -165,26 +246,49 @@ impl Bindings {
         // Validate all syntax before any potentially large executable hashing.
         let ip_sha = digest(&manifest.ip.sha256)?;
         let iptables_sha = digest(&manifest.iptables.sha256)?;
-        let bootstrap: SocketAddr = manifest.dns_bootstrap.parse().map_err(|_| BindingError::Bootstrap)?;
+        let bootstrap: SocketAddr = manifest
+            .dns_bootstrap
+            .parse()
+            .map_err(|_| BindingError::Bootstrap)?;
         let source = SourcePolicy::native(bootstrap).map_err(|_| BindingError::Bootstrap)?;
-        let names = capture_kernel::table_names(manifest.route_tables.as_bytes()).map_err(|_| BindingError::RouteTables)?;
-        let ip = TrustedBinary::admit(Path::new(&manifest.ip.path), ip_sha).map_err(|_| BindingError::Binary)?;
-        let iptables = TrustedBinary::admit(Path::new(&manifest.iptables.path), iptables_sha).map_err(|_| BindingError::Binary)?;
+        let names = capture_kernel::table_names(manifest.route_tables.as_bytes())
+            .map_err(|_| BindingError::RouteTables)?;
+        let ip = TrustedBinary::admit(Path::new(&manifest.ip.path), ip_sha)
+            .map_err(|_| BindingError::Binary)?;
+        let iptables = TrustedBinary::admit(Path::new(&manifest.iptables.path), iptables_sha)
+            .map_err(|_| BindingError::Binary)?;
         pinned.checked(path)?;
-        Ok(Self { binaries: Binaries { ip, iptables }, names, source })
+        Ok(Self {
+            binaries: Binaries { ip, iptables },
+            names,
+            source,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, os::unix::fs::{DirBuilderExt, PermissionsExt}, path::PathBuf,
-        sync::atomic::{AtomicU64, Ordering}};
+    use std::{
+        fs,
+        os::unix::fs::{DirBuilderExt, PermissionsExt},
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    struct Fixture { root: PathBuf, path: PathBuf }
+    struct Fixture {
+        root: PathBuf,
+        path: PathBuf,
+    }
     impl Fixture {
         fn new() -> Self {
-            let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("b6p-bind-pin-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+            let root = fs::canonicalize(std::env::temp_dir())
+                .unwrap()
+                .join(format!(
+                    "b6p-bind-pin-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
             fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
             let path = root.join("manifest.json");
             fs::write(&path, b"{}").unwrap();
@@ -192,7 +296,11 @@ mod tests {
             Self { root, path }
         }
     }
-    impl Drop for Fixture { fn drop(&mut self) { fs::remove_dir_all(&self.root).unwrap(); } }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
     #[test]
     fn pinned_manifest_refuses_replacement_and_permission_change() {
         let f = Fixture::new();

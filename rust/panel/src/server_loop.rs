@@ -28,7 +28,7 @@ impl fmt::Display for LoopError {
 }
 impl std::error::Error for LoopError {}
 fn stopped(cancel: &AtomicBool) -> bool {
-    cancel.load(Ordering::Acquire)
+    cancel.load(Ordering::Acquire) || crate::shutdown::requested()
 }
 fn close(
     runtime: &mut Option<&mut RuntimeHttp>,
@@ -119,6 +119,71 @@ pub fn serve(
                     io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
                 ) => {}
             Err(_) => return close(&mut runtime, Err(LoopError::Listener)),
+        }
+    }
+}
+
+/// Failed shutdown keeps the same authenticated entry and owner. There are no
+/// recovery ticks or automatic cleanup retries. Only another signal or parsed
+/// authenticated DELETE/stop action requests one caller-owned close retry.
+/// Invalid clients and GET cannot trigger capture/core mutations.
+pub fn serve_cleanup(
+    listener: &TcpListener,
+    service: &Service,
+    runtime: &mut RuntimeHttp,
+    signal_sequence: u32,
+) -> Result<(), LoopError> {
+    if !service.authentication_required() {
+        return Err(LoopError::Authentication);
+    }
+    listener
+        .set_nonblocking(true)
+        .map_err(|_| LoopError::Listener)?;
+    let cleanup_sequence = runtime.cleanup_sequence();
+    loop {
+        if crate::shutdown::sequence() != signal_sequence {
+            return Ok(());
+        }
+        let mut poll = libc::pollfd {
+            fd: listener.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut poll, 1, IDLE_SLICE.as_millis() as libc::c_int) };
+        if ready < 0 {
+            if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(LoopError::Listener);
+        }
+        if ready == 0 {
+            continue;
+        }
+        if poll.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+            return Err(LoopError::Listener);
+        }
+        if poll.revents & libc::POLLIN == 0 {
+            continue;
+        }
+        match listener.accept() {
+            Ok((stream, _)) => {
+                if stream.set_nonblocking(false).is_err() {
+                    continue;
+                }
+                let _ = service.handle_with_runtime(stream, runtime);
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) =>
+            {
+                continue;
+            }
+            Err(_) => return Err(LoopError::Listener),
+        }
+        if runtime.cleanup_sequence() != cleanup_sequence {
+            return Ok(());
         }
     }
 }

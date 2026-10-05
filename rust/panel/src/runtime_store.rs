@@ -959,6 +959,9 @@ fn required_file(dir: &File, name: &CStr, limit: usize) -> Result<File, StoreErr
 }
 fn check_store_budget(budget: Option<&(Instant, Arc<AtomicBool>)>) -> Result<(), StoreError> {
     if let Some((deadline, cancel)) = budget {
+        if crate::shutdown::requested() {
+            return Err(StoreError::Cancelled);
+        }
         if cancel.load(Ordering::Acquire) {
             return Err(StoreError::Cancelled);
         }

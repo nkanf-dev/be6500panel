@@ -137,6 +137,9 @@ struct OperationBudget {
 }
 impl OperationBudget {
     fn check_cancelled(&self) -> Result<(), ProcessError> {
+        if crate::shutdown::requested() {
+            return Err(ProcessError::Cancelled);
+        }
         if self
             .cancel
             .as_ref()

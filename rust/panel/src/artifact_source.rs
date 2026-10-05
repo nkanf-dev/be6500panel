@@ -53,6 +53,9 @@ impl fmt::Display for SourceError {
 }
 impl std::error::Error for SourceError {}
 fn check(budget: &Budget<'_>) -> Result<(), SourceError> {
+    if crate::shutdown::requested() {
+        return Err(SourceError::Cancelled);
+    }
     budget.check().map_err(|error| match error {
         TunError::Cancelled => SourceError::Cancelled,
         _ => SourceError::Deadline,
