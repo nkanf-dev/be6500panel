@@ -159,6 +159,17 @@ fn isolated_signal_owned_core_case() {
         unsafe { libc::sigaction(libc::SIGTERM, std::ptr::null(), &mut prior) },
         0
     );
+    // libc/kernel may add internal flags such as Linux SA_RESTORER when
+    // reinstalling an action. Compare against a round-tripped baseline, not
+    // the never-installed default, while keeping every restoration assertion.
+    assert_eq!(
+        unsafe { libc::sigaction(libc::SIGTERM, &prior, std::ptr::null_mut()) },
+        0
+    );
+    assert_eq!(
+        unsafe { libc::sigaction(libc::SIGTERM, std::ptr::null(), &mut prior) },
+        0
+    );
     let guard = SignalGuard::install().unwrap();
     assert!(!be6500_panel::shutdown::requested());
     assert!(SignalGuard::install().is_err());
