@@ -151,7 +151,6 @@ fn http_request_debug_redacts_cookie_and_target() {
     assert!(!format!("{request:?}").contains("private-secret"));
 }
 
-
 #[test]
 fn capture_exact_methods_and_query_metadata_are_preserved() {
     for (method, expected, headers, length) in [
@@ -161,8 +160,13 @@ fn capture_exact_methods_and_query_metadata_are_preserved() {
         ("DELETE", Method::Delete, "", 0),
         ("DELETE", Method::Delete, "Content-Length: 0\r\n", 0),
     ] {
-        for target in ["/api/proxy/capture", "/api/proxy/capture?mode=private%20value"] {
-            let bytes = format!("{method} {target} HTTP/1.1\r\nHost: panel.example:18890\r\nOrigin: http://panel.example:18890\r\nCookie: private-cookie\r\nSec-Fetch-Site: same-origin\r\n{headers}\r\n");
+        for target in [
+            "/api/proxy/capture",
+            "/api/proxy/capture?mode=private%20value",
+        ] {
+            let bytes = format!(
+                "{method} {target} HTTP/1.1\r\nHost: panel.example:18890\r\nOrigin: http://panel.example:18890\r\nCookie: private-cookie\r\nSec-Fetch-Site: same-origin\r\n{headers}\r\n"
+            );
             let request = parse_request(bytes.as_bytes()).unwrap();
             assert_eq!(request.method, expected);
             assert_eq!(request.target, target);
@@ -181,62 +185,117 @@ fn capture_exact_methods_and_query_metadata_are_preserved() {
 #[test]
 fn capture_post_requires_length_and_keeps_64kib_body_cap() {
     use be6500_panel::http::MAX_BODY_BYTES;
-    for (length, accepted) in [(0, true), (MAX_BODY_BYTES, true), (MAX_BODY_BYTES + 1, false)] {
-        let bytes = format!("POST /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\nContent-Length: {length}\r\n\r\n");
+    for (length, accepted) in [
+        (0, true),
+        (MAX_BODY_BYTES, true),
+        (MAX_BODY_BYTES + 1, false),
+    ] {
+        let bytes = format!(
+            "POST /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\nContent-Length: {length}\r\n\r\n"
+        );
         match parse_request(bytes.as_bytes()) {
-            Ok(request) => { assert!(accepted); assert_eq!(request.content_length, length); }
-            Err(error) => { assert!(!accepted); assert_eq!(error.kind, ErrorKind::BodyTooLarge); }
+            Ok(request) => {
+                assert!(accepted);
+                assert_eq!(request.content_length, length);
+            }
+            Err(error) => {
+                assert!(!accepted);
+                assert_eq!(error.kind, ErrorKind::BodyTooLarge);
+            }
         }
     }
-    assert_eq!(parse_request(b"POST /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap_err().kind,
-        ErrorKind::BadRequest);
+    assert_eq!(
+        parse_request(b"POST /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap_err()
+            .kind,
+        ErrorKind::BadRequest
+    );
 }
 
 #[test]
 fn capture_delete_is_empty_only_and_ambiguous_framing_is_bad_request() {
     for headers in [
-        "Content-Length: 1\r\n", "Content-Length: 65537\r\n",
-        "Content-Length: +0\r\n", "Content-Length: -0\r\n", "Content-Length: \r\n",
-        "Content-Length: 0,0\r\n", "Content-Length: 0x0\r\n",
+        "Content-Length: 1\r\n",
+        "Content-Length: 65537\r\n",
+        "Content-Length: +0\r\n",
+        "Content-Length: -0\r\n",
+        "Content-Length: \r\n",
+        "Content-Length: 0,0\r\n",
+        "Content-Length: 0x0\r\n",
         "Content-Length: 999999999999999999999999999999999999\r\n",
         "Content-Length: 0\r\ncontent-length: 0\r\n",
         "Content-Length: 0\r\nContent-Length: 1\r\n",
-        "Transfer-Encoding: chunked\r\n", "Transfer-Encoding: identity\r\n",
-        "Transfer-Encoding: \r\n", "Content-Length: 0\r\nTransfer-Encoding: chunked\r\n",
+        "Transfer-Encoding: chunked\r\n",
+        "Transfer-Encoding: identity\r\n",
+        "Transfer-Encoding: \r\n",
+        "Content-Length: 0\r\nTransfer-Encoding: chunked\r\n",
         "Content-Length: 0\r\nContent-Type: application/json\r\ncontent-type: application/json\r\n",
-        "Content-Length : 0\r\n", " Content-Length: 0\r\n",
+        "Content-Length : 0\r\n",
+        " Content-Length: 0\r\n",
     ] {
-        let bytes = format!("DELETE /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\n{headers}\r\n");
+        let bytes =
+            format!("DELETE /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\n{headers}\r\n");
         let error = parse_request(bytes.as_bytes()).unwrap_err();
         assert_eq!(error.kind, ErrorKind::BadRequest, "{headers:?}");
         assert!(!error.head_only);
     }
     for suffix in ["{}", "0\r\n\r\n", "GET / HTTP/1.0\r\n\r\n"] {
-        let bytes = format!("DELETE /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n{suffix}");
-        assert_eq!(parse_request(bytes.as_bytes()).unwrap_err().kind, ErrorKind::BadRequest);
+        let bytes = format!(
+            "DELETE /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n{suffix}"
+        );
+        assert_eq!(
+            parse_request(bytes.as_bytes()).unwrap_err().kind,
+            ErrorKind::BadRequest
+        );
     }
 }
 
 #[test]
 fn capture_delete_never_admits_other_session_static_or_api_paths() {
-    for path in ["/", "/index.html", "/api/session/login", "/api/session/logout",
-        "/api/runtime/stop", "/api/proxy/select", "/api/proxy/local-rules",
-        "/api/proxy/capture/", "/api/proxy/capture/other", "/api/proxy/capturE",
-        "/api/proxy/%63apture", "/api/proxy/capture%3Fmode=x", "/api/proxy/capture.json"] {
-        let bytes = format!("DELETE {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
-        assert_eq!(parse_request(bytes.as_bytes()).unwrap_err().kind, ErrorKind::MethodNotAllowed, "{path}");
+    for path in [
+        "/",
+        "/index.html",
+        "/api/session/login",
+        "/api/session/logout",
+        "/api/runtime/stop",
+        "/api/proxy/select",
+        "/api/proxy/local-rules",
+        "/api/proxy/capture/",
+        "/api/proxy/capture/other",
+        "/api/proxy/capturE",
+        "/api/proxy/%63apture",
+        "/api/proxy/capture%3Fmode=x",
+        "/api/proxy/capture.json",
+    ] {
+        let bytes =
+            format!("DELETE {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
+        assert_eq!(
+            parse_request(bytes.as_bytes()).unwrap_err().kind,
+            ErrorKind::MethodNotAllowed,
+            "{path}"
+        );
     }
     for method in ["PUT", "PATCH", "OPTIONS", "delete"] {
-        let bytes = format!("{method} /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
-        assert_eq!(parse_request(bytes.as_bytes()).unwrap_err().kind, ErrorKind::MethodNotAllowed);
+        let bytes = format!(
+            "{method} /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n"
+        );
+        assert_eq!(
+            parse_request(bytes.as_bytes()).unwrap_err().kind,
+            ErrorKind::MethodNotAllowed
+        );
     }
 }
 
 #[test]
 fn capture_delete_does_not_override_origin_or_trust_method_headers() {
-    for metadata in ["Origin: https://localhost\r\n", "Origin: http://other.example\r\n",
-        "Sec-Fetch-Site: cross-site\r\n"] {
-        let bytes = format!("DELETE /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\n{metadata}Content-Length: 0\r\n\r\n");
+    for metadata in [
+        "Origin: https://localhost\r\n",
+        "Origin: http://other.example\r\n",
+        "Sec-Fetch-Site: cross-site\r\n",
+    ] {
+        let bytes = format!(
+            "DELETE /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\n{metadata}Content-Length: 0\r\n\r\n"
+        );
         assert!(!parse_request(bytes.as_bytes()).unwrap().same_origin());
     }
     let request = parse_request(b"DELETE /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\nX-HTTP-Method-Override: POST\r\n\r\n").unwrap();
@@ -249,18 +308,34 @@ fn capture_delete_does_not_override_origin_or_trust_method_headers() {
 #[test]
 fn capture_delete_header_limits_and_duplicate_metadata_stay_strict() {
     let prefix = "DELETE /api/proxy/capture HTTP/1.1\r\nHost: localhost\r\n";
-    let exact = format!("{prefix}X-Pad: {}\r\n\r\n", "a".repeat(MAX_HEADER_BYTES - prefix.len() - "X-Pad: ".len() - 4));
+    let exact = format!(
+        "{prefix}X-Pad: {}\r\n\r\n",
+        "a".repeat(MAX_HEADER_BYTES - prefix.len() - "X-Pad: ".len() - 4)
+    );
     assert_eq!(exact.len(), MAX_HEADER_BYTES);
     assert!(parse_request(exact.as_bytes()).is_ok());
     let over = exact.replacen("X-Pad: ", "X-Pad: a", 1);
-    assert_eq!(parse_request(over.as_bytes()).unwrap_err().kind, ErrorKind::HeadersTooLarge);
+    assert_eq!(
+        parse_request(over.as_bytes()).unwrap_err().kind,
+        ErrorKind::HeadersTooLarge
+    );
     let exact_count = format!("{prefix}{}\r\n", "X-A: b\r\n".repeat(63));
     assert!(parse_request(exact_count.as_bytes()).is_ok());
     let over_count = format!("{prefix}{}\r\n", "X-A: b\r\n".repeat(64));
-    assert_eq!(parse_request(over_count.as_bytes()).unwrap_err().kind, ErrorKind::HeadersTooLarge);
-    for headers in ["Host: localhost\r\n", "Origin: http://localhost\r\norigin: http://localhost\r\n",
-        "Cookie: a=b\r\nCOOKIE: c=d\r\n", "Sec-Fetch-Site: same-origin\r\nsec-fetch-site: same-origin\r\n"] {
+    assert_eq!(
+        parse_request(over_count.as_bytes()).unwrap_err().kind,
+        ErrorKind::HeadersTooLarge
+    );
+    for headers in [
+        "Host: localhost\r\n",
+        "Origin: http://localhost\r\norigin: http://localhost\r\n",
+        "Cookie: a=b\r\nCOOKIE: c=d\r\n",
+        "Sec-Fetch-Site: same-origin\r\nsec-fetch-site: same-origin\r\n",
+    ] {
         let bytes = format!("{prefix}{headers}\r\n");
-        assert_eq!(parse_request(bytes.as_bytes()).unwrap_err().kind, ErrorKind::BadRequest);
+        assert_eq!(
+            parse_request(bytes.as_bytes()).unwrap_err().kind,
+            ErrorKind::BadRequest
+        );
     }
 }

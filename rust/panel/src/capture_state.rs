@@ -331,6 +331,11 @@ impl Controller {
     /// Internal cleanup admission from the validated journal only. It does not
     /// authorize restoration; that always needs fresh accepted configuration
     /// and LAN intent from the runtime integration owner.
+    pub(crate) fn owned_command_count(&self) -> usize {
+        self.owned
+            .as_ref()
+            .map_or(0, |owned| owned.plan.apply.len())
+    }
     pub(crate) fn cleanup_input(&self) -> Option<RulesPlanInput> {
         let owned = self.owned.as_ref()?;
         Some(
@@ -373,6 +378,25 @@ impl Controller {
         P: FnMut(&RulesPlanInput, &OwnedRulesPlan, Instant) -> Result<(), PreflightError>,
         R: FnMut(&[String], Instant) -> Result<CommandResult, CommandError>,
     {
+        self.apply_until(
+            input,
+            &mut preflight,
+            &mut runner,
+            Instant::now() + OPERATION_BUDGET,
+        )
+    }
+    pub(crate) fn apply_until<P, R>(
+        &mut self,
+        input: RulesPlanInput,
+        mut preflight: P,
+        mut runner: R,
+        deadline: Instant,
+    ) -> Result<(), Error>
+    where
+        P: FnMut(&RulesPlanInput, &OwnedRulesPlan, Instant) -> Result<(), PreflightError>,
+        R: FnMut(&[String], Instant) -> Result<CommandResult, CommandError>,
+    {
+        let deadline = deadline.min(Instant::now() + OPERATION_BUDGET);
         if self.owned.is_some() {
             return Err(Error::AlreadyOwned);
         }
@@ -388,7 +412,6 @@ impl Controller {
             },
             MAX_JOURNAL_BYTES,
         )?;
-        let deadline = Instant::now() + OPERATION_BUDGET;
         preflight(&input, &plan, deadline).map_err(|_| Error::Preflight)?;
         if Instant::now() >= deadline {
             return Err(Error::Deadline);
@@ -474,11 +497,18 @@ impl Controller {
     where
         R: FnMut(&[String], Instant) -> Result<CommandResult, CommandError>,
     {
-        self.desired.desired = false;
-        self.disable_not_persisted = true;
+        self.disable_until(runner, Instant::now() + OPERATION_BUDGET)
+    }
+    pub(crate) fn disable_until<R>(&mut self, mut runner: R, deadline: Instant) -> Result<(), Error>
+    where
+        R: FnMut(&[String], Instant) -> Result<CommandResult, CommandError>,
+    {
+        self.latch_off();
         let desired = self.desired.clone();
         let persistence_failed = self.set_desired(desired).is_err();
-        let cleanup_failed = self.cleanup(runner).is_err();
+        let cleanup_failed = self
+            .cleanup_until(&mut runner, deadline.min(Instant::now() + OPERATION_BUDGET))
+            .is_err();
         if persistence_failed {
             self.disable_not_persisted = true;
         }
@@ -490,6 +520,10 @@ impl Controller {
         } else {
             Ok(())
         }
+    }
+    pub(crate) fn latch_off(&mut self) {
+        self.desired.desired = false;
+        self.disable_not_persisted = true;
     }
     fn save(&self, name: &CStr, raw: &[u8], pin: Option<&File>) -> Result<Saved, Error> {
         self.directory.checked()?;
@@ -602,7 +636,7 @@ enum Fault {
     AfterRemove,
 }
 
-fn normalize_desired(mut d: Desired) -> Result<Desired, Error> {
+pub(crate) fn normalize_desired(mut d: Desired) -> Result<Desired, Error> {
     if d.ipv6.is_empty() {
         d.ipv6 = "direct".into();
     }
@@ -710,7 +744,7 @@ fn canonical_mac(raw: &str) -> Option<String> {
             .join(":"),
     )
 }
-fn desired_matches(d: &Desired, o: &RulesOwnership) -> Result<(), Error> {
+pub(crate) fn desired_matches(d: &Desired, o: &RulesOwnership) -> Result<(), Error> {
     let matches = if d.scope == "gateway" {
         o.scope == "gateway" && d.lan_ipv4_prefixes == o.lan_ipv4_prefixes
     } else if o.scope == "gateway" {
@@ -1329,5 +1363,53 @@ mod tests {
             Err(Error::InsufficientSpace)
         );
         assert_eq!(fs::read_dir(&f.0).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn expired_capture_apply_preflight_cannot_persist_journal_or_execute_commands() {
+        let fixture = Fixture::new();
+        let mut controller = fixture.open();
+        controller.set_desired(desired()).unwrap();
+        let accepted = fs::read(fixture.0.join("capture-desired.json")).unwrap();
+        let result = controller.apply_until(
+            input(),
+            |_, _, deadline| {
+                assert!(Instant::now() >= deadline);
+                Ok(())
+            },
+            |_, _| panic!("Apply afterexpiredpreflight"),
+            Instant::now(),
+        );
+        assert_eq!(result, Err(Error::Deadline));
+        assert_eq!(controller.status().phase, Phase::Off);
+        assert!(!fixture.0.join("capture-journal.json").exists());
+        assert_eq!(
+            fs::read(fixture.0.join("capture-desired.json")).unwrap(),
+            accepted
+        );
+    }
+    #[test]
+    fn expired_disable_still_latches_and_persists_off_with_all_pending_cleanup() {
+        let fixture = Fixture::new();
+        let mut controller = active(&fixture);
+        let result = controller.disable_until(|_, _| panic!("pastdeadlinecleanup"), Instant::now());
+        assert_eq!(
+            result,
+            Err(Error::DisableFailed {
+                persistence_failed: false,
+                cleanup_failed: true
+            })
+        );
+        assert!(!controller.desired().desired);
+        assert_eq!(controller.status().phase, Phase::CleanupPending);
+        assert!(!fixture.open().desired().desired);
+        assert_eq!(
+            controller.status().pending_cleanup_commands,
+            capture_plan::plan_owned_rules(&input())
+                .unwrap()
+                .cleanup
+                .len()
+        );
+        controller.cleanup(success).unwrap();
     }
 }

@@ -818,6 +818,23 @@ impl Manager {
         deadline: Instant,
         mut observe: impl FnMut(&HookContext<'_>) -> Result<T, HookError>,
     ) -> Result<T, HookError> {
+        self.ready_context(service, deadline, &mut observe)
+    }
+    pub(crate) fn capture_operation<T>(
+        &mut self,
+        deadline: Instant,
+        mut action: impl FnMut(&HookContext<'_>) -> Result<T, HookError>,
+    ) -> Result<T, HookError> {
+        self.ensure(ServiceId::SingBox)
+            .map_err(|_| HookError::Failed)?;
+        self.ready_context(ServiceId::SingBox, deadline, &mut action)
+    }
+    fn ready_context<T>(
+        &mut self,
+        service: ServiceId,
+        deadline: Instant,
+        mut observe: impl FnMut(&HookContext<'_>) -> Result<T, HookError>,
+    ) -> Result<T, HookError> {
         let deadline = deadline.min(Instant::now() + Duration::from_secs(30));
         if Instant::now() >= deadline {
             return Err(HookError::Deadline);

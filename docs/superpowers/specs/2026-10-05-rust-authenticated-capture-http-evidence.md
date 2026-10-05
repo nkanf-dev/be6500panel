@@ -1,0 +1,23 @@
+# Authenticated capture API owned by one manager
+
+## Wire authority
+
+`/api/proxy/capture` GET/HEAD/POST/DELETE uses the attached actual RuntimeHttp and typedCaptureHandle. ParserDELETE isallowedonlyexactcapturepath; absentCL/CL0 only, TE/duplicates/nonzeroCL reject. ServerPOST/DELETE shares sameOrigin/auth gate before intent/core actions. DELETEsession/static/otherAPI405. GETbudget3s, HEADpurephaseprojection/noDNS/query/mutation. DefaultmainhasnoattachedManager/capture and explicitlyrefuses ratherthanpretendscontrolsavailable.
+
+POSTstrictuniqueobjectrequiresipv6direct,64devices/64KiB body; nesteddeviceobjects maponly. Gateway forbidsIP/device/browserprefixes; nativecurrentbr-lan declaresobservedprefixes. DeviceMACselection resolvescurrenteligibleuniqueidentity; legacyIPv4 onlythroughfreshuniqueMAC, notsavedIP. Selectedscope and compilerownership checked BEFORE storedintent/oldcleanup. Actualnative retainedidentity/config/DNS proof repeats afterpreparation+desiredpersistence immediatelybeforeoldcleanup, thenaftersecondfreshbuilder immediatelybeforeApply; loss duringeitherwindow refuses further networkmutation while retaining newsavedselection. Acceptednativeconfig listener/TUN/DNS scope andactualownedcoreproof remainmandatory. FixedreadyContext mutation neverrestarts/stops/adoptscore. Coreunreadyproxy_not_running, no selection/binarycommand/write.
+
+## Resource ordering
+
+Preparefreshdesired+nativeinput+planmatch, thenpersistdesired/withdrawoldownedresources. Rebuildfromcurrentacceptedbytes andfreshLAN beforeApply. Controllerapply_until usesoutercapturedeadline<=30s; failedApplycleanupgetsindependent30s. Kernelpreflight/journal/privatefsync/readback/proofqualifications unchanged. VerifiedApply isnotenough: currentnative/acceptedRun/freshscope/kernelproof required. IfcompletedPOSTApplyinvalidatedbyfinalownedcontextdeadline/exit, explicitmutationwithdrawsunderindependentbudget ratherthanreturnfalseactive. GETneverrepairs.
+
+DELETEeffectiveoff first evenbinaryexecutoradmission/persistencefailure. Privateoffsave alwaysattempted andallcleanupcommands attempted/countretainedbyfinitebudget. Savedselectionpersists; oldjournalnotreplayed; actualcleanupfailure retained. Persistencefailureflags capture_disable_not_persisted andblocksautomaticrestore inprocess, no restartingcore tohideerror. Onlyindependentlyqualifiednativecorelifecyclemaylaterresume.
+
+## Truthful status
+
+Currentactive onlyfullyqualified. Loadedjournalstaged/priorApplyunknown/queryfailureunknown/scopechangescope-changed/cleanupfailurecleanup-pending. SavedMACs haveIPempty unlessfreshscope/currentproof matchesexactinstalledidentity; separateinstalledClients maydescribeoldjournalIP withoutclaimingcurrent. Gatewayprefixwire names exactlanIPv4Prefixes/installedLanIPv4Prefixes; noacronymSerdeguess. No traffic/hit/internet/tunnelhealthfabrication. Exactcommandcountreadsadmittedplanmetadata ratherthanrecompilingallcommandvectors; no targetperformancegainclaim. Responses bounded64KiB/countstream8KiBbuffer.
+
+## Evidence and boundary
+
+Fakecore/process, syntheticproc/netlink/nativeproof,actual localDNSanswer andfixedcommandreplyfixtures exercise actualauthHTTPgateway/device/currentGET/HEAD/Delete/corePIDpreserved/refusals/offpersistencefailure. Focused5newHTTPcases, strictDTO/freshselection/expiredApply/offunits, parser12/currentcontroller20 andexistingHTTPintegration14 pass; strictClippy passes. Initiallysyntheticreadinessmarker racedchildcreation; fixtureboundedmarkerread underexistingdeadline fixed withoutproductiontimeoutchange. Before owner-boundaryreviewfix,420 fullserializedhosttests/fmt/strictClippy/diffpassed. A realretained fakecore/syntheticprocidentityfault regression firstshowed oldcleanup andnewApply afterlostnativeproof duringpreparation; repeatednativeproof nowrefuses beforeeachmutation. The exactlatestfullhost/ARM evidence is external rust-authenticated-capture-http-*; latestpostfixfull/ARMremainpending untilreadback.
+
+No actualrouter/core/captureoperations, defaultmainnativeowner, legacydesired/journalmigration, productionhandover orfullmanagementparity. SoleproductroutedTUN,IPv6direct/faildirect retained. Existing8788retired/captureoff liveboundary unchanged; targetRSS/latency/aggregateRAMgain unclaimed.

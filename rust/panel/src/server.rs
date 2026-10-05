@@ -214,7 +214,7 @@ impl Service {
         };
         let head_only = request.method == Method::Head;
         // Same-origin precedes rate accounting, session creation, or logout.
-        if request.method == Method::Post && !request.same_origin() {
+        if matches!(request.method, Method::Post | Method::Delete) && !request.same_origin() {
             return api_error(
                 &mut DeadlineWriter::new(stream, write_budget),
                 403,
@@ -227,7 +227,10 @@ impl Service {
         }
         if matches!(
             request.path(),
-            "/api/session/login" | "/api/proxy/local-rules" | "/api/proxy/local-rules/preview"
+            "/api/session/login"
+                | "/api/proxy/local-rules"
+                | "/api/proxy/local-rules/preview"
+                | "/api/proxy/capture"
         ) && request.method == Method::Post
             && !http::json_content_type(request.content_type)
         {
@@ -243,7 +246,7 @@ impl Service {
         }
         // Logout usually has no body (current browser contract); any submitted
         // body still needs an unambiguous length and JSON media type.
-        if request.method == Method::Post
+        if matches!(request.method, Method::Post | Method::Delete)
             && (request.content_length > 0 || request.content_type.is_some())
             && !http::json_content_type(request.content_type)
         {
@@ -267,6 +270,10 @@ impl Service {
             && request.method == Method::Post
         {
             write_budget.max(Duration::from_secs(90))
+        } else if request.path() == "/api/proxy/capture"
+            && matches!(request.method, Method::Post | Method::Delete)
+        {
+            write_budget.max(Duration::from_secs(65))
         } else {
             write_budget
         };
@@ -292,7 +299,9 @@ impl Service {
                 &[],
             );
         }
-        if crate::runtime_http::is_runtime_path(request.path()) {
+        if crate::runtime_http::is_runtime_path(request.path())
+            || request.path() == "/api/proxy/capture"
+        {
             drop(auth);
             let Some(runtime) = runtime else {
                 return crate::runtime_http::unavailable(&mut writer, head_only);

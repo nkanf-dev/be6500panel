@@ -8,6 +8,8 @@ pub mod auth;
 #[cfg(unix)]
 pub mod capture_executor;
 #[cfg(unix)]
+pub mod capture_http;
+#[cfg(unix)]
 pub mod capture_input;
 #[cfg(unix)]
 pub mod capture_kernel;

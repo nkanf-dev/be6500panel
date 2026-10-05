@@ -10,6 +10,21 @@ use crate::runtime_manager::{HookContext, HookError, Hooks, OwnedRunIdentity, Se
 use serde::Deserialize;
 use std::{cell::RefCell, fmt, path::PathBuf, rc::Rc, time::Instant};
 type FreshInput = Box<dyn FnMut(&Desired, &[u8], Instant) -> Result<RulesPlanInput, HookError>>;
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Selection {
+    pub scope: String,
+    pub devices: Vec<crate::capture_state::DeviceSelection>,
+    pub client_ipv4: String,
+    pub client_ipv6: String,
+    pub ipv6: String,
+}
+impl fmt::Debug for Selection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CaptureSelection([private])")
+    }
+}
+type SelectDesired = Box<dyn FnMut(&Selection, Instant) -> Result<Desired, HookError>>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CurrentState {
     Inactive,
@@ -34,6 +49,7 @@ pub struct CaptureRuntime {
     fresh_input: FreshInput,
     executor: Option<Executor>,
     applied_run: Option<OwnedRunIdentity>,
+    select_desired: Option<SelectDesired>,
 }
 impl fmt::Debug for CaptureRuntime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -58,6 +74,7 @@ impl CaptureRuntime {
             fresh_input: Box::new(fresh_input),
             executor: None,
             applied_run: None,
+            select_desired: None,
         }
     }
     /// Native current-source builder using the same bounded Observer seam as
@@ -67,9 +84,11 @@ impl CaptureRuntime {
         binaries: Binaries,
         run_dir: PathBuf,
         names: TableNames,
-        mut observer: O,
+        observer: O,
     ) -> Self {
-        Self::new(
+        let shared = Rc::new(RefCell::new(observer));
+        let build = shared.clone();
+        let mut runtime = Self::new(
             controller,
             binaries,
             run_dir,
@@ -80,14 +99,53 @@ impl CaptureRuntime {
                     deadline,
                     cancel: &cancel,
                 };
-                crate::capture_input::observe_and_build(&mut observer, desired, accepted, &budget)
-                    .map_err(|error| match error {
-                        crate::capture_input::InputError::Deadline => HookError::Deadline,
-                        crate::capture_input::InputError::Canceled => HookError::Cancelled,
-                        _ => HookError::Failed,
-                    })
+                crate::capture_input::observe_and_build(
+                    &mut *build.try_borrow_mut().map_err(|_| HookError::Failed)?,
+                    desired,
+                    accepted,
+                    &budget,
+                )
+                .map_err(|error| match error {
+                    crate::capture_input::InputError::Deadline => HookError::Deadline,
+                    crate::capture_input::InputError::Canceled => HookError::Cancelled,
+                    _ => HookError::Failed,
+                })
             },
-        )
+        );
+        runtime.select_desired = Some(Box::new(move |selection, deadline| {
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let budget = crate::readiness_tun::Budget {
+                deadline,
+                cancel: &cancel,
+            };
+            validate_selection(selection)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .map_err(|_| HookError::Failed)?
+                .as_secs();
+            let observed = crate::capture_lan::observe(
+                &mut *shared.try_borrow_mut().map_err(|_| HookError::Failed)?,
+                selection.scope != "gateway",
+                now,
+                &budget,
+            )
+            .map_err(|error| match error {
+                crate::capture_lan::LanError::Deadline => HookError::Deadline,
+                crate::capture_lan::LanError::Cancelled => HookError::Cancelled,
+                _ => HookError::Failed,
+            })?;
+            selection_from_lan(selection, &observed)
+        }));
+        runtime
+    }
+    /// Trusted local selection observer adapter. It returns desired identity
+    /// only, never command arrays, ports, core path or proof of installation.
+    pub fn with_selection_observer(
+        mut self,
+        observer: impl FnMut(&Selection, Instant) -> Result<Desired, HookError> + 'static,
+    ) -> Self {
+        self.select_desired = Some(Box::new(observer));
+        self
     }
     pub fn desired(&self) -> Desired {
         self.controller.desired()
@@ -165,11 +223,19 @@ impl CaptureRuntime {
         let raw = native_runtime::read_accepted(context)?;
         let input = (self.fresh_input)(&desired, &raw, context.deadline)?;
         validate_accepted_input(&raw, &input)?;
+        drop(raw);
+        self.apply_input(context, input)
+    }
+    fn apply_input(
+        &mut self,
+        context: &HookContext<'_>,
+        input: RulesPlanInput,
+    ) -> Result<(), HookError> {
         self.admit_executor(&input)?;
         let checked_input = input.clone();
         let result = {
             let executor = RefCell::new(self.executor.as_mut().ok_or(HookError::Failed)?);
-            self.controller.apply(
+            self.controller.apply_until(
                 input,
                 |fresh, _plan, deadline| {
                     capture_kernel::preflight(
@@ -186,6 +252,7 @@ impl CaptureRuntime {
                 },
                 // Controller supplies an independent cleanup deadline on failure.
                 |argv, deadline| executor.borrow_mut().execute(argv, deadline, None),
+                context.deadline,
             )
         };
         if result.is_err() {
@@ -213,6 +280,119 @@ impl CaptureRuntime {
         }
         self.release_finished_executor();
         observed.map_err(|_| HookError::Failed)
+    }
+    /// Explicit selection, not a current-read repair. Fresh LAN/config
+    /// preparation must succeed before stored intent or old resources change.
+    pub fn select(
+        &mut self,
+        context: &HookContext<'_>,
+        selection: &Selection,
+        mut native: impl FnMut(&HookContext<'_>) -> Result<(), HookError>,
+    ) -> Result<CurrentStatus, HookError> {
+        validate_selection(selection)?;
+        if context.service != ServiceId::SingBox
+            || context.run.is_none()
+            || Instant::now() >= context.deadline
+        {
+            return Err(HookError::Failed);
+        }
+        native(context)?;
+        let desired =
+            (self.select_desired.as_mut().ok_or(HookError::Failed)?)(selection, context.deadline)?;
+        let desired =
+            crate::capture_state::normalize_desired(desired).map_err(|_| HookError::Failed)?;
+        if !desired.desired {
+            return Err(HookError::Failed);
+        }
+        // Trusted selection adapters cannot turn device request into gateway.
+        if (selection.scope == "gateway") != (desired.scope == "gateway") {
+            return Err(HookError::Failed);
+        }
+        if !selection.devices.is_empty() {
+            let requested = crate::capture_state::normalize_desired(Desired {
+                scope: "devices".into(),
+                devices: selection.devices.clone(),
+                desired: true,
+                ..Desired::default()
+            })
+            .map_err(|_| HookError::Failed)?;
+            if requested.devices != desired.devices {
+                return Err(HookError::Failed);
+            }
+        }
+        let raw = native_runtime::read_accepted(context)?;
+        let input = (self.fresh_input)(&desired, &raw, context.deadline)?;
+        validate_accepted_input(&raw, &input)?;
+        let plan = crate::capture_plan::plan_owned_rules(&input).map_err(|_| HookError::Failed)?;
+        crate::capture_state::desired_matches(&desired, &plan.ownership)
+            .map_err(|_| HookError::Failed)?;
+        drop(plan);
+        drop(raw);
+        drop(input);
+        if Instant::now() >= context.deadline {
+            return Err(HookError::Deadline);
+        }
+        self.controller
+            .set_desired(desired)
+            .map_err(|_| HookError::Failed)?;
+        // Fresh scope/config preparation and durability may consume time or
+        // observe a lost retained core. Recheck before withdrawing old rules.
+        native(context)?;
+        self.cleanup_until(context.deadline)?;
+        if Instant::now() >= context.deadline {
+            return Err(HookError::Deadline);
+        }
+        let raw = native_runtime::read_accepted(context)?;
+        let desired = self.controller.desired();
+        let input = (self.fresh_input)(&desired, &raw, context.deadline)?;
+        validate_accepted_input(&raw, &input)?;
+        drop(raw);
+        // Old withdrawal and this second fresh builder cannot authorize new
+        // interception if the actual retained identity or DNS proof was lost.
+        native(context)?;
+        self.apply_input(context, input)?;
+        let current = self.observe_current(context, &mut native);
+        if current.active {
+            Ok(current)
+        } else {
+            // Query uncertainty after explicit Apply cannot become success.
+            let _ = self.cleanup_until(Instant::now() + std::time::Duration::from_secs(30));
+            Err(HookError::Failed)
+        }
+    }
+    /// Effective off intent first, including binary/executor admission failure.
+    /// Persistence and best-effort cleanup remain attempted with independent
+    /// fixed deadline and all unresolved owned commands retained.
+    pub fn disable(&mut self, deadline: Instant) -> Result<(), crate::capture_state::Error> {
+        self.applied_run = None;
+        let input = self.controller.cleanup_input();
+        self.controller.latch_off();
+        let admitted = if let Some(input) = input {
+            self.admit_executor(&input).is_ok()
+        } else {
+            true
+        };
+        let executor = &mut self.executor;
+        let result = self.controller.disable_until(
+            |argv, budget| {
+                if !admitted {
+                    return Err(crate::capture_state::CommandError::Failure);
+                }
+                executor
+                    .as_mut()
+                    .ok_or(crate::capture_state::CommandError::Failure)?
+                    .execute(argv, budget, None)
+            },
+            deadline.min(Instant::now() + std::time::Duration::from_secs(30)),
+        );
+        self.release_finished_executor();
+        result
+    }
+    pub fn snapshot(&self) -> crate::capture_state::Snapshot {
+        self.controller.snapshot()
+    }
+    pub fn owned_command_count(&self) -> usize {
+        self.controller.owned_command_count()
     }
     fn current(&self, state: CurrentState) -> CurrentStatus {
         CurrentStatus {
@@ -391,6 +571,41 @@ impl<O> fmt::Debug for CaptureHandle<O> {
     }
 }
 impl<O: Observer + 'static> CaptureHandle<O> {
+    pub fn owned_command_count(&self) -> Result<usize, HookError> {
+        Ok(self
+            .capture
+            .try_borrow()
+            .map_err(|_| HookError::Failed)?
+            .owned_command_count())
+    }
+    pub fn snapshot(&self) -> Result<crate::capture_state::Snapshot, HookError> {
+        Ok(self
+            .capture
+            .try_borrow()
+            .map_err(|_| HookError::Failed)?
+            .snapshot())
+    }
+    pub fn disable(&self, deadline: Instant) -> Result<(), crate::capture_state::Error> {
+        self.capture
+            .try_borrow_mut()
+            .map_err(|_| crate::capture_state::Error::AlreadyOwned)?
+            .disable(deadline)
+    }
+    pub fn select(
+        &self,
+        context: &HookContext<'_>,
+        selection: &Selection,
+    ) -> Result<CurrentStatus, HookError> {
+        self.capture
+            .try_borrow_mut()
+            .map_err(|_| HookError::Failed)?
+            .select(context, selection, |context| {
+                self.native
+                    .try_borrow_mut()
+                    .map_err(|_| HookError::Failed)?
+                    .observe_current(context)
+            })
+    }
     pub fn startup_withdraw(&self, deadline: Instant) -> Result<(), HookError> {
         self.capture
             .try_borrow_mut()
@@ -416,6 +631,70 @@ impl<O: Observer + 'static> CaptureHandle<O> {
                 .observe_current(context)
         }))
     }
+}
+fn validate_selection(selection: &Selection) -> Result<(), HookError> {
+    if selection.ipv6 != "direct"
+        || !selection.client_ipv6.is_empty()
+        || selection.devices.len() > 64
+    {
+        return Err(HookError::Failed);
+    }
+    match selection.scope.as_str() {
+        "gateway" if selection.devices.is_empty() && selection.client_ipv4.is_empty() => Ok(()),
+        "" | "devices" if selection.client_ipv4.is_empty() != selection.devices.is_empty() => {
+            Ok(())
+        }
+        _ => Err(HookError::Failed),
+    }
+}
+fn selection_from_lan(
+    selection: &Selection,
+    observed: &crate::capture_lan::Snapshot,
+) -> Result<Desired, HookError> {
+    validate_selection(selection)?;
+    if selection.scope == "gateway" {
+        return crate::capture_state::normalize_desired(Desired {
+            scope: "gateway".into(),
+            lan_ipv4_prefixes: observed.lan_ipv4_prefixes.clone(),
+            desired: true,
+            ..Desired::default()
+        })
+        .map_err(|_| HookError::Failed);
+    }
+    let devices = if !selection.client_ipv4.is_empty() {
+        let address = selection
+            .client_ipv4
+            .parse::<std::net::Ipv4Addr>()
+            .map_err(|_| HookError::Failed)?;
+        let text = address.to_string();
+        let mut found = observed.devices.iter().filter(|device| device.ip == text);
+        let device = found.next().ok_or(HookError::Failed)?;
+        if found.next().is_some() {
+            return Err(HookError::Failed);
+        }
+        vec![crate::capture_state::DeviceSelection {
+            mac: device.mac.clone(),
+        }]
+    } else {
+        selection.devices.clone()
+    };
+    let desired = crate::capture_state::normalize_desired(Desired {
+        scope: "devices".into(),
+        devices,
+        desired: true,
+        ..Desired::default()
+    })
+    .map_err(|_| HookError::Failed)?;
+    for selected in &desired.devices {
+        let mut found = observed
+            .devices
+            .iter()
+            .filter(|device| device.mac == selected.mac);
+        if found.next().is_none() || found.next().is_some() {
+            return Err(HookError::Failed);
+        }
+    }
+    Ok(desired)
 }
 #[derive(Deserialize)]
 struct Listeners {
@@ -526,5 +805,80 @@ mod tests {
         input.ports.dns = 1053;
         input.tun_interface = "b6p-wrong".into();
         assert!(validate_accepted_input(&raw, &input).is_err());
+    }
+
+    fn observed_lan() -> crate::capture_lan::Snapshot {
+        crate::capture_lan::Snapshot {
+            lan_ipv4_prefixes: vec!["192.168.50.0/24".into()],
+            lan_addresses: vec!["192.168.50.1".into()],
+            management_ips: vec!["192.168.50.1".into()],
+            interface_addresses: vec![],
+            devices: vec![crate::capture_lan::Device {
+                mac: "02:aa:bb:cc:dd:ee".into(),
+                ip: "192.168.50.2".into(),
+            }],
+        }
+    }
+    #[test]
+    fn selection_uses_fresh_gateway_or_unique_current_mac_not_supplied_network() {
+        let observed = observed_lan();
+        let gateway = selection_from_lan(
+            &Selection {
+                scope: "gateway".into(),
+                ipv6: "direct".into(),
+                ..Selection::default()
+            },
+            &observed,
+        )
+        .unwrap();
+        assert_eq!(gateway.lan_ipv4_prefixes, observed.lan_ipv4_prefixes);
+        assert!(gateway.desired && gateway.devices.is_empty());
+        let literal = Selection {
+            client_ipv4: "192.168.50.2".into(),
+            ipv6: "direct".into(),
+            ..Selection::default()
+        };
+        let device = selection_from_lan(&literal, &observed).unwrap();
+        assert_eq!(
+            device.devices,
+            vec![crate::capture_state::DeviceSelection {
+                mac: "02:aa:bb:cc:dd:ee".into()
+            }]
+        );
+        assert!(device.client_ipv4.is_empty());
+        let stable = Selection {
+            devices: device.devices.clone(),
+            ipv6: "direct".into(),
+            ..Selection::default()
+        };
+        assert_eq!(selection_from_lan(&stable, &observed).unwrap(), device);
+        let mut stale = observed_lan();
+        stale.devices.clear();
+        assert!(selection_from_lan(&literal, &stale).is_err());
+        assert!(selection_from_lan(&stable, &stale).is_err());
+        let mut conflicted = observed_lan();
+        conflicted.devices.push(crate::capture_lan::Device {
+            mac: "02:aa:bb:cc:dd:ff".into(),
+            ip: "192.168.50.2".into(),
+        });
+        assert!(selection_from_lan(&literal, &conflicted).is_err());
+        let duplicate = Selection {
+            devices: vec![device.devices[0].clone(), device.devices[0].clone()],
+            ipv6: "direct".into(),
+            ..Selection::default()
+        };
+        assert!(selection_from_lan(&duplicate, &observed).is_err());
+        assert!(
+            selection_from_lan(
+                &Selection {
+                    scope: "gateway".into(),
+                    client_ipv4: "192.168.50.2".into(),
+                    ipv6: "direct".into(),
+                    ..Selection::default()
+                },
+                &observed
+            )
+            .is_err()
+        );
     }
 }

@@ -6,7 +6,7 @@ Performance comes first on this embedded BE6500 device. Management is single-use
 
 ## Current live boundary
 
-The extra Go rules entry :8788 is paused after a memory-pressure incident. Its persistent rule drafts, native exception, package and backups remain. Original panel PID 6642 and sing-box PID 7858/configuration generation 9 were retained. Capture was subsequently observed desired=false/active=false; do not re-enable it as a rewrite side effect. Preserve independent SSH, factory ACLs, guest isolation and FRPC support. No production owner replacement or reboot is part of the initial Rust slice.
+The extra Go rules entry :8788 was retired after the memory/disk incidents. Its process, RAM tree, persistent package/checksum, paused bootstrap and exact cron entry were removed; it is not a recoverable paused entry. Rule drafts, native exception, history and required backups remain. Last production readback retained the original manager and sing-box generation9 with capture desired=false/active=false; these dated observations do not establish current live state. Do not restore :8788 or re-enable capture as a rewrite side effect. Preserve independent SSH, factory ACLs, guest isolation and FRPC support. Rust source qualifications are not production ownership migration, network activation or a reboot.
 
 ## Rewrite boundary
 

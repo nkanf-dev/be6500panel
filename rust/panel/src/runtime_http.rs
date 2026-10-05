@@ -6,7 +6,7 @@ use crate::artifact_stage::StageError;
 use crate::runtime_intent::{DesiredServices, IntentError, RuntimeIntent};
 use crate::{
     http::{self, Method},
-    runtime_manager::{Failure, Manager, ManagerError, ServiceId, Status},
+    runtime_manager::{Failure, HookError, Manager, ManagerError, ServiceId, Status},
     runtime_process::ProcessError,
     runtime_store::StoreError,
 };
@@ -134,6 +134,7 @@ pub struct RuntimeHttp {
     recovery_enabled: bool,
     intent_uncertain: bool,
     acquisition: Option<Acquisition>,
+    capture: Option<Box<dyn crate::capture_http::CaptureControl>>,
 }
 fn index(service: ServiceId) -> usize {
     match service {
@@ -160,7 +161,18 @@ impl RuntimeHttp {
             recovery_enabled: false,
             intent_uncertain: false,
             acquisition: None,
+            capture: None,
         }
+    }
+    pub fn load_capture<O: crate::readiness_tun::Observer + 'static>(
+        &mut self,
+        handle: crate::capture_runtime::CaptureHandle<O>,
+    ) -> Result<(), HookError> {
+        if self.closing || self.capture.is_some() {
+            return Err(HookError::Failed);
+        }
+        self.capture = Some(Box::new(handle));
+        Ok(())
     }
     /// Trusted startup wiring only. Borrows this owner, performs no fetch/start
     /// and cannot be configured by an HTTP path/CA/bootstrap request.
@@ -533,6 +545,16 @@ impl RuntimeHttp {
                 "runtime_shutting_down",
                 "Runtime shutdown is in progress.",
                 false,
+            );
+        }
+        if path == "/api/proxy/capture" {
+            return crate::capture_http::respond(
+                writer,
+                &mut self.manager,
+                self.capture.as_deref(),
+                target,
+                method,
+                body,
             );
         }
         if path == "/api/runtime" {
