@@ -131,6 +131,7 @@ pub struct RuntimeHttp {
     retry: [Retry; 2],
     restarts: [u32; 2],
     closing: bool,
+    startup_blocked: bool,
     recovery_enabled: bool,
     intent_uncertain: bool,
     acquisition: Option<Acquisition>,
@@ -150,6 +151,9 @@ impl std::fmt::Debug for RuntimeHttp {
     }
 }
 impl RuntimeHttp {
+    pub(crate) fn set_startup_blocked(&mut self, blocked: bool) {
+        self.startup_blocked = blocked;
+    }
     pub fn new(manager: Manager) -> Self {
         Self {
             manager,
@@ -158,6 +162,7 @@ impl RuntimeHttp {
             retry: [Retry::default(), Retry::default()],
             restarts: [0; 2],
             closing: false,
+            startup_blocked: false,
             recovery_enabled: false,
             intent_uncertain: false,
             acquisition: None,
@@ -344,7 +349,7 @@ impl RuntimeHttp {
     /// Explicit startup integration call, not a constructor or GET side effect.
     pub fn restore_saved(&mut self) -> Vec<(ServiceId, Result<Status, RestoreError>)> {
         let mut outcomes = Vec::with_capacity(2);
-        if self.closing {
+        if self.closing || self.startup_blocked {
             return outcomes;
         }
         self.recovery_enabled = true;
@@ -373,7 +378,7 @@ impl RuntimeHttp {
     /// action. Cleanup must complete before the old child is reaped/restarted.
     pub fn poll_recovery(&mut self, now: Instant) -> Vec<(ServiceId, RecoveryResult)> {
         let mut results = Vec::with_capacity(2);
-        if self.closing || !self.recovery_enabled {
+        if self.closing || self.startup_blocked || !self.recovery_enabled {
             return results;
         }
         for service in SERVICES {
@@ -517,6 +522,15 @@ impl RuntimeHttp {
         generation: u64,
         bytes: &[u8],
     ) -> Result<Status, ManagerError> {
+        if self.startup_blocked {
+            return Err(ManagerError {
+                service: Some(ServiceId::SingBox),
+                failure: Failure::CheckPending,
+                recovery_failure: None,
+                generation,
+                owned_pid: None,
+            });
+        }
         self.manager
             .configure(ServiceId::SingBox, generation, bytes, None)
     }
@@ -537,6 +551,16 @@ impl RuntimeHttp {
     ) -> io::Result<()> {
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let head = method == Method::Head;
+        if self.startup_blocked && method == Method::Post && path != "/api/runtime/stop" {
+            return error(
+                writer,
+                503,
+                "Service Unavailable",
+                "startup_cleanup_pending",
+                "Startup capture withdrawal must complete before activation.",
+                false,
+            );
+        }
         if self.closing && method == Method::Post && path != "/api/runtime/stop" {
             return error(
                 writer,

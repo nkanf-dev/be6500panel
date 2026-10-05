@@ -25,6 +25,8 @@ pub mod http;
 pub mod memory;
 pub mod native;
 #[cfg(unix)]
+pub mod native_owner;
+#[cfg(unix)]
 pub mod native_runtime;
 pub mod policy;
 #[cfg(unix)]

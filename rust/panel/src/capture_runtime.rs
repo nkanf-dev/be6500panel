@@ -86,6 +86,24 @@ impl CaptureRuntime {
         names: TableNames,
         observer: O,
     ) -> Self {
+        Self::with_observer_cancel(
+            controller,
+            binaries,
+            run_dir,
+            names,
+            observer,
+            Rc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+    }
+    pub fn with_observer_cancel<O: Observer + 'static>(
+        controller: Controller,
+        binaries: Binaries,
+        run_dir: PathBuf,
+        names: TableNames,
+        observer: O,
+        cancel: Rc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        let build_cancel = cancel.clone();
         let shared = Rc::new(RefCell::new(observer));
         let build = shared.clone();
         let mut runtime = Self::new(
@@ -94,10 +112,9 @@ impl CaptureRuntime {
             run_dir,
             names,
             move |desired, accepted, deadline| {
-                let cancel = std::sync::atomic::AtomicBool::new(false);
                 let budget = crate::readiness_tun::Budget {
                     deadline,
-                    cancel: &cancel,
+                    cancel: &build_cancel,
                 };
                 crate::capture_input::observe_and_build(
                     &mut *build.try_borrow_mut().map_err(|_| HookError::Failed)?,
@@ -113,7 +130,6 @@ impl CaptureRuntime {
             },
         );
         runtime.select_desired = Some(Box::new(move |selection, deadline| {
-            let cancel = std::sync::atomic::AtomicBool::new(false);
             let budget = crate::readiness_tun::Budget {
                 deadline,
                 cancel: &cancel,
