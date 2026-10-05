@@ -308,6 +308,9 @@ impl RuntimeHttp {
                     }))?;
             self.acquire_artifact(service, metadata, Some(status.generation))?;
         }
+        self.manager
+            .check_accepted(service)
+            .map_err(RestoreError::Runtime)?;
         self.manager.start(service).map_err(RestoreError::Runtime)
     }
     /// Load only. Even saved true intent executes no child/check/hook until

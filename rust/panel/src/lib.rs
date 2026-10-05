@@ -31,6 +31,8 @@ pub mod native_runtime;
 pub mod policy;
 #[cfg(unix)]
 pub mod policy_store;
+#[cfg(unix)]
+pub mod product_io;
 pub mod readiness_dns;
 #[cfg(unix)]
 pub mod readiness_tun;

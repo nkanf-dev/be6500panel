@@ -145,7 +145,7 @@ fn run(options: Options) -> Result<(), &'static str> {
     let _signals = be6500_panel::shutdown::SignalGuard::install()
         .map_err(|_| "shutdown signal setup unavailable")?;
     if let Some(bindings) = bindings {
-        let mut owner = be6500_panel::native_owner::NativeOwner::open(
+        let mut owner = be6500_panel::native_owner::NativeOwner::open_with_artifacts(
             be6500_panel::native_owner::Options {
                 data_dir: options.data_dir.expect("validated native option"),
                 run_dir: options.run_dir.expect("validated native option"),
@@ -153,6 +153,7 @@ fn run(options: Options) -> Result<(), &'static str> {
             bindings.binaries,
             bindings.names,
             bindings.source,
+            bindings.artifacts,
             std::rc::Rc::new(std::sync::atomic::AtomicBool::new(false)),
         )
         .map_err(|_| "native owner unavailable")?;

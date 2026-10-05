@@ -717,6 +717,28 @@ impl Manager {
             })
             .transpose()
     }
+    pub(crate) fn check_accepted(&mut self, service: ServiceId) -> Result<(), ManagerError> {
+        let result = (|| {
+            self.ensure(service)?;
+            let record = self
+                .store
+                .service_state(service.into())
+                .current
+                .clone()
+                .ok_or(Failure::NotConfigured)?;
+            let bytes = self
+                .store
+                .read_config(service.into(), &record)
+                .map_err(Failure::Store)?;
+            let path = self.services[service.index()]
+                .config_root
+                .join(&record.file);
+            let spec = self.spec(service, &path, &bytes)?;
+            self.verify_process(service, spec, None)
+                .map_err(Failure::Process)
+        })();
+        result.map_err(|failure| self.error(service, failure, None))
+    }
     /// Stored bounded request only. Does not adopt/hash any boot executable.
     pub(crate) fn saved_artifact_request(&self, service: ServiceId) -> Option<store::Artifact> {
         self.store.service_state(service.into()).artifact.clone()
