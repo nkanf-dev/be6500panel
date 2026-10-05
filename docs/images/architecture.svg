@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" width="100%" height="100%">
+  <defs>
+    <style>
+      .bg { fill: #0d1117; }
+      .card { fill: #161b22; stroke: #30363d; stroke-width: 1.5; rx: 8px; }
+      .subcard { fill: #21262d; stroke: #30363d; stroke-width: 1; rx: 6px; }
+      .accent-card { fill: #161b22; stroke: #238636; stroke-width: 1.5; rx: 8px; }
+      .rust-card { fill: #161b22; stroke: #d97706; stroke-width: 1.5; rx: 8px; }
+      .text-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; fill: #58a6ff; }
+      .text-rust { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; fill: #f59e0b; }
+      .text-green { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; fill: #3fb950; }
+      .text-main { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 500; fill: #c9d1d9; }
+      .text-sub { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 11px; fill: #8b949e; }
+      .text-badge { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; fill: #79c0ff; }
+      .flow-line { stroke: #388bfd; stroke-width: 1.5; stroke-dasharray: 4 2; fill: none; }
+      .arrow { fill: #388bfd; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" class="bg" rx="12"/>
+
+  <!-- Top Title Bar -->
+  <text x="40" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif" font-size="18" font-weight="600" fill="#f0f6fc">be6500panel 系统架构</text>
+  <text x="250" y="38" class="text-sub">高性能嵌入式 Rust 单所有者网关 + 反应式轻量 Web 控制台</text>
+
+  <!-- Left: Browser Web Console -->
+  <rect x="40" y="65" width="260" height="375" class="card"/>
+  <rect x="40" y="65" width="260" height="36" class="subcard" rx="8"/>
+  <text x="56" y="88" class="text-title">前端控制台 (浏览器端执行)</text>
+  <text x="210" y="87" class="text-badge">Zero Node.js</text>
+
+  <rect x="55" y="115" width="230" height="55" class="subcard"/>
+  <text x="68" y="136" class="text-main">现代化组件体系</text>
+  <text x="68" y="154" class="text-sub">React 18 · Radix UI · Tailwind CSS</text>
+
+  <rect x="55" y="180" width="230" height="55" class="subcard"/>
+  <text x="68" y="201" class="text-main">反应式状态与契约</text>
+  <text x="68" y="219" class="text-sub">Effect.js · @effect/schema 严密解码</text>
+
+  <rect x="55" y="245" width="230" height="55" class="subcard"/>
+  <text x="68" y="266" class="text-main">专业数据可视化</text>
+  <text x="68" y="284" class="text-sub">Apache ECharts · 流量趋势与热力图</text>
+
+  <rect x="55" y="310" width="230" height="115" class="subcard"/>
+  <text x="68" y="331" class="text-main">核心管理视图 (23 核心视图)</text>
+  <text x="68" y="351" class="text-sub">• 运行概览 · WAN 流量监控</text>
+  <text x="68" y="369" class="text-sub">• 自定义规则编辑器 · 实时置顶</text>
+  <text x="68" y="387" class="text-sub">• 设备拓扑 · 原生网络与防火墙</text>
+  <text x="68" y="405" class="text-sub">• 原生服务监督 · 系统备份与导入</text>
+
+  <!-- Middle: HTTP / SSE Bridge -->
+  <path d="M 300 142 L 350 142" class="flow-line"/>
+  <path d="M 350 142 L 342 138 L 342 146 Z" class="arrow"/>
+  <text x="306" y="133" class="text-badge">REST API</text>
+
+  <path d="M 350 200 L 300 200" class="flow-line"/>
+  <path d="M 300 200 L 308 196 L 308 204 Z" class="arrow"/>
+  <text x="308" y="191" class="text-badge">SSE 事件流</text>
+
+  <!-- Center/Right: Native Control Plane (Rust) -->
+  <rect x="350" y="65" width="570" height="375" class="rust-card"/>
+  <rect x="350" y="65" width="570" height="36" class="subcard" rx="8"/>
+  <text x="368" y="88" class="text-rust">嵌入式原生控制平面 (Rust 单所有者内核 · ARMv7)</text>
+  <text x="790" y="87" class="text-badge">PID 6920 / 内存 &lt; 20M</text>
+
+  <!-- Server loop & Security -->
+  <rect x="368" y="115" width="260" height="85" class="subcard"/>
+  <text x="382" y="136" class="text-main">单监听服务循环 (Server Loop)</text>
+  <text x="382" y="154" class="text-sub">• 绝对时间预算 (DeadlineWriter)</text>
+  <text x="382" y="172" class="text-sub">• 零并发锁争用 · 内存持久保护</text>
+  <text x="382" y="190" class="text-sub">• Session Cookie 安全认证与速率限制</text>
+
+  <!-- Configuration Engine -->
+  <rect x="642" y="115" width="260" height="85" class="accent-card"/>
+  <text x="656" y="136" class="text-green">原子配置工作流 (Config Engine)</text>
+  <text x="656" y="154" class="text-sub">• Edit → Stage → Diff/校验 → Commit</text>
+  <text x="656" y="172" class="text-sub">• 代次隔离 (Generation Guard)</text>
+  <text x="656" y="190" class="text-sub">• 高风险操作超时自动回滚保护</text>
+
+  <!-- System Observations -->
+  <rect x="368" y="215" width="260" height="100" class="subcard"/>
+  <text x="382" y="236" class="text-main">系统真实观察 (Observations)</text>
+  <text x="382" y="254" class="text-sub">• Linux procfs (/proc/net/dev, stat)</text>
+  <text x="382" y="272" class="text-sub">• 原厂 sysfs, UCI 配置解析</text>
+  <text x="382" y="290" class="text-sub">• iptables, DNS / DHCP 租约探测</text>
+  <text x="382" y="306" class="text-sub">• 真实设备 IP-MAC 关联与状态</text>
+
+  <!-- Native Process Supervisors -->
+  <rect x="642" y="215" width="260" height="100" class="subcard"/>
+  <text x="656" y="236" class="text-main">原生进程监督 (Process Supervision)</text>
+  <text x="656" y="254" class="text-sub">• sing-box (透明路由核心 / 守护 PID)</text>
+  <text x="656" y="272" class="text-sub">• frpc (内网穿透反向代理服务)</text>
+  <text x="656" y="290" class="text-sub">• routed-TUN 专用虚拟网卡绑定</text>
+  <text x="656" y="306" class="text-sub">• 本地热重载监听器 (Watcher Reload)</text>
+
+  <!-- Bottom Hardware Boundary -->
+  <rect x="368" y="330" width="534" height="95" class="subcard"/>
+  <text x="382" y="352" class="text-main">底层硬件与宿主环境 (Xiaomi BE6500 · RN02)</text>
+  <text x="382" y="373" class="text-sub">• 高通 IPQ5322 四核 ARM Cortex-A53 @ 1.5GHz · 1GB DDR4 内存</text>
+  <text x="382" y="391" class="text-sub">• 全 2.5G 盲插网口 · Wi-Fi 7 (802.11be) 6500Mbps 射频</text>
+  <text x="382" y="409" class="text-sub">• 独立轻量静态资源嵌入 (musl 静态编译) · 零依赖原厂 OpenWrt 系统环境</text>
+</svg>
