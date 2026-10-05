@@ -11,10 +11,12 @@ use crate::policy_store::{SaveOutcome, Snapshot, Store, StoreError};
 use crate::subscription::{PolicySummary, Subscription, parse_clash_yaml, summarize_policy};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de, ser::SerializeSeq};
 use std::fmt;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs::File;
+use std::io::{self, Write};
+use std::os::{
+    fd::{AsRawFd, FromRawFd, OwnedFd},
+    unix::{ffi::OsStrExt, fs::MetadataExt},
+};
 use std::path::{Component, Path, PathBuf};
 
 pub const MAX_SUBSCRIPTION_BYTES: usize = 2 << 20;
@@ -37,11 +39,30 @@ pub struct RulesState {
     diagnostics: Vec<Diagnostic>,
     summary: PolicySummary,
     data_dir: PathBuf,
+    source_store: crate::subscription_store::Store,
 }
 impl fmt::Debug for RulesState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("RulesState (private)")
     }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportInput {
+    #[serde(default, deserialize_with = "optional_text")]
+    url: Option<String>,
+    #[serde(default, deserialize_with = "optional_text")]
+    content: Option<String>,
+}
+fn optional_text<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportUncertain<'a> {
+    error: ApiError<'static>,
+    committed: bool,
+    subscription: NodesResponse<'a>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -70,16 +91,107 @@ struct ApplyUncertain {
     config_sha256: String,
     applied: bool,
 }
+// Validate original path components before either store opens. Missing private
+// directories use relative mkdirat/openat, never create_dir_all through aliases.
+fn source_directory(path: &Path) -> Result<PathBuf, RulesError> {
+    if path.as_os_str().is_empty() {
+        return Err(RulesError);
+    }
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir().map_err(|_| RulesError)?.join(path)
+    };
+    if absolute
+        .as_os_str()
+        .as_bytes()
+        .split(|b| *b == b'/')
+        .any(|part| part == b"." || part == b"..")
+    {
+        return Err(RulesError);
+    }
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let budget = crate::readiness_tun::Budget {
+        deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+        cancel: &cancel,
+    };
+    budget.check().map_err(|_| RulesError)?;
+    let fd = unsafe {
+        libc::open(
+            c"/".as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(RulesError);
+    }
+    let mut parent = unsafe { OwnedFd::from_raw_fd(fd) };
+    for component in absolute.components() {
+        let name = match component {
+            Component::RootDir => continue,
+            Component::Normal(name) => name,
+            _ => return Err(RulesError),
+        };
+        budget.check().map_err(|_| RulesError)?;
+        let name = std::ffi::CString::new(name.as_bytes()).map_err(|_| RulesError)?;
+        let mut fd = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            if std::io::Error::last_os_error().kind() != io::ErrorKind::NotFound {
+                return Err(RulesError);
+            }
+            budget.check().map_err(|_| RulesError)?;
+            if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) } != 0 {
+                return Err(RulesError);
+            }
+            fd = unsafe {
+                libc::openat(
+                    parent.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                )
+            };
+            if fd < 0 {
+                return Err(RulesError);
+            }
+        }
+        parent = unsafe { OwnedFd::from_raw_fd(fd) };
+        budget.check().map_err(|_| RulesError)?;
+    }
+    let file = File::from(parent);
+    let metadata = file.metadata().map_err(|_| RulesError)?;
+    budget.check().map_err(|_| RulesError)?;
+    if !metadata.is_dir()
+        || metadata.mode() & 0o7777 != 0o700
+        || metadata.uid() != unsafe { libc::geteuid() }
+    {
+        return Err(RulesError);
+    }
+    Ok(absolute)
+}
 impl RulesState {
     /// Reads only subscription.yaml and the independent draft. Missing source
     /// means no subscription; corrupt/unsafe existing source fails closed.
-    /// Store::open handles its own private directory/draft. No save or Apply.
+    /// Missing private directories are created without following aliases.
+    /// Original source admission precedes draft-store open. No save or Apply.
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self, RulesError> {
-        let subscription = read_subscription(data_dir.as_ref())?;
+        let data_dir = source_directory(data_dir.as_ref())?;
+        let source_store =
+            crate::subscription_store::Store::open(&data_dir).map_err(|_| RulesError)?;
+        // Existing unsafe roots/source are refused before the older draft
+        // store can harden permissions. Keep original path, not canonical alias.
+        let store = Store::open(&data_dir).map_err(|_| RulesError)?;
+        let subscription = match source_store.load().map_err(|_| RulesError)? {
+            Some(raw) => parse_clash_yaml(&raw).map_err(|_| RulesError)?,
+            None => Subscription::default(),
+        };
         let summary = summarize_policy(&subscription);
         let prepared = PreparedSubscription::new(subscription.rules).map_err(|_| RulesError)?;
-        let store = Store::open(data_dir.as_ref()).map_err(|_| RulesError)?;
-        let data_dir = data_dir.as_ref().canonicalize().map_err(|_| RulesError)?;
         Ok(Self {
             store,
             subscription: prepared,
@@ -87,6 +199,7 @@ impl RulesState {
             diagnostics: subscription.diagnostics,
             summary,
             data_dir,
+            source_store,
         })
     }
     fn preview(&self, policy: &Policy) -> Result<EffectivePolicy, RulesError> {
@@ -114,6 +227,12 @@ impl RulesState {
     ) -> io::Result<()> {
         let head = method == Method::Head;
         match (path, method) {
+            ("/api/proxy/import", Method::Post) => {
+                let Some(runtime) = runtime else {
+                    return runtime_unavailable(writer, false);
+                };
+                self.import_source(writer, body, runtime)
+            }
             ("/api/proxy/nodes", Method::Get | Method::Head) => {
                 let response = NodesResponse {
                     nodes: PublicNodes(&self.nodes),
@@ -195,6 +314,237 @@ impl RulesState {
                 },
             ),
         }
+    }
+    fn import_source(
+        &mut self,
+        writer: &mut impl Write,
+        body: &[u8],
+        runtime: &mut crate::runtime_http::RuntimeHttp,
+    ) -> io::Result<()> {
+        if !runtime.subscription_import_allowed() {
+            return runtime_unavailable(writer, false);
+        }
+        let operation_deadline = std::time::Instant::now() + std::time::Duration::from_secs(80);
+        if body.len() > 3 << 20
+            || body
+                .iter()
+                .find(|b| !b.is_ascii_whitespace())
+                .is_none_or(|b| *b != b'{')
+        {
+            return error(
+                writer,
+                400,
+                "Bad Request",
+                "invalid_json",
+                "Import fields do not match the request contract.",
+                false,
+            );
+        }
+        let input: ImportInput = match serde_json::from_slice(body) {
+            Ok(value) => value,
+            Err(_) => {
+                return error(
+                    writer,
+                    400,
+                    "Bad Request",
+                    "invalid_json",
+                    "Import fields do not match the request contract.",
+                    false,
+                );
+            }
+        };
+        let raw = match (input.url, input.content) {
+            (None, Some(content))
+                if !content.is_empty() && content.len() <= MAX_SUBSCRIPTION_BYTES =>
+            {
+                content.into_bytes()
+            }
+            (Some(url), None) if !url.is_empty() && url.len() <= 4096 => {
+                match runtime.fetch_subscription(
+                    &url,
+                    operation_deadline
+                        .min(std::time::Instant::now() + std::time::Duration::from_secs(45)),
+                ) {
+                    Ok(raw) => raw,
+                    Err(_) => {
+                        return error(
+                            writer,
+                            502,
+                            "Bad Gateway",
+                            "subscription_fetch_failed",
+                            "Subscription download did not complete.",
+                            false,
+                        );
+                    }
+                }
+            }
+            _ => {
+                return error(
+                    writer,
+                    400,
+                    "Bad Request",
+                    "invalid_input",
+                    "Provide one bounded subscription URL or content source.",
+                    false,
+                );
+            }
+        };
+        let parsed = match parse_clash_yaml(&raw) {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                return error(
+                    writer,
+                    422,
+                    "Unprocessable Entity",
+                    "subscription_invalid",
+                    "Subscription format or node fields are invalid.",
+                    false,
+                );
+            }
+        };
+        if parsed.nodes.is_empty() {
+            return error(
+                writer,
+                422,
+                "Unprocessable Entity",
+                "no_compatible_nodes",
+                "Subscription has no compatible nodes.",
+                false,
+            );
+        }
+        let summary = summarize_policy(&parsed);
+        let prepared = match PreparedSubscription::new(parsed.rules) {
+            Ok(prepared) => prepared,
+            Err(_) => {
+                return error(
+                    writer,
+                    422,
+                    "Unprocessable Entity",
+                    "subscription_invalid",
+                    "Subscription rules exceed supported bounds.",
+                    false,
+                );
+            }
+        };
+        let draft = self.store.snapshot();
+        let mut preview = match prepared.merge(&draft.policy) {
+            Ok(preview) => preview,
+            Err(_) => {
+                return error(
+                    writer,
+                    422,
+                    "Unprocessable Entity",
+                    "local_rules_invalid",
+                    "Local policy cannot be merged with this source.",
+                    false,
+                );
+            }
+        };
+        preview
+            .diagnostics
+            .extend(summary.omitted_rules.iter().map(|omission| Diagnostic {
+                scope: "subscription".into(),
+                index: omission.index,
+                code: omission.code.clone(),
+                message: omission.message.clone(),
+            }));
+        let nodes = NodesResponse {
+            nodes: PublicNodes(&parsed.nodes),
+            diagnostics: &parsed.diagnostics,
+            selected_node_id: "",
+            revision: &summary.revision,
+            policy_summary: &summary,
+        };
+        let response = Readback {
+            draft: Draft(&draft),
+            subscription_revision: &summary.revision,
+            subscription_rules: SubscriptionRules {
+                rules: prepared.rules(),
+                fingerprints: prepared.fingerprints(),
+            },
+            preview: &preview,
+            applied: Applied::unknown(),
+            runtime_generation: 0,
+            policy_summary: &summary,
+        };
+        let uncertain = ImportUncertain {
+            error: ApiError {
+                code: "storage_failed",
+                message: "Subscription was accepted, but directory durability is unconfirmed.",
+            },
+            committed: true,
+            subscription: NodesResponse {
+                nodes: PublicNodes(&parsed.nodes),
+                diagnostics: &parsed.diagnostics,
+                selected_node_id: "",
+                revision: &summary.revision,
+                policy_summary: &summary,
+            },
+        };
+        if json_length(&nodes).is_err()
+            || json_length(&response).is_err()
+            || json_length(&uncertain).is_err()
+        {
+            return response_too_large(writer, false);
+        }
+        drop(response);
+        drop(preview);
+        drop(draft);
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let budget = crate::readiness_tun::Budget {
+            deadline: operation_deadline
+                .min(std::time::Instant::now() + std::time::Duration::from_secs(30)),
+            cancel: &cancel,
+        };
+        let saved = match self.source_store.save(&raw, &budget) {
+            Ok(saved) => saved,
+            Err(error) => {
+                let low = matches!(
+                    error,
+                    crate::subscription_store::StoreError::InsufficientSpace
+                        | crate::subscription_store::StoreError::Measurement
+                );
+                let (status, code) = match error {
+                    crate::subscription_store::StoreError::Deadline => (504, "operation_timeout"),
+                    crate::subscription_store::StoreError::Cancelled => {
+                        (409, "operation_cancelled")
+                    }
+                    _ if low => (409, "storage_insufficient"),
+                    _ => (500, "storage_failed"),
+                };
+                return error_response_import(writer, status, code);
+            }
+        };
+        // Rename acceptance is authoritative even when directory durability is
+        // uncertain; the new parsed source becomes current exactly once.
+        self.subscription = prepared;
+        self.nodes = parsed.nodes;
+        self.diagnostics = parsed.diagnostics;
+        self.summary = summary;
+        let response = NodesResponse {
+            nodes: PublicNodes(&self.nodes),
+            diagnostics: &self.diagnostics,
+            selected_node_id: "",
+            revision: &self.summary.revision,
+            policy_summary: &self.summary,
+        };
+        if saved.durability_error.is_some() {
+            return write_json(
+                writer,
+                500,
+                "Internal Server Error",
+                &ImportUncertain {
+                    error: ApiError {
+                        code: "storage_failed",
+                        message: "Subscription was accepted, but directory durability is unconfirmed.",
+                    },
+                    committed: true,
+                    subscription: response,
+                },
+                false,
+            );
+        }
+        write_json(writer, 200, "OK", &response, false)
     }
     fn runtime_evidence(
         &self,
@@ -555,82 +905,6 @@ impl RulesState {
             head,
         )
     }
-}
-
-fn read_subscription(data_dir: &Path) -> Result<Subscription, RulesError> {
-    if data_dir.as_os_str().is_empty() {
-        return Err(RulesError);
-    }
-    let absolute = if data_dir.is_absolute() {
-        data_dir.to_owned()
-    } else {
-        std::env::current_dir()
-            .map_err(|_| RulesError)?
-            .join(data_dir)
-    };
-    let normalized: PathBuf = absolute
-        .components()
-        .filter(|part| *part != Component::CurDir)
-        .collect();
-    let directory = match OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
-        .open(normalized)
-    {
-        Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Subscription::default()),
-        Err(_) => return Err(RulesError),
-    };
-    // SAFETY: live directory fd, fixed terminated name, and ownership moves to File.
-    let fd = unsafe {
-        libc::openat(
-            directory.as_raw_fd(),
-            c"subscription.yaml".as_ptr(),
-            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        return if io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
-            Ok(Subscription::default())
-        } else {
-            Err(RulesError)
-        };
-    }
-    let mut file = unsafe { File::from_raw_fd(fd) };
-    let metadata = file.metadata().map_err(|_| RulesError)?;
-    if !metadata.is_file() || metadata.len() > MAX_SUBSCRIPTION_BYTES as u64 {
-        return Err(RulesError);
-    }
-    // Metadata is bounded above; reserve only the actual source plus one
-    // growth sentinel. Never initialize 2 MiB for a tiny source file.
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(metadata.len() as usize + 1)
-        .map_err(|_| RulesError)?;
-    let mut chunk = [0_u8; 32 << 10];
-    while bytes.len() <= MAX_SUBSCRIPTION_BYTES {
-        let remaining = (MAX_SUBSCRIPTION_BYTES + 1 - bytes.len()).min(chunk.len());
-        let count = match file.read(&mut chunk[..remaining]) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(_) => return Err(RulesError),
-        };
-        let length = bytes.len() + count;
-        if length > bytes.capacity() {
-            let capacity = length
-                .max(bytes.capacity().saturating_mul(2))
-                .min(MAX_SUBSCRIPTION_BYTES + 1);
-            bytes
-                .try_reserve_exact(capacity - bytes.len())
-                .map_err(|_| RulesError)?;
-        }
-        bytes.extend_from_slice(&chunk[..count]);
-    }
-    if bytes.len() > MAX_SUBSCRIPTION_BYTES {
-        return Err(RulesError);
-    }
-    parse_clash_yaml(&bytes).map_err(|_| RulesError)
 }
 
 // Typed decoding rejects duplicate and unknown fields at every known object.
@@ -1056,7 +1330,8 @@ fn write_json(
 pub(crate) fn is_rules_path(path: &str) -> bool {
     matches!(
         path,
-        "/api/proxy/local-rules"
+        "/api/proxy/import"
+            | "/api/proxy/local-rules"
             | "/api/proxy/local-rules/preview"
             | "/api/proxy/local-rules/apply"
             | "/api/proxy/select"
@@ -1097,6 +1372,24 @@ pub(crate) fn method_not_allowed(
         head,
         JSON_TYPE,
         &[("Allow", allow)],
+    )
+}
+fn error_response_import(
+    writer: &mut impl Write,
+    status: u16,
+    code: &'static str,
+) -> io::Result<()> {
+    error(
+        writer,
+        status,
+        match status {
+            409 => "Conflict",
+            504 => "Gateway Timeout",
+            _ => "Internal Server Error",
+        },
+        code,
+        "Subscription save did not commit; the accepted source is unchanged.",
+        false,
     )
 }
 fn response_too_large(writer: &mut impl Write, head: bool) -> io::Result<()> {

@@ -10,6 +10,7 @@ pub const MAX_BODY_BYTES: usize = 64 * 1024;
 pub const MAX_RUNTIME_BODY_BYTES: usize = 2 << 20;
 pub const MAX_LOGIN_BODY_BYTES: usize = 4 * 1024;
 pub const MAX_RULES_BODY_BYTES: usize = 256 * 1024;
+pub const MAX_IMPORT_BODY_BYTES: usize = 3 << 20;
 pub const MAX_HOST_BYTES: usize = 512;
 pub const MAX_ORIGIN_BYTES: usize = 1024;
 pub const MAX_COOKIE_BYTES: usize = 4 * 1024;
@@ -216,6 +217,7 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
                 | "/api/proxy/local-rules"
                 | "/api/proxy/local-rules/preview"
                 | "/api/proxy/local-rules/apply"
+                | "/api/proxy/import"
                 | "/api/proxy/select"
                 | "/api/proxy/capture"
                 | "/api/runtime/configure"
@@ -245,6 +247,7 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
         "/api/session/login" => MAX_LOGIN_BODY_BYTES,
         "/api/proxy/local-rules" | "/api/proxy/local-rules/preview" => MAX_RULES_BODY_BYTES,
         "/api/runtime/configure" => MAX_RUNTIME_BODY_BYTES,
+        "/api/proxy/import" => MAX_IMPORT_BODY_BYTES,
         _ => MAX_BODY_BYTES,
     };
     if request.content_length > limit {

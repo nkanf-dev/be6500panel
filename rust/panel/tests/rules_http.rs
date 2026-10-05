@@ -20,11 +20,13 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "be6500-rules-http-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
+        let path = fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!(
+                "be6500-rules-http-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
         fs::create_dir(&path).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         Self(path)
@@ -749,6 +751,11 @@ fn authenticated_nodes_match_actual_public_parser_projection_without_private_fie
 rules: ['MATCH,DIRECT']
 "#;
     fs::write(fixture.0.join("subscription.yaml"), yaml).unwrap();
+    fs::set_permissions(
+        fixture.0.join("subscription.yaml"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
     let expected = serde_json::to_value(parse_clash_yaml(yaml).unwrap().public_nodes()).unwrap();
     let service = fixture.service();
     let response = exchange(&service, &request("GET", "/api/proxy/nodes", "", ""));
@@ -773,4 +780,42 @@ rules: ['MATCH,DIRECT']
     .unwrap();
     assert!(!rules.contains("192.0.2.1"));
     assert!(!rules.contains("11111111-1111-4111-8111-111111111111"));
+}
+
+#[test]
+fn source_admission_precedes_draft_store_hardening_and_never_erases_parent_alias() {
+    let fixture = Fixture::new();
+    fixture.subscription();
+    let draft = serde_json::to_vec(&policy()).unwrap();
+    fs::write(fixture.0.join(FILE_NAME), &draft).unwrap();
+    fs::set_permissions(fixture.0.join(FILE_NAME), fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&fixture.0, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(RulesState::open(&fixture.0).is_err());
+    assert_eq!(
+        fs::metadata(&fixture.0).unwrap().permissions().mode() & 0o7777,
+        0o755
+    );
+    assert_eq!(fs::read(fixture.0.join(FILE_NAME)).unwrap(), draft);
+    fs::set_permissions(&fixture.0, fs::Permissions::from_mode(0o700)).unwrap();
+    let wrapper = Fixture::new();
+    symlink(&fixture.0, wrapper.0.join("parent-alias")).unwrap();
+    assert!(RulesState::open(wrapper.0.join("parent-alias/private-source")).is_err());
+    assert!(!fixture.0.join("private-source").exists());
+    assert!(RulesState::open(wrapper.0.join("parent-alias")).is_err());
+    assert_eq!(fs::read(fixture.0.join(FILE_NAME)).unwrap(), draft);
+}
+#[test]
+fn missing_private_source_root_is_created_without_parent_alias_or_unrelated_changes() {
+    let fixture = Fixture::new();
+    let root = fixture.0.join("new-private");
+    RulesState::open(&root).unwrap();
+    assert_eq!(
+        fs::metadata(&root).unwrap().permissions().mode() & 0o7777,
+        0o700
+    );
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+    fs::write(fixture.0.join("preserve"), b"unrelated").unwrap();
+    assert!(RulesState::open(fixture.0.join("new-private/../escaped")).is_err());
+    assert!(!fixture.0.join("escaped").exists());
+    assert_eq!(fs::read(fixture.0.join("preserve")).unwrap(), b"unrelated");
 }

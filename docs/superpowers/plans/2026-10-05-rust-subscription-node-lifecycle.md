@@ -6,12 +6,12 @@
 
 ## Source storage lane
 
-- [ ] Add `subscription_store.rs/tests/subscription_store.rs`: existingprivate0700root, subscription.yaml private0600,2MiBsourcecap; nofollow/pinnedinode/parent; read optional, atomictemporary/filefsync/rename/dirfsync; measured1MiBheadroom/fulltemporarygrowth. Save returns committed+durability uncertainty and retainsnewsourceauthority afterrename. No reset corruptfile or otherdraft/history/corewrite. Existing source read compatibility preserved. Source-only worker; root exports/builds.
+- [x] Add `subscription_store.rs/tests/subscription_store.rs`: existingprivate0700root, subscription.yaml private0600,2MiBsourcecap; nofollow/pinnedinode/parent; read optional, atomictemporary/filefsync/rename/dirfsync; measured1MiBheadroom/fulltemporarygrowth. Save returns committed+durability uncertainty and retainsnewsourceauthority afterrename. No reset corruptfile or otherdraft/history/corewrite. Existing source read compatibility preserved. Source-only worker; root exports/builds.
 
 ## Root source workflow
 
-- [ ] Refactor qualifiedSourcePolicy's response loop into trusted callback/bodyconsumer for existing artifactStage and bounded subscriptionbytes<=2MiB/redirects3/45s. Retainexacterrorclasses/shareddeadline/TLSidentity and HTTPcontentencoding rules. Root/nativehelpersprivate, no generalHTTPRPC.
-- [ ] Strict `/api/proxy/import` bodycontent XOR url, requirednon-null/unique fields, max3MiBJSON torepresent2MiBraw; malformedorzero compatible nodes refused before storage. Nodes/public summary+PreparedSubscription bound once. Acceptnewsource afterrename evenuncertain, clearselectedmarkerbutoldcurrentcoreunchanged; drafts preserveorder/edits/orphanprovenance. Failedprecommitoldstate/readbackintact; response uncertainty truthful.
+- [x] Refactor qualifiedSourcePolicy's response loop into trusted callback/bodyconsumer for existing artifactStage and bounded subscriptionbytes<=2MiB/redirects3/45s. Retainexacterrorclasses/shareddeadline/TLSidentity and HTTPcontentencoding rules. Root/nativehelpersprivate, no generalHTTPRPC.
+- [x] Strict `/api/proxy/import` bodycontent XOR url, requirednon-null/unique fields, max3MiBJSON torepresent2MiBraw; malformedorzero compatible nodes refused before storage. Nodes/public summary+PreparedSubscription bound once. Acceptnewsource afterrename evenuncertain, clearselectedmarkerbutoldcurrentcoreunchanged; drafts preserveorder/edits/orphanprovenance. Failedprecommitoldstate/readbackintact; response uncertainty truthful.
 
 ## Root pure selection
 
@@ -19,3 +19,10 @@
 - [ ] StrictSelect DTO nodeId/ipv6/failure/ports, optionaldatapath/routedTUN/ack/currentgeneration; map-only nestedobjects/direct-only/caps. Resolveactualnodeendpoint through fixednativeSourcePolicybootstrap; verifiedSRS/readconfig/generation/omission gates beforecheck/cleanup. Localdraftrevision/effectivepolicy transferredwithoutkeepingpreviewgraph overchecker/fsync.
 - [ ] Configure sameManager, whileoffacceptconfigbutnotappliedready; whileonexactacceptedbytes/actualready resourceproof before appliedmanifest. KnownselectednodeID requiresacceptedproxycredentialidentity+selectionmanifest hash/generation, never volatilelabelalone. Manifestpersistfailure reportrealacceptedstate andselection/applieduncertain, no falseoldactive.
 - [ ] Hosttemporarysource/fakecore/actualHTTP tests import/noApply/draftpreserve/URLTLDsource errors/newsourceorphans/selectoldnodemissing/customsettings/firstLANbind/stalegeneration/ack/noRefs/checkfail/cleanupfail/successreadback. FrozenGofixturesnoGocommands. Fullserialstatic/native+completeARM aftersettledhost; no productionmigration/parity/resourcegain claim.
+
+## Import qualification checkpoint
+
+- Root observed 468 serialized host tests, fmt/clippy/diff all pass.
+- Original existing0755 root and parent-symlink aliases refuse before either store; permissions/drafts unchanged. Red-to-green regression retained. Missing private roots create through relative mkdirat/openat, no canonicalization bypass.
+- Complete native HTTPS/owner ARMv7 executable link passes with LLVM ar; ELF32machine40/static/noPT_INTERP. This is crossbuild evidence, not device execution or production deployment.
+- Import content/URL/auth/origin/strictDTO/draft/currentcorePID/configmanifest/orphaned-edit evidence passes; no Apply on import.

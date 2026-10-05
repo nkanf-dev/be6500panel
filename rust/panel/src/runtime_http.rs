@@ -514,6 +514,25 @@ impl RuntimeHttp {
         self.closing = true;
         self.manager.close()
     }
+    pub(crate) fn subscription_import_allowed(&self) -> bool {
+        !self.closing && !self.startup_blocked && !crate::shutdown::requested()
+    }
+    pub(crate) fn fetch_subscription(
+        &self,
+        source: &str,
+        deadline: Instant,
+    ) -> Result<Vec<u8>, SourceError> {
+        if self.closing || self.startup_blocked {
+            return Err(SourceError::Cancelled);
+        }
+        let acquisition = self.acquisition.as_ref().ok_or(SourceError::Input)?;
+        let cancel = AtomicBool::new(false);
+        let budget = crate::readiness_tun::Budget {
+            deadline,
+            cancel: &cancel,
+        };
+        acquisition.source.fetch_subscription(source, &budget)
+    }
     pub(crate) fn rule_status(&mut self) -> Result<Status, ManagerError> {
         self.manager.status(ServiceId::SingBox)
     }

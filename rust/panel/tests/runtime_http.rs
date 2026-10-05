@@ -2222,3 +2222,227 @@ fn startup_rebuild_bad_digest_keeps_saved_metadata_and_accepted_bytes_then_off_c
     );
     assert!(owner.runtime.restore_saved().is_empty());
 }
+
+const IMPORT_YAML: &str = r#"proxies:
+  - name: Import fixture node
+    type: vless
+    server: 192.0.2.1
+    port: 443
+    uuid: 11111111-1111-4111-8111-111111111111
+    tls: true
+    udp: true
+    network: tcp
+    servername: example.com
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: '0123456789abcdef'
+rules:
+  - DOMAIN,first.example,DIRECT
+  - MATCH,DIRECT
+"#;
+#[test]
+fn subscription_import_preserves_draft_and_runtime_and_orphans_changed_source_edits() {
+    use be6500_panel::artifact_source::SourcePolicy;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.runtime();
+    let service = Service::new(fixture.root.clone())
+        .with_auth(Auth::new("isolated-secret"))
+        .with_data_dir(&fixture.root);
+    let cookie = login(&service);
+    let policy = json!({"rules":[{"id":"local-direct","enabled":true,"label":"retained independent","note":"not a subscription edit","rule":{"kind":"domain","value":"gpt.kanglives.top","target":"direct","index":0}}],"subscriptionEdits":[]});
+    let saved = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules",
+        Some(&json!({"policy":policy})),
+        &cookie,
+        200,
+    );
+    let draft = fs::read(fixture.root.join("local-proxy-rules.json")).unwrap();
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":"good\n","generation":0})),
+        &cookie,
+        200,
+    );
+    let running = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    let pid = running["pid"].as_u64().unwrap();
+    let accepted = fs::read(fixture.root.join("services/sing-box/state.json")).unwrap();
+    let payload = json!({"content":IMPORT_YAML});
+    body(
+        &exchange(
+            &service,
+            Some(&mut owner.runtime),
+            request(
+                "POST",
+                "/api/proxy/import",
+                Some(&payload),
+                "",
+                "http://localhost",
+            ),
+        ),
+        401,
+    );
+    body(
+        &exchange(
+            &service,
+            Some(&mut owner.runtime),
+            request(
+                "POST",
+                "/api/proxy/import",
+                Some(&payload),
+                &cookie,
+                "http://foreign.test",
+            ),
+        ),
+        403,
+    );
+    assert!(!fixture.root.join("subscription.yaml").exists());
+    for invalid in [
+        json!({}),
+        json!({"url":"https://example.invalid/sub","content":IMPORT_YAML}),
+        json!({"content":null}),
+        json!({"content":IMPORT_YAML,"extra":true}),
+        json!([IMPORT_YAML]),
+        json!({"content":"rules: [broken"}),
+        json!({"content":"rules:\n - MATCH,DIRECT\n"}),
+    ] {
+        let expected = if invalid["content"]
+            .as_str()
+            .is_some_and(|s| s == "rules: [broken" || s.starts_with("rules:\n"))
+        {
+            422
+        } else {
+            400
+        };
+        assert!(
+            call(
+                &service,
+                &mut owner.runtime,
+                "/api/proxy/import",
+                Some(&invalid),
+                &cookie,
+                expected
+            )
+            .get("error")
+            .is_some()
+        );
+        assert!(!fixture.root.join("subscription.yaml").exists());
+    }
+    let imported = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/import",
+        Some(&payload),
+        &cookie,
+        200,
+    );
+    assert_eq!(imported["nodes"].as_array().unwrap().len(), 1);
+    assert_eq!(imported["selectedNodeId"], "");
+    assert_eq!(
+        fs::read(fixture.root.join("subscription.yaml")).unwrap(),
+        IMPORT_YAML.as_bytes()
+    );
+    assert_eq!(
+        fs::read(fixture.root.join("local-proxy-rules.json")).unwrap(),
+        draft
+    );
+    assert_eq!(
+        fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+        accepted
+    );
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/runtime",
+            None,
+            &cookie,
+            200
+        )["services"][0]["pid"],
+        pid
+    );
+    let read = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules",
+        None,
+        &cookie,
+        200,
+    );
+    assert_eq!(read["draft"]["revision"], saved["draft"]["revision"]);
+    let reference = read["subscriptionRules"][0]["fingerprint"]
+        .as_str()
+        .unwrap();
+    let mut edited = policy.clone();
+    edited["subscriptionEdits"] = json!([{"id":"override-first","sourceFingerprint":reference,"disabled":true,"label":"changed source may orphan","note":""}]);
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules",
+        Some(&json!({"policy":edited})),
+        &cookie,
+        200,
+    );
+    let retained = fs::read(fixture.root.join("local-proxy-rules.json")).unwrap();
+    let changed = IMPORT_YAML.replace("first.example", "second.example");
+    owner
+        .runtime
+        .load_artifact_source(
+            SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+            &fixture.root.join("artifacts"),
+            &fixture.root.join("artifacts"),
+        )
+        .unwrap();
+    let (url, peer) = artifact_download_fixture(changed.as_bytes().to_vec());
+    let imported = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/import",
+        Some(&json!({"url":url})),
+        &cookie,
+        200,
+    );
+    peer.join().unwrap();
+    assert_eq!(
+        fs::read(fixture.root.join("subscription.yaml")).unwrap(),
+        changed.as_bytes()
+    );
+    assert_ne!(imported["revision"], read["subscriptionRevision"]);
+    assert_eq!(
+        fs::read(fixture.root.join("local-proxy-rules.json")).unwrap(),
+        retained
+    );
+    let changed_read = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/local-rules",
+        None,
+        &cookie,
+        200,
+    );
+    assert!(
+        changed_read["preview"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "orphaned-edit")
+    );
+    assert_eq!(changed_read["applied"]["state"], "unknown");
+    assert_eq!(
+        fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+        accepted
+    );
+}

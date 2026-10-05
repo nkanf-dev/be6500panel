@@ -31,6 +31,7 @@ pub enum SourceError {
     Http,
     Status,
     Redirect,
+    Limit,
     Deadline,
     Cancelled,
     Stage(StageError),
@@ -45,6 +46,7 @@ impl fmt::Display for SourceError {
             Self::Http => "artifact HTTP response invalid",
             Self::Status => "artifact HTTP status refused",
             Self::Redirect => "artifact redirect refused",
+            Self::Limit => "private HTTPS source size limit exceeded",
             Self::Deadline => "artifact source deadline exceeded",
             Self::Cancelled => "artifact source cancelled",
             Self::Stage(_) => "artifact staging refused",
@@ -129,13 +131,44 @@ impl SourcePolicy {
     ) -> Result<Stage, SourceError> {
         check(budget)?;
         crate::artifact_stage::metadata(artifact).map_err(|_| SourceError::Input)?;
+        self.consume_body(&artifact.url, budget, MAX_REDIRECTS, |reader, budget| {
+            Stage::from_reader(root, artifact, reader, budget).map_err(SourceError::Stage)
+        })
+    }
+    pub(crate) fn fetch_subscription(
+        &self,
+        source: &str,
+        budget: &Budget<'_>,
+    ) -> Result<Vec<u8>, SourceError> {
+        let limited = Budget {
+            deadline: budget
+                .deadline
+                .min(Instant::now() + Duration::from_secs(45)),
+            cancel: budget.cancel,
+        };
+        self.consume_body(source, &limited, 3, |reader, budget| {
+            read_source_bytes(reader, 2 << 20, budget)
+        })
+    }
+    fn consume_body<T>(
+        &self,
+        source: &str,
+        budget: &Budget<'_>,
+        redirect_limit: usize,
+        consume: impl FnOnce(&mut dyn Read, &Budget<'_>) -> Result<T, SourceError>,
+    ) -> Result<T, SourceError> {
+        check(budget)?;
+        if redirect_limit > MAX_REDIRECTS {
+            return Err(SourceError::Input);
+        }
+        let mut consume = Some(consume);
         let limited = Budget {
             deadline: budget.deadline.min(Instant::now() + MAX_FETCH_TIME),
             cancel: budget.cancel,
         };
         let mut url =
-            Url::parse(&artifact.url, self.allow_loopback_http).map_err(|_| SourceError::Input)?;
-        for redirects in 0..=MAX_REDIRECTS {
+            Url::parse(source, self.allow_loopback_http).map_err(|_| SourceError::Input)?;
+        for redirects in 0..=redirect_limit {
             check(&limited)?;
             let mut transport = self.connect(&url, &limited)?;
             let request = format!(
@@ -156,7 +189,7 @@ impl SourcePolicy {
             })?;
             let status = response.status();
             if matches!(status, 301 | 302 | 303 | 307 | 308) {
-                if redirects == MAX_REDIRECTS {
+                if redirects == redirect_limit {
                     return Err(SourceError::Redirect);
                 }
                 let next = url
@@ -169,18 +202,15 @@ impl SourcePolicy {
             if status != 200 {
                 return Err(SourceError::Status);
             }
-            let reader = ObservedReader {
+            let mut reader = ObservedReader {
                 inner: response.into_body(),
                 error: &observed_error,
             };
-            let stage = Stage::from_reader(root, artifact, reader, &limited).map_err(|error| {
-                transport_error(
-                    &limited,
-                    observed_error.get().unwrap_or(SourceError::Stage(error)),
-                )
-            })?;
+            let result = consume.take().ok_or(SourceError::Input)?(&mut reader, &limited).map_err(
+                |error| transport_error(&limited, observed_error.get().unwrap_or(error)),
+            )?;
             check(&limited)?;
-            return Ok(stage);
+            return Ok(result);
         }
         Err(SourceError::Redirect)
     }
@@ -237,6 +267,39 @@ impl SourcePolicy {
         };
         transport.handshake()?;
         Ok(transport)
+    }
+}
+fn read_source_bytes(
+    reader: &mut dyn Read,
+    limit: usize,
+    budget: &Budget<'_>,
+) -> Result<Vec<u8>, SourceError> {
+    let mut bytes = Vec::with_capacity(8192.min(limit));
+    let mut chunk = [0u8; 8192];
+    loop {
+        check(budget)?;
+        let size = chunk.len().min(limit.saturating_sub(bytes.len()) + 1);
+        let result = reader.read(&mut chunk[..size]);
+        check(budget)?;
+        let count = match result {
+            Ok(count) => count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err(SourceError::Http),
+        };
+        if count == 0 {
+            return Ok(bytes);
+        }
+        if count > size || count > limit.saturating_sub(bytes.len()) {
+            return Err(SourceError::Limit);
+        }
+        let needed = bytes.len() + count;
+        if needed > bytes.capacity() {
+            let capacity = needed.max(bytes.capacity().saturating_mul(2)).min(limit);
+            bytes
+                .try_reserve_exact(capacity - bytes.len())
+                .map_err(|_| SourceError::Limit)?;
+        }
+        bytes.extend_from_slice(&chunk[..count]);
     }
 }
 struct ObservedReader<'a, R> {
@@ -1070,5 +1133,63 @@ mod tests {
             );
             assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
         }
+    }
+
+    #[test]
+    fn private_subscription_consumer_keeps_exact_bytes_and_refuses_limit_or_extra_redirect() {
+        let fixture = SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap();
+        let raw = b"proxies: []\nrules: []\n";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = thread::spawn(move || {
+            let mut stream = listener.accept().unwrap().0;
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).unwrap();
+            let header = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", raw.len());
+            stream.write_all(header.as_bytes()).unwrap();
+            stream.write_all(raw).unwrap();
+        });
+        let cancel = AtomicBool::new(false);
+        let budget = Budget {
+            deadline: Instant::now() + Duration::from_secs(3),
+            cancel: &cancel,
+        };
+        assert_eq!(
+            fixture
+                .fetch_subscription(&format!("http://{address}/subscription"), &budget)
+                .unwrap(),
+            raw
+        );
+        peer.join().unwrap();
+        let mut reader = std::io::Cursor::new(vec![7u8; (2 << 20) + 1]);
+        assert_eq!(
+            read_source_bytes(&mut reader, 2 << 20, &budget),
+            Err(SourceError::Limit)
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = thread::spawn(move || {
+            for _ in 0..=3 {
+                let mut stream = listener.accept().unwrap().0;
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut bytes = [0u8; 1024];
+                let _ = stream.read(&mut bytes).unwrap();
+                stream
+                    .write_all(
+                        b"HTTP/1.1 302 Found\r\nLocation: /again\r\nContent-Length: 0\r\n\r\n",
+                    )
+                    .unwrap();
+            }
+        });
+        assert_eq!(
+            fixture.fetch_subscription(&format!("http://{address}/again"), &budget),
+            Err(SourceError::Redirect)
+        );
+        peer.join().unwrap();
     }
 }

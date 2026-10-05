@@ -57,3 +57,5 @@ pub mod server_loop;
 pub mod shutdown;
 pub mod static_files;
 pub mod subscription;
+#[cfg(unix)]
+pub mod subscription_store;

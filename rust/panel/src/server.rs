@@ -231,6 +231,7 @@ impl Service {
                 | "/api/proxy/local-rules"
                 | "/api/proxy/local-rules/preview"
                 | "/api/proxy/capture"
+                | "/api/proxy/import"
         ) && request.method == Method::Post
             && !http::json_content_type(request.content_type)
         {
@@ -266,7 +267,8 @@ impl Service {
                 Err(error) => return write_http_error(stream, write_budget, error),
             };
         let peer = stream.peer_addr()?.ip();
-        let response_budget = if crate::runtime_http::is_runtime_path(request.path())
+        let response_budget = if (crate::runtime_http::is_runtime_path(request.path())
+            || request.path() == "/api/proxy/import")
             && request.method == Method::Post
         {
             write_budget.max(Duration::from_secs(90))

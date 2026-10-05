@@ -86,8 +86,15 @@ fn cli_data_dir_opens_drafts_without_startup_save_or_runtime_owner() {
     use std::io::{Read, Write};
     use std::net::{Shutdown, TcpListener, TcpStream};
     use std::time::{Duration, Instant};
-    let path = std::env::temp_dir().join(format!("be6500-cli-draft-{}", std::process::id()));
+    let path = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("be6500-cli-draft-{}", std::process::id()));
     fs::create_dir(&path).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let probe = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = probe.local_addr().unwrap();
     drop(probe);
