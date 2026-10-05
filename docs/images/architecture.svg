@@ -21,12 +21,12 @@
 
   <!-- Top Title Bar -->
   <text x="40" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif" font-size="18" font-weight="600" fill="#f0f6fc">be6500panel 系统架构</text>
-  <text x="250" y="38" class="text-sub">高性能嵌入式 Rust 单所有者网关 + 反应式轻量 Web 控制台</text>
+  <text x="250" y="38" class="text-sub">轻量 Rust 后端服务 + 现代化 Web 管理面板</text>
 
   <!-- Left: Browser Web Console -->
   <rect x="40" y="65" width="260" height="375" class="card"/>
   <rect x="40" y="65" width="260" height="36" class="subcard" rx="8"/>
-  <text x="56" y="88" class="text-title">前端控制台 (浏览器端执行)</text>
+  <text x="56" y="88" class="text-title">前端页面 (浏览器端)</text>
   <text x="210" y="87" class="text-badge">Zero Node.js</text>
 
   <rect x="55" y="115" width="230" height="55" class="subcard"/>
@@ -34,7 +34,7 @@
   <text x="68" y="154" class="text-sub">React 19 · Radix UI · Tailwind CSS</text>
 
   <rect x="55" y="180" width="230" height="55" class="subcard"/>
-  <text x="68" y="201" class="text-main">反应式状态与契约</text>
+  <text x="68" y="201" class="text-main">状态管理与 API 契约</text>
   <text x="68" y="219" class="text-sub">Effect.js · @effect/schema 严密解码</text>
 
   <rect x="55" y="245" width="230" height="55" class="subcard"/>
@@ -60,7 +60,7 @@
   <!-- Center/Right: Native Control Plane (Rust) -->
   <rect x="350" y="65" width="570" height="375" class="rust-card"/>
   <rect x="350" y="65" width="570" height="36" class="subcard" rx="8"/>
-  <text x="368" y="88" class="text-rust">嵌入式原生控制平面 (Rust 单所有者内核 · ARMv7)</text>
+  <text x="368" y="88" class="text-rust">后端服务 (Rust · ARMv7)</text>
   <text x="790" y="87" class="text-badge">实测管理器内存 ~5–7 MiB</text>
 
   <!-- Server loop & Security -->
@@ -72,7 +72,7 @@
 
   <!-- Configuration Engine -->
   <rect x="642" y="115" width="260" height="85" class="accent-card"/>
-  <text x="656" y="136" class="text-green">原子配置工作流 (Config Engine)</text>
+  <text x="656" y="136" class="text-green">配置管理与回滚保护</text>
   <text x="656" y="154" class="text-sub">• Edit → Stage → Diff/校验 → Commit</text>
   <text x="656" y="172" class="text-sub">• 代次隔离 (Generation Guard)</text>
   <text x="656" y="190" class="text-sub">• 高风险操作超时自动回滚保护</text>
@@ -95,7 +95,7 @@
 
   <!-- Bottom Hardware Boundary -->
   <rect x="368" y="330" width="534" height="95" class="subcard"/>
-  <text x="382" y="352" class="text-main">底层硬件与宿主环境 (Xiaomi BE6500 · RN02)</text>
+  <text x="382" y="352" class="text-main">路由器硬件与系统 (Xiaomi BE6500 · RN02)</text>
   <text x="382" y="373" class="text-sub">• 高通 IPQ5322 四核 ARM Cortex-A53 @ 1.5GHz · 1GB DDR4 内存</text>
   <text x="382" y="391" class="text-sub">• 全 2.5G 盲插网口 · Wi-Fi 7 (802.11be) 6500Mbps 射频</text>
   <text x="382" y="409" class="text-sub">• 原生服务直接托管静态目录 · musl 静态编译</text>
