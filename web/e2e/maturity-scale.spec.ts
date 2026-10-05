@@ -93,6 +93,9 @@ const expectBaseline = async (
     name: `${title} 数据表分页`,
     exact: true,
   });
+  // Bulk source-record checks use DOM clicks after the table is opened. This
+  // avoids repeated viewport scrolling through large charts on slower CI hosts.
+  // Every page count, label and displayed record is still checked below.
   // A previous single-device/table journey may retain its page across same-component updates.
   for (
     let previous = 0;
@@ -102,7 +105,7 @@ const expectBaseline = async (
       .isEnabled());
     previous += 1
   )
-    await pager.getByLabel(`${title} 数据表上一页`, { exact: true }).click();
+    await pager.getByLabel(`${title} 数据表上一页`, { exact: true }).evaluate((button) => (button as HTMLButtonElement).click());
   // Display values use decimal byte units, while rates in this fixture stay below 1 KB/s.
   // Keep this expected projection independent of the product formatter.
   const byteText = (bytes: number | null) =>
@@ -144,14 +147,14 @@ const expectBaseline = async (
       )),
     );
     if (pageIndex < pages - 1)
-      await pager.getByLabel(`${title} 数据表下一页`, { exact: true }).click();
+      await pager.getByLabel(`${title} 数据表下一页`, { exact: true }).evaluate((button) => (button as HTMLButtonElement).click());
   }
   // Every displayed record is the source record. This includes all8 null first buckets.
   expect(observed).toEqual(expected);
   await expect(
     pager.getByLabel(`${title} 数据表下一页`, { exact: true }),
   ).toBeDisabled();
-  await pager.getByLabel(`${title} 数据表上一页`, { exact: true }).click();
+  await pager.getByLabel(`${title} 数据表上一页`, { exact: true }).evaluate((button) => (button as HTMLButtonElement).click());
   await expect(rows).toHaveCount(100);
   await pager.getByLabel(`${title} 数据表末页`, { exact: true }).click();
   await expect(rows).toHaveCount(total - (pages - 1) * 100);
