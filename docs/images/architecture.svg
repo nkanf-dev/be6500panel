@@ -31,7 +31,7 @@
 
   <rect x="55" y="115" width="230" height="55" class="subcard"/>
   <text x="68" y="136" class="text-main">现代化组件体系</text>
-  <text x="68" y="154" class="text-sub">React 18 · Radix UI · Tailwind CSS</text>
+  <text x="68" y="154" class="text-sub">React 19 · Radix UI · Tailwind CSS</text>
 
   <rect x="55" y="180" width="230" height="55" class="subcard"/>
   <text x="68" y="201" class="text-main">反应式状态与契约</text>
@@ -61,7 +61,7 @@
   <rect x="350" y="65" width="570" height="375" class="rust-card"/>
   <rect x="350" y="65" width="570" height="36" class="subcard" rx="8"/>
   <text x="368" y="88" class="text-rust">嵌入式原生控制平面 (Rust 单所有者内核 · ARMv7)</text>
-  <text x="790" y="87" class="text-badge">PID 6920 / 内存 &lt; 20M</text>
+  <text x="790" y="87" class="text-badge">实测管理器内存 ~5–7 MiB</text>
 
   <!-- Server loop & Security -->
   <rect x="368" y="115" width="260" height="85" class="subcard"/>
@@ -98,5 +98,5 @@
   <text x="382" y="352" class="text-main">底层硬件与宿主环境 (Xiaomi BE6500 · RN02)</text>
   <text x="382" y="373" class="text-sub">• 高通 IPQ5322 四核 ARM Cortex-A53 @ 1.5GHz · 1GB DDR4 内存</text>
   <text x="382" y="391" class="text-sub">• 全 2.5G 盲插网口 · Wi-Fi 7 (802.11be) 6500Mbps 射频</text>
-  <text x="382" y="409" class="text-sub">• 独立轻量静态资源嵌入 (musl 静态编译) · 零依赖原厂 OpenWrt 系统环境</text>
+  <text x="382" y="409" class="text-sub">• 原生服务直接托管静态目录 · musl 静态编译</text>
 </svg>
