@@ -1,8 +1,32 @@
 # Professional history: source map and bounded storage design
 
-## Scope and delivery status
+## Source retirement and current native paths
 
-This batch extends the existing persistent WAN query presets. It does not add
+This document retains the WAN range-extension record and later-store design.
+Its original Go source paths, timings, RAM figures and test results below are
+**historical/reference-only**, not current Rust build instructions. The frozen
+`mature-integration` tree outside this tree remains the reference; project Go
+source (`cmd/`, Go files under `internal/`, `go.mod`, `go.sum`) is retired.
+
+Current production source is `rust/panel/src/`:
+
+| Historical source | Current native source |
+| --- | --- |
+| `internal/traffic`, `internal/telemetry`, `internal/devicetelemetry` | `product_telemetry.rs`: WAN rings, core observations, device activity and annotations |
+| `internal/requesttrace` | `product_diagnostics.rs`: bounded manual request diagnostics |
+| `internal/core/logs.go` | `product_support.rs`, `product_events.rs`: bounded public logs and streams |
+| `internal/storage` | `product_telemetry.rs`, `product_configuration.rs`, `product_maintenance.rs`: source-specific storage admission and recovery |
+| `internal/httpapi` | `server.rs`, `product_gateway.rs`: the same authenticated product routes |
+
+The native owner lane invokes cooperative ticks without HTTP client threads or
+Tokio. It preserves WANRING layout, range contracts and device annotation format;
+it does not retain the old Go worker/RAM implementation. No year of observations
+is created by migration. All four Go-derived golden JSON fixtures under
+`rust/panel/tests/fixtures/` remain required compatibility evidence.
+
+## Historical range-extension scope
+
+This batch extended the existing persistent WAN query presets. It does not add
 connection, proxy, device, activity, latency, count, or request-trace history.
 It does not change a collector, API route, physical ring, or chart implementation.
 
@@ -17,9 +41,10 @@ The WAN selector already maps `TRAFFIC_HISTORY_RANGES` and its labels. Empty
 older coverage stays empty. Enabling a year-long selection does not create old
 measurements.
 
-## Current source inventory
+## Historical source inventory
 
-These are source-code facts, not new router measurements. The router budget of
+These are facts from the historical range-extension source, not new router
+measurements or current Rust scheduling/memory claims. The router budget of
 about 20 MiB total on `/data`, with about 5 MiB free, is supplied deployment
 context. Free space must be measured again before admitting any new store.
 
@@ -201,9 +226,10 @@ not borrowed from WAN or filled with zeros. Long source capability support is
 not delivered until backend collection, storage, bounded queries, UI and
 readback tests pass.
 
-## Verification boundary
+## Historical verification boundary
 
-`internal/traffic/range_presets_test.go` verifies all twelve names and durations,
+In the frozen Go reference, `internal/traffic/range_presets_test.go` verified all
+twelve names and durations,
 point bounds, native tier selection, returned integer-multiple resolution,
 full-range measured totals after simulated wrap-around, byte/coverage
 conservation, peaks and missing buckets. Its old-layout fixture
@@ -216,8 +242,9 @@ The existing `TestOneYearRetentionBoundedRingsAndExactDownsampling` independentl
 fills 405 simulated days, exercises all ring capacities/wrap-around, verifies
 400-day oldest coverage and a one-year query, and reopens persisted files.
 This is retention-capacity evidence, not proof that the live router has already
-collected a year's history. Existing restart, corruption, coverage and storage
-failure tests remain in the native suite.
+collected a year's history. Restart, corruption, coverage and storage failure
+checks from that reference are historical evidence; current Rust coverage is in
+`rust/panel/tests/product_telemetry.rs` and the module-local telemetry tests.
 
 Frontend range tests cover exact order/seconds/labels, Effect schema decoding,
 all GET range requests, automatic selector options, a single 24-hour label,
@@ -225,18 +252,19 @@ and no chart/export for an all-uncovered range. Existing UTC/CSV checks keep
 raw counter totals and empty values for uncovered buckets. No byte-format,
 chart-unit or request-phase implementation is changed by this batch.
 
-Local verification commands use existing dependencies only:
+Current project verification uses Rust and Bun only. From the repository root:
 
 ```sh
-go test ./internal/traffic
-go test -race ./internal/traffic
-go vet ./internal/traffic
-cd web
-bun run test src/lib/traffic-history-api.test.ts src/components/traffic-history/TrafficHistoryPanel.test.tsx src/components/traffic-history/use-traffic-history.test.tsx --maxWorkers=1 --no-file-parallelism
-bun run typecheck
+make test
 ```
 
-Results for this batch: native traffic tests, race and vet passed. The
+Cargo output is shared in `.build/rust`, serialized with one build job. Scoped
+traffic tests now live in `rust/panel/tests/product_telemetry.rs`; frontend range
+coverage remains under `web/src/lib/traffic-history-api.test.ts` and
+`web/src/components/traffic-history/`. Go test/race/vet commands from the original
+batch are not project verification commands.
+
+Historical range-only results: Go traffic tests, race and vet passed. The
 serialized frontend run passed **36 tests across three files**. Full frontend
 `tsc --noEmit` passed using the existing linked dependencies; nothing was
 installed. The new Go file adds five scoped preset tests. No full frontend

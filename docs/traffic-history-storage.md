@@ -1,27 +1,34 @@
 # WAN traffic history storage
 
-`internal/traffic` records one real WAN series. A server-owned worker samples
-`router.NewWANSource(routerAdapter).Snapshot` every two seconds. This bounded
-source reads only `/proc/net/dev`, `/proc/net/route`, and IPv6 routes when no
-IPv4 default exists. It has its own cache/lock and never reads device leases,
-WiFi, platform, or firewall, and never starts subprocesses. No browser, SSE subscription, chart,
-or device client needs to be connected. It uses raw receive/transmit counters,
-not the adapter's rate fields.
+`rust/panel/src/product_telemetry.rs` records one real WAN series and preserves
+the WANRING disk layout. `product_gateway.rs` owns one telemetry instance;
+`server_loop.rs` invokes cooperative ticks on the single native-owner lane,
+nominally once per second. Long requests can delay ticks. There is no independent
+sampler thread, HTTP client thread or Tokio runtime, and collection does not need
+a browser, SSE subscription or chart client.
+
+The WAN source reads raw receive/transmit counters from `/proc/net/dev` and selects
+the default route from `/proc/net/route` or IPv6 routes. It does not derive totals
+from displayed rate fields or create a series per interface. The same telemetry
+module has separate device/core observations; those are not WAN history.
 
 ## Enable and integrate
 
-Provide `traffic.Options{DataDir: filepath.Join(dataDir, "traffic"), Source:
-router.NewWANSource(routerAdapter)}` to `traffic.New`. Set `dataDir` to a persistent location such as
-`/data/be6500panel`. Empty `dataDir` must disable collection explicitly. Never use
-`/tmp`, silently fall back to RAM, or create an implicit series per interface.
+Production `--native-runtime --data-dir` opens the full product. Use a persistent
+private data location such as `/data/be6500panel`; rings live in its `traffic/`
+subdirectory. Do not use `/tmp` for persistent history. Initialization opens or
+admits fixed tiers once, not on every request. Startup/admission failures remain
+visible, valid existing tiers remain readable, and no unavailable store is
+silently relabeled as persistent RAM history.
 
-Call `Start(ctx)` once and `Close()` on shutdown. Both are idempotent; report a
-`Close` error. `New` returns filesystem, allocation, sync, or invalid-header
-errors. The panel should keep working but expose a disabled/unavailable reason
-if startup fails. Do not call `New` repeatedly every HTTP request.
+`product_gateway.rs` dispatches authenticated GET `/api/traffic/history`.
+`Telemetry::tick` performs bounded observation and scheduled dirty flushes;
+`Telemetry::close` attempts the final flush. Errors use safe public projections.
 
-Wire `httpapi.TrafficHistory(w, r, collector)` to the authenticated GET route
-`/api/traffic/history`. Nil collector returns the full disabled contract.
+The former `internal/traffic`, `router.NewWANSource`, `traffic.Options`,
+`Start(ctx)` and `httpapi.TrafficHistory` names are historical/reference-only in
+the frozen `mature-integration` tree outside this tree. Project Go source is
+retired. Keep all four golden JSON fixtures in `rust/panel/tests/fixtures/`.
 
 ## Measurement rules
 
@@ -35,9 +42,9 @@ Wire `httpapi.TrafficHistory(w, r, collector)` to the authenticated GET route
   contributes its actual `uint64` deltas and elapsed coverage. Split deltas
   across bucket boundaries by cumulative integer time fractions; every delta
   piece sums to its exact original total. Time attribution within that short
-  two-second measurement interval is an estimate; the counter total is not.
+  measurement interval is an estimate; the counter total is not.
 - Rates are byte totals divided by **observed coverage**, in bytes/second. Peaks
-  are the highest two-second counter-derived rate, not an instantaneous peak.
+  are the highest observed-interval counter-derived rate, not an instantaneous peak.
   Coarse buckets sum bytes and coverage and retain the maximum peak. They do
   not sum rate samples or fill missing time with zero traffic.
 - Missing reads, missing WAN interfaces, a source change, decreased counters,
@@ -64,11 +71,11 @@ Each file has a 64-byte checksummed layout header. Each logical bucket has two
 64-byte physical records. Records contain a 32-bit generation, millisecond observed-end offset, UTC bucket start,
 receive/transmit byte totals, nanosecond coverage, receive/transmit peaks, CRC32,
 and a record marker. No schema sidecar, JSON archive, SQLite, CGO, or external
-storage dependency is required. Memory contains 24,000 fixed buckets (under
-2 MiB on 64-bit Go) plus fixed dirty flags. Open/recovery temporarily reads at
-most one ring (~1.2 MiB); returned queries contain at most 2,000 samples. There
-are no per-interface or per-client histories. Route/traffic inputs exceeding
-4,096 rows are rejected.
+storage dependency is required. The Rust implementation scans bounded record
+slabs from disk and keeps at most 128 dirty slots per tier; it does not recreate
+the historical Go array of 24,000 in-memory buckets. Returned queries contain at
+most 2,000 samples. There are no per-interface or per-client histories.
+Route/traffic inputs are bounded; oversized input is rejected.
 
 New files are created once with actual zero writes, synced, then renamed and
 the directory synced. Creation needs the stated final budget plus filesystem
@@ -78,9 +85,9 @@ space for panel binaries/upgrade staging in addition to this history budget.
 
 All three resolutions receive the same counter deltas at collection time.
 Queries use **one** tier that retains the entire requested range; tiers are not
-joined or added together. The public ranges are `30m`, `3h`, `6h`, `1d`, `7d`,
-`30d`, `180d`, and `1y` (365 days). The long tier retains 400 days, so a one-year
-query remains available after recording long enough. Nothing creates a year
+joined or added together. The public ranges are `30m`, `1h`, `3h`, `6h`, `10h`,
+`12h`, `1d`, `3d`, `7d`, `30d`, `180d`, and `1y` (365 days). The long tier retains
+400 days, so a one-year query remains available after recording long enough. Nothing creates a year
 of measurements before collection began; `oldestAt` is the oldest still-retained
 bucket with actual coverage.
 
@@ -95,22 +102,21 @@ clients show these boundaries.
 
 ## Writes, loss window, and recovery
 
-The central worker flushes dirty slots and syncs changed rings **once per
-minute**, plus a final shutdown flush. Only changed records are written; there
-is no whole-history rewrite. A normal minute updates only a few 64-byte slots
-per tier. Filesystem/UBI page and journal write amplification is separate from
-these logical bytes. Manual `Flush()` exists for tests or explicit shutdown
-control; do not call it at the sampling cadence.
+The cooperative owner lane schedules dirty-slot syncs **once per minute** and
+attempts a final shutdown flush. A full bounded dirty map can flush sooner. Only
+changed records are written; there is no whole-history rewrite. A normal minute
+updates only a few 64-byte slots per tier. Filesystem/UBI page and journal write
+amplification is separate from these logical bytes. Long owner-lane operations
+can delay both observation and the next scheduled flush.
 
-A crash can lose up to one minute of unsynced measurements. Starting a new
-process also skips its first counter interval (normally up to two seconds),
-and last observation boundaries persist at millisecond precision to prevent
-re-counting intervals after a backward wall-clock change,
-and all downtime is uncovered. `Close()` attempts to save current measurements.
-`persistent: true` means persistent storage is enabled and healthy, **not** that
-the newest minute of samples has already been saved. `maxUnsyncedSeconds: 60`
-states the scheduled flush interval. Optional `lastFlushAt` is the latest
-successful dirty-data sync time in the current process; it is omitted until a
+A crash loses measurements since the last successful sync. Sixty seconds is the
+scheduled flush interval, not a strict loss bound while the owner lane is busy.
+A new process skips its first counter interval, persisted observation boundaries
+prevent recounting after a backward clock change, and downtime stays uncovered.
+`Telemetry::close` attempts to save current measurements. `persistent: true` means
+persistent storage is enabled and healthy, **not** that the newest samples have
+already been saved. `maxUnsyncedSeconds: 60` states the scheduled flush interval.
+Optional `lastFlushAt` is the latest successful dirty-data sync time in the current process; it is omitted until a
 flush after restart because observation timestamps are not flush timestamps.
 The source name identifies the **current** default route; this single aggregate
 WAN history can contain earlier interfaces and must not label all past samples
@@ -132,16 +138,20 @@ fresh recording can start.
 
 ## Verification
 
-Native tests cover exact delta partitioning, rates versus totals, peak
-aggregation, explicit gaps, resets, source changes, chosen/unrelated route errors,
-clock regressions, 405 days of wrap-around with a retained one-year query,
-point/cardinality/disk bounds, cancellation, central collection with no
-subscribers, restart loss window, torn/checksum/truncated records, startup errors,
-and visible flush errors. Run:
+Current Rust coverage is in `rust/panel/tests/product_telemetry.rs` and the
+module-local telemetry tests. It covers compatible ring layout/readback,
+counter totals and gaps, tier/query bounds, persistence/corruption and visible
+source/storage failures. The old Go traffic/httpapi test, race, vet and Go ARM
+commands are historical reference only, not commands for this retired source.
+
+Use the repository's Rust/Bun-only entry points:
 
 ```sh
-go test ./internal/traffic ./internal/httpapi
-go test -race ./internal/traffic ./internal/httpapi
-go vet ./...
-CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go test -c ./internal/traffic -o /tmp/be6500panel-traffic-armv7.test
+make test
+make armv7
 ```
+
+All Cargo output shares `.build/rust`, serialized with one build job. A static
+ARMv7 build proves target format, not a year of actual router observations. See
+`docs/professional-retention-source-map.md` for the historical 405-day simulated
+retention record and the separate, design-only grouped record-store proposal.

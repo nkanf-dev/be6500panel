@@ -2,7 +2,7 @@
 
 A modular, professional control panel for the Xiaomi BE6500 (RN02).
 
-**Native control plane:** Rust. The replacement uses bounded requests, private configuration generations and explicit resource ownership. Production migration is not complete; the existing device manager remains in place until the safe handover is qualified. **Browser:** React, Effect, Motion, Tailwind CSS, accessible Radix/shadcn-style components and Apache ECharts. No Node.js runtime on the router.
+**Native control plane:** Rust. The full native product now serves the existing authenticated API and static browser tree. It uses bounded requests, private configuration generations and one exclusive runtime owner. **Browser:** React, Effect, Motion, Tailwind CSS, accessible Radix/shadcn-style components and Apache ECharts. No Node.js runtime on the router.
 
 ## Modules
 
@@ -27,7 +27,7 @@ Runtime configurations use explicit **Commit 配置**, followed by Start/Stop. S
 
 ## Development
 
-Rust 1.93, Bun and Node.js 20.20+. Go is no longer a project build requirement.
+Rust 1.93, Bun and Node.js 20.20+. Makefile and CI build/test the project with Rust and Bun only; Go is not a project build or test requirement.
 
 ```text
 make setup
@@ -39,21 +39,21 @@ make build
 make armv7
 ```
 
-The Rust development service defaults to loopback `127.0.0.1:8790` diagnostic mode. It serves rule draft read/save/preview and memory diagnostics without a runtime owner. An explicit `--native-runtime` mode attaches the one exclusive native owner. It requires a password, existing private data/run directories and a private verified command manifest. This mode supports authenticated core/FRPC acquisition, configuration, start/stop, rule Apply and scoped capture. Subscription import/node selection and other management modules are still being ported. It is not yet a production replacement.
+The development service defaults to loopback `127.0.0.1:8790` diagnostic mode without a runtime owner. Production uses explicit `--native-runtime` mode with a password, existing private data/run directories and a verified command manifest. The full product includes system/router observations, UCI transactions, subscriptions and node selection, core/FRPC lifecycle, rules and scoped capture, telemetry/history, diagnostics, backup/import and maintenance. Add `--web-dir` to serve the same browser assets.
 
-Native mode example (use isolated directories until handover is qualified):
+Native mode example (use isolated directories for development):
 
 ```text
-BE6500PANEL_PASSWORD=<private password from your secret store> \
+BE6500PANEL_PASSWORD='<private password from your secret store>' \
   cargo run --locked --manifest-path rust/panel/Cargo.toml -- \
   --native-runtime --listen 127.0.0.1:8790 \
   --data-dir /absolute/private/data --run-dir /absolute/private/run \
   --command-manifest /absolute/private/command-bindings.json
 ```
 
-The command manifest is a private `0600` JSON object, at most 4 KiB. Its fixed fields are `ip` and `iptables` objects with absolute `path` and release `sha256`, `dnsBootstrap` as a literal address with port, and optional `routeTables` text. It does not admit core boot files, shell commands, browser paths or certificate overrides. SIGTERM cancels new work. If withdrawal fails, the same authenticated entry and owner remain alive for explicit cleanup retry; the process does not claim a clean shutdown or abandon installed capture.
+The command manifest is a private `0600` JSON object, at most 4 KiB. Its fields are `ip` and `iptables` objects with absolute `path` and release `sha256`, `dnsBootstrap` as a literal address with port, and optional `routeTables` text. Optional `singBox` and `frpc` objects bind fixed local executables by absolute `path` and release `sha256`; the runtime verifies them before check/start. The manifest does not admit core configuration, arbitrary commands, browser paths or certificate overrides. SIGTERM cancels new work. If withdrawal fails, the same authenticated entry and owner remain alive for explicit cleanup retry; the process does not claim a clean shutdown or abandon installed capture.
 
-All Cargo commands use `.build/rust`, one build job and no incremental cache. Do not pass a per-worker `--target-dir`. Separate source worktrees must set `CARGO_TARGET_DIR` to the integration worktree's `.build/rust` and share the existing `web/node_modules` directory.
+All Cargo commands share `.build/rust`, run serialized with one build job and use no incremental cache. Do not pass a per-worker `--target-dir`. Separate source worktrees must set `CARGO_TARGET_DIR` to the integration worktree's `.build/rust` and share the existing `web/node_modules` directory.
 
 For ARMv7 cross-builds, install the Rust `armv7-unknown-linux-musleabihf` target. Native TLS also needs an ARM-capable compiler and archiver, not just a linker. Linux CI uses `arm-linux-gnueabihf-gcc` and `arm-linux-gnueabihf-ar`.
 
@@ -72,13 +72,17 @@ Apple `ar` does not build the required ARM ELF crypto archive. If changing archi
 cargo +1.93.0 clean --manifest-path rust/panel/Cargo.toml --package ring --release --target armv7-unknown-linux-musleabihf
 ```
 
-Inspect the complete native executable, not an earlier diagnostic binary whose unused TLS code was removed by the linker. Cross-build success does not prove device RSS, latency, process lifecycle or production readiness.
+Inspect the complete native executable, not an earlier diagnostic binary whose unused TLS code was removed by the linker. The qualified build is static ARMv7. Cross-build success alone does not prove device RSS, latency or process lifecycle.
 
-## Production migration boundary
+## Production handover and source retirement
 
-Do not install the current Rust slice over the running device manager yet. The existing manager and native cores remain independent from source-side cleanup. Production activation requires actual readiness, resource budgets, exclusive ownership, remaining API parity and data migration checks.
+The full native product has completed the production handover on the same authenticated API and static tree. The qualification record for source `483f780d7f35e1f3070ff897b713e5a9af33c30b` has a ready native owner on port `8776`, a ready sing-box core on port `8806` at runtime generation `9`, and capture **off**. Accepted configuration generation `8`, draft version `1`, and the runtime configuration hash were preserved. These values describe the qualified handover snapshot.
 
-The obsolete extra Go management front has been retired. User rule drafts, accepted configurations, native routing data, history, rescue SSH and factory ACLs are preserved. External sing-box and FRPC are retained components, not project Go build targets.
+Qualification covered 23 real views with zero actual alerts and 12 behavior checks. The full Rust suite passed 589 tests and the complete ARMv7 executable was static. The prior full frontend run passed 1,602 tests; a further 38 copy/status tests passed. These are recorded results, not checks rerun by documentation edits.
+
+`cmd/`, Go source under `internal/`, `go.mod` and `go.sum` are retired project source. The frozen `mature-integration` tree outside this tree remains a historical reference, not a build dependency. Keep all four compatibility JSON fixtures in `rust/panel/tests/fixtures/`: `native-go.json`, `subscription-go.json`, `local-policy-go.json` and `capture-go.json`.
+
+User rule drafts, accepted configurations, native routing data, history, rescue SSH and factory ACLs remain intact. External sing-box and FRPC remain native runtime components, not project Go build targets. FRPC is currently unconfigured; no external tunnel connectivity is claimed. `scripts/bootstrap.sh` is the native bootstrap entry point; deployment and live-device changes belong to the root deployment lane.
 
 ## Architecture
 
@@ -105,7 +109,7 @@ The capability matrix tracks dedicated RN02 adapters for official Wi-Fi7/MLO/Mes
 
 Only source, tests and synthetic examples belong in Git. Subscriptions, keys, Wi-Fi credentials, live snapshots and private configuration remain on the managed device/developer machine. The panel is MIT; external binaries and data retain their upstream licenses.
 
-Browser CI currently runs isolated fixture suites only. The old Go-demo-dependent
-`console.spec.ts` and `modern-layout.spec.ts` remain historical tests, not active
-Rust parity gates. They must be ported to actual Rust contracts before production
-migration is declared complete. No browser test starts a Go process.
+Browser CI runs isolated fixture suites without starting a Go process. The old
+Go-demo-dependent `console.spec.ts` and `modern-layout.spec.ts` remain historical
+reference tests, not active Rust parity gates. Production handover evidence comes
+from the real views and behavior checks above; it is separate from fixture CI.
