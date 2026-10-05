@@ -573,10 +573,12 @@ fn current_identity_and_accepted_hash_must_survive_dns_interval() {
             CurrentCase::ConfigChange,
         ] {
             let (result, _, active) = exercise_current(case, tun);
-            assert_eq!(
-                result,
-                Err(Failure::Hook(HookStage::Readiness, HookError::Failed))
-            );
+            let expected = if case == CurrentCase::ConfigChange {
+                Failure::Store(be6500_panel::runtime_store::StoreError::InvalidState)
+            } else {
+                Failure::Hook(HookStage::Readiness, HookError::Failed)
+            };
+            assert_eq!(result, Err(expected));
             assert!(!active);
         }
     }

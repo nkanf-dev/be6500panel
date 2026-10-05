@@ -604,6 +604,10 @@ impl RuntimeStore {
     /// or activation: the caller must stage/check/withdraw/own it separately.
     /// Config generation, current and proven lastGood records stay unchanged.
     #[cfg(test)]
+    pub(crate) fn inject_committed_sync_fault(&mut self) {
+        self.fault = Some(Fault::CommittedSync);
+    }
+    #[cfg(test)]
     pub(crate) fn inject_artifact_fault(&mut self, after_commit: bool) {
         self.artifact_fault = Some(after_commit);
     }

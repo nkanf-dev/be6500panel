@@ -1973,8 +1973,9 @@ impl Manager {
             .as_mut()
             .ok_or(Failure::Exited)?
             .ready = true;
-        self.outcome(service, result.durability_error)?;
-        self.restore_resources(service, &record)
+        let durability = self.outcome(service, result.durability_error).err();
+        self.restore_resources(service, &record)?;
+        durability.map_or(Ok(()), Err)
     }
     fn restore_resources(
         &mut self,
@@ -2093,19 +2094,18 @@ impl Manager {
             }
         };
         self.services[service.index()].restored = false;
-        self.outcome(service, outcome.durability_error)
-            .map_err(|failure| (failure, None))?;
+        let durability = self.outcome(service, outcome.durability_error).err();
         if !should_run {
             let slot = &mut self.services[service.index()];
             slot.failure = None;
             slot.needs_recovery = slot.durability_uncertain;
             slot.resource_suspended = true;
-            return Ok(());
+            return durability.map_or(Ok(()), |failure| Err((failure, None)));
         }
         match self.start_accepted(service) {
             Ok(()) => {
-                self.services[service.index()].failure = None;
-                Ok(())
+                self.services[service.index()].failure = durability;
+                durability.map_or(Ok(()), |failure| Err((failure, None)))
             }
             Err(failure) => Err((failure, self.failed_change(service, failure, frozen))),
         }
@@ -2118,10 +2118,11 @@ impl Manager {
     ) -> Option<Failure> {
         // Resource restore failure keeps a genuinely ready core alive. An
         // authoritative durability error also must not trigger blind rollback.
-        if matches!(
-            failure,
-            Failure::Hook(HookStage::Restore, _) | Failure::Store(StoreError::Durability)
-        ) {
+        if failure == Failure::Store(StoreError::Durability) {
+            self.services[service.index()].needs_recovery = true;
+            return None;
+        }
+        if matches!(failure, Failure::Hook(HookStage::Restore, _)) {
             self.services[service.index()].needs_recovery = true;
             self.services[service.index()].resource_suspended = true;
             return None;
@@ -2947,6 +2948,34 @@ IFS= read -r value < "$TMPDIR/wait"
         assert_eq!(
             current_status_after_io(Err(error), deadline, deadline - Duration::from_nanos(1)),
             Err(HookError::Failed)
+        );
+        manager.close().unwrap();
+    }
+    #[test]
+    fn committed_config_sync_uncertainty_still_starts_ready_core_and_restores_resources() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let fixture = Fixture::new();
+        let mut manager = fixture.manager();
+        manager
+            .configure(ServiceId::SingBox, 0, b"old\n", None)
+            .unwrap();
+        let old = manager.start(ServiceId::SingBox).unwrap().pid.unwrap();
+        manager.store.inject_committed_sync_fault();
+        let failed = manager
+            .configure(ServiceId::SingBox, 1, b"checked-new\n", None)
+            .unwrap_err();
+        assert_eq!(failed.failure, Failure::Store(StoreError::Durability));
+        let status = manager.status(ServiceId::SingBox).unwrap();
+        assert!(status.desired && status.ready && status.running_matches_accepted);
+        assert!(!status.resource_suspended);
+        assert_ne!(status.pid, Some(old));
+        assert_eq!(
+            manager.config(ServiceId::SingBox).unwrap().unwrap().bytes(),
+            b"checked-new\n"
+        );
+        assert_eq!(
+            unsafe { libc::kill(status.pid.unwrap() as libc::pid_t, 0) },
+            0
         );
         manager.close().unwrap();
     }

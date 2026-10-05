@@ -36,6 +36,25 @@ impl<O: Observer + 'static> NativeReadiness<O> {
     pub fn with_observer(observer: O, cancel: Rc<AtomicBool>) -> Self {
         Self { observer, cancel }
     }
+    pub(crate) fn selection_scope(
+        &mut self,
+        budget: &readiness_tun::Budget<'_>,
+    ) -> Result<crate::capture_lan::Snapshot, HookError> {
+        budget.check().map_err(tun_error)?;
+        if self.cancel.load(Ordering::Relaxed) {
+            return Err(HookError::Cancelled);
+        }
+        let scope =
+            crate::capture_lan::observe(&mut self.observer, false, 0, budget).map_err(|error| {
+                match error {
+                    crate::capture_lan::LanError::Deadline => HookError::Deadline,
+                    crate::capture_lan::LanError::Cancelled => HookError::Cancelled,
+                    _ => HookError::Failed,
+                }
+            })?;
+        budget.check().map_err(tun_error)?;
+        Ok(scope)
+    }
     pub fn pre_start(&mut self, context: &HookContext<'_>) -> Result<(), HookError> {
         self.check(context)?;
         if context.service == ServiceId::Frpc {
@@ -154,9 +173,6 @@ impl<O: Observer + 'static> NativeReadiness<O> {
                 _ => TunError::IdentityChanged,
             })
         };
-        identity
-            .unchanged(&mut self.observer, &budget, &mut status)
-            .map_err(tun_error)?;
         if context.service == ServiceId::Frpc {
             // Identity/liveness only: no accepted listener or tunnel-health claim.
             return self.check(context);
@@ -193,25 +209,7 @@ impl<O: Observer + 'static> NativeReadiness<O> {
         identity
             .unchanged(&mut self.observer, &budget, &mut status)
             .map_err(tun_error)?;
-        if tun {
-            readiness_tun::observe_owned_once(
-                &raw,
-                &identity,
-                &mut self.observer,
-                context.deadline,
-                &self.cancel,
-                &mut status,
-            )
-            .map_err(tun_error)?;
-        }
         listeners?;
-        // Release the first bounded config before its second disk/hash read.
-        // Current observation must not retain two maximum-size config buffers.
-        drop(raw);
-        read_accepted_until(context, Some(&self.cancel))?;
-        identity
-            .unchanged(&mut self.observer, &budget, &mut status)
-            .map_err(tun_error)?;
         if owned_status(context)? != initial {
             return Err(HookError::Failed);
         }

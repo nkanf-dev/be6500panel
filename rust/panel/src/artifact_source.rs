@@ -118,6 +118,31 @@ impl SourcePolicy {
         policy.allow_loopback_http = true;
         Ok(policy)
     }
+    pub(crate) fn selection_endpoints(
+        &self,
+        host: &str,
+        budget: &Budget<'_>,
+    ) -> Result<Vec<String>, SourceError> {
+        check(budget)?;
+        let endpoints = if let Ok(address) = host.parse::<std::net::IpAddr>() {
+            vec![address]
+        } else {
+            endpoint_dns::resolve(host, self.bootstrap, budget.deadline, Some(budget.cancel))
+                .map_err(|_| transport_error(budget, SourceError::Dns))?
+        };
+        check(budget)?;
+        if endpoints.is_empty()
+            || endpoints.len() > 128
+            || endpoints.iter().any(|ip| {
+                ip.is_unspecified()
+                    || ip.is_multicast()
+                    || matches!(ip,std::net::IpAddr::V6(v)if v.to_ipv4_mapped().is_some())
+            })
+        {
+            return Err(SourceError::Dns);
+        }
+        Ok(endpoints.into_iter().map(|ip| ip.to_string()).collect())
+    }
     pub(crate) fn validate_artifact(&self, artifact: &Artifact) -> Result<(), SourceError> {
         crate::artifact_stage::metadata(artifact).map_err(|_| SourceError::Input)?;
         Url::parse(&artifact.url, self.allow_loopback_http).map_err(|_| SourceError::Input)?;

@@ -268,7 +268,7 @@ impl Service {
             };
         let peer = stream.peer_addr()?.ip();
         let response_budget = if (crate::runtime_http::is_runtime_path(request.path())
-            || request.path() == "/api/proxy/import")
+            || matches!(request.path(), "/api/proxy/import" | "/api/proxy/select"))
             && request.method == Method::Post
         {
             write_budget.max(Duration::from_secs(90))
@@ -313,21 +313,21 @@ impl Service {
         if rules_http::is_rules_path(request.path()) {
             // Session lock never covers draft filesystem I/O or streaming.
             drop(auth);
-            if request.path() == "/api/proxy/select" {
-                return if request.method == Method::Post {
-                    rules_http::runtime_unavailable(&mut writer, head_only)
-                } else {
-                    rules_http::method_not_allowed(&mut writer, head_only, "POST")
-                };
-            }
             if matches!(
                 request.path(),
-                "/api/proxy/local-rules/preview" | "/api/proxy/local-rules/apply"
+                "/api/proxy/local-rules/preview"
+                    | "/api/proxy/local-rules/apply"
+                    | "/api/proxy/select"
+                    | "/api/proxy/import"
             ) && request.method != Method::Post
             {
                 return rules_http::method_not_allowed(&mut writer, head_only, "POST");
             }
-            if request.path() == "/api/proxy/local-rules/apply" && runtime.is_none() {
+            if matches!(
+                request.path(),
+                "/api/proxy/local-rules/apply" | "/api/proxy/select" | "/api/proxy/import"
+            ) && runtime.is_none()
+            {
                 return rules_http::runtime_unavailable(&mut writer, head_only);
             }
             let Some(rules) = &self.rules else {

@@ -171,9 +171,9 @@ fn open_at(dir: &File, name: &CStr, flags: i32) -> io::Result<File> {
     }
     Ok(unsafe { File::from_raw_fd(fd) })
 }
-fn optional(dir: &File, b: &Budget<'_>) -> Result<Option<File>, StoreError> {
+fn optional(dir: &File, name: &CStr, b: &Budget<'_>) -> Result<Option<File>, StoreError> {
     check(b)?;
-    let result = open_at(dir, SOURCE, libc::O_RDONLY);
+    let result = open_at(dir, name, libc::O_RDONLY);
     check(b)?;
     match result {
         Ok(f) => Ok(Some(f)),
@@ -181,17 +181,26 @@ fn optional(dir: &File, b: &Budget<'_>) -> Result<Option<File>, StoreError> {
         Err(_) => Err(StoreError::Storage),
     }
 }
+#[cfg(test)]
 fn read_hash(
     file: &mut impl Read,
     b: &Budget<'_>,
+    bytes: Option<&mut Vec<u8>>,
+) -> Result<([u8; 32], u64), StoreError> {
+    read_hash_limit(file, b, bytes, MAX_BYTES)
+}
+fn read_hash_limit(
+    file: &mut impl Read,
+    b: &Budget<'_>,
     mut bytes: Option<&mut Vec<u8>>,
+    limit: usize,
 ) -> Result<([u8; 32], u64), StoreError> {
     let mut sha = Sha256::new();
     let mut scratch = [0; 8192];
     let mut total = 0usize;
     loop {
         check(b)?;
-        let size = scratch.len().min(MAX_BYTES.saturating_sub(total) + 1);
+        let size = scratch.len().min(limit.saturating_sub(total) + 1);
         let result = file.read(&mut scratch[..size]);
         check(b)?;
         let n = match result {
@@ -201,7 +210,7 @@ fn read_hash(
         if n == 0 {
             break;
         }
-        if n > MAX_BYTES.saturating_sub(total) {
+        if n > limit.saturating_sub(total) {
             return Err(StoreError::Limit);
         }
         total += n;
@@ -271,6 +280,8 @@ fn admit_space(unit: u128, available: u128, length: usize) -> Result<(), StoreEr
 }
 pub struct Store {
     path: PathBuf,
+    name: &'static CStr,
+    limit: usize,
     directory: File,
     root_id: (u64, u64),
     file: Option<File>,
@@ -288,6 +299,12 @@ impl fmt::Debug for Store {
 }
 impl Store {
     pub fn open(root: &Path) -> Result<Self, StoreError> {
+        Self::open_fixed(root, SOURCE, MAX_BYTES)
+    }
+    pub(crate) fn open_selection(root: &Path) -> Result<Self, StoreError> {
+        Self::open_fixed(root, c"proxy-selection.json", 4096)
+    }
+    fn open_fixed(root: &Path, name: &'static CStr, limit: usize) -> Result<Self, StoreError> {
         let cancel = AtomicBool::new(false);
         let budget = Budget {
             deadline: Instant::now() + Duration::from_secs(30),
@@ -297,6 +314,8 @@ impl Store {
         let m = checked_io(&budget, || directory.metadata())?;
         let mut value = Self {
             path: root.into(),
+            name,
+            limit,
             directory,
             root_id: (m.dev(), m.ino()),
             file: None,
@@ -307,10 +326,13 @@ impl Store {
             #[cfg(test)]
             cancel_after_commit: None,
         };
-        if let Some(mut file) = optional(&value.directory, &budget)? {
+        if let Some(mut file) = optional(&value.directory, value.name, &budget)? {
             let before = checked_io(&budget, || file.metadata())?;
             private_file(&before)?;
-            let (sha, size) = read_hash(&mut file, &budget, None)?;
+            if before.len() > value.limit as u64 {
+                return Err(StoreError::Limit);
+            }
+            let (sha, size) = read_hash_limit(&mut file, &budget, None, value.limit)?;
             let after = checked_io(&budget, || file.metadata())?;
             if stamp(&before) != stamp(&after) || size != before.len() {
                 return Err(StoreError::Storage);
@@ -333,7 +355,7 @@ impl Store {
         {
             return Err(StoreError::Storage);
         }
-        let disk = optional(&self.directory, b)?;
+        let disk = optional(&self.directory, self.name, b)?;
         match (&self.file, &disk) {
             (None, None) => {}
             (Some(pin), Some(disk)) => {
@@ -347,6 +369,10 @@ impl Store {
             _ => return Err(StoreError::Storage),
         }
         Ok(disk)
+    }
+    pub(crate) fn current_sha256(&self, b: &Budget<'_>) -> Result<Option<[u8; 32]>, StoreError> {
+        drop(self.checked(b)?);
+        Ok(self.sha256)
     }
     pub fn load(&self) -> Result<Option<Vec<u8>>, StoreError> {
         let cancel = AtomicBool::new(false);
@@ -363,7 +389,7 @@ impl Store {
         let mut raw = Vec::new();
         raw.try_reserve_exact(size as usize)
             .map_err(|_| StoreError::Storage)?;
-        let (sha, length) = read_hash(&mut disk, b, Some(&mut raw))?;
+        let (sha, length) = read_hash_limit(&mut disk, b, Some(&mut raw), self.limit)?;
         drop(self.checked(b)?);
         if length != size || self.sha256 != Some(sha) {
             return Err(StoreError::Storage);
@@ -372,7 +398,7 @@ impl Store {
     }
     pub fn save(&mut self, raw: &[u8], b: &Budget<'_>) -> Result<SaveOutcome, StoreError> {
         check(b)?;
-        if raw.len() > MAX_BYTES {
+        if raw.len() > self.limit {
             return Err(StoreError::Limit);
         }
         drop(self.checked(b)?);
@@ -434,7 +460,7 @@ impl Store {
                 return Err(StoreError::Storage);
             }
             checked_io(b, || file.seek(SeekFrom::Start(0)))?;
-            let (reread, length) = read_hash(&mut file, b, None)?;
+            let (reread, length) = read_hash_limit(&mut file, b, None, self.limit)?;
             if reread != expected || length != m.len() {
                 return Err(StoreError::Storage);
             }
@@ -454,7 +480,7 @@ impl Store {
                     self.directory.as_raw_fd(),
                     name.as_ptr(),
                     self.directory.as_raw_fd(),
-                    SOURCE.as_ptr(),
+                    self.name.as_ptr(),
                 )
             } != 0
             {
@@ -588,6 +614,41 @@ mod tests {
             deadline: Instant::now() + Duration::from_secs(30),
             cancel,
         }
+    }
+
+    #[test]
+    fn fixed_selection_evidence_keeps_private_cap_source_and_pin_authority() {
+        let fixture = Fixture::new();
+        let mut source = Store::open(&fixture.0).unwrap();
+        let cancel = AtomicBool::new(false);
+        source.save(b"opaque-source", &budget(&cancel)).unwrap();
+        let mut selection = Store::open_selection(&fixture.0).unwrap();
+        let accepted = vec![b'x'; 4096];
+        let outcome = selection.save(&accepted, &budget(&cancel)).unwrap();
+        assert_eq!(outcome.sha256, <[u8; 32]>::from(Sha256::digest(&accepted)));
+        assert_eq!(
+            selection.current_sha256(&budget(&cancel)).unwrap(),
+            Some(outcome.sha256)
+        );
+        assert_eq!(
+            selection
+                .save(&vec![b'x'; 4097], &budget(&cancel))
+                .unwrap_err(),
+            StoreError::Limit
+        );
+        assert_eq!(selection.load().unwrap().unwrap(), accepted);
+        assert_eq!(source.load().unwrap().unwrap(), b"opaque-source");
+        selection.fault = Some(Fault {
+            step: Step::DirectorySync,
+            error: StoreError::Storage,
+        });
+        let changed = selection.save(b"new-evidence", &budget(&cancel)).unwrap();
+        assert!(changed.committed);
+        assert_eq!(changed.durability_error, Some(StoreError::Durability));
+        assert_eq!(selection.load().unwrap().unwrap(), b"new-evidence");
+        // Committed-new authority remains usable; a noncritical fsync report
+        // does not introduce a permanent operation gate or affect the core.
+        assert!(selection.current_sha256(&budget(&cancel)).is_ok());
     }
     #[test]
     fn each_precommit_fault_keeps_old_source_and_cleans_only_owned_temp() {

@@ -18,6 +18,10 @@ use std::{
 };
 const MAX_RESPONSE: usize = 64 << 10;
 pub(crate) trait CaptureControl {
+    fn selection_scope(
+        &self,
+        budget: &crate::readiness_tun::Budget<'_>,
+    ) -> Result<crate::capture_lan::Snapshot, HookError>;
     fn snapshot(&self) -> Result<Snapshot, HookError>;
     fn commands(&self) -> Result<usize, HookError>;
     fn unobserved(&self) -> Result<CurrentStatus, HookError>;
@@ -31,6 +35,12 @@ pub(crate) trait CaptureControl {
     fn withdraw(&self, deadline: Instant) -> Result<(), HookError>;
 }
 impl<O: Observer + 'static> CaptureControl for CaptureHandle<O> {
+    fn selection_scope(
+        &self,
+        budget: &crate::readiness_tun::Budget<'_>,
+    ) -> Result<crate::capture_lan::Snapshot, HookError> {
+        self.selection_scope(budget)
+    }
     fn commands(&self) -> Result<usize, HookError> {
         self.owned_command_count()
     }

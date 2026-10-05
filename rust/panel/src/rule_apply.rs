@@ -212,7 +212,9 @@ fn intention_for(accepted: &[u8], nodes: &[Node], selected: Option<&Node>) -> Re
     } else {
         let mut matched = nodes.iter().filter(|node| node_matches(proxy[0], node));
         let node = matched.next().ok_or(ApplyError)?.clone();
-        if matched.next().is_some() { return Err(ApplyError); }
+        if matched.next().is_some() {
+            return Err(ApplyError);
+        }
         node
     };
     let mut input = CompileInput {
@@ -246,7 +248,8 @@ fn intention_for(accepted: &[u8], nodes: &[Node], selected: Option<&Node>) -> Re
                 input.dns_listen_address = inbound.listen.clone();
             }
             ("tun-in", "tun") => {}
-            _ if selected.is_some() && !matches!(inbound.tag.as_str(), "mixed-in" | "dns-in" | "tun-in") => {}
+            _ if selected.is_some()
+                && !matches!(inbound.tag.as_str(), "mixed-in" | "dns-in" | "tun-in") => {}
             _ => return Err(ApplyError),
         }
     }
@@ -296,7 +299,11 @@ fn intention_for(accepted: &[u8], nodes: &[Node], selected: Option<&Node>) -> Re
                 });
             }
             "dns-fake" if server.kind == "fakeip" => input.fake_ip = true,
-            _ if selected.is_some() && !matches!(server.tag.as_str(), "dns-direct" | "dns-proxy" | "dns-local" | "dns-fake") => {}
+            _ if selected.is_some()
+                && !matches!(
+                    server.tag.as_str(),
+                    "dns-direct" | "dns-proxy" | "dns-local" | "dns-fake"
+                ) => {}
             _ => return Err(ApplyError),
         }
     }
@@ -429,14 +436,24 @@ pub fn selection_settings(accepted: &[u8], node: &Node) -> Result<CompileInput> 
 /// Exact accepted credential identity only. A label, endpoint or previous
 /// selection marker is never a substitute for one unique current node match.
 pub fn selected_node_id(accepted: &[u8], nodes: &[Node]) -> Result<String> {
-    if accepted.is_empty() || accepted.len() > native::MAX_CONFIG_BYTES { return Err(ApplyError); }
+    if accepted.is_empty() || accepted.len() > native::MAX_CONFIG_BYTES {
+        return Err(ApplyError);
+    }
     selection_shape(accepted)?;
     let cfg: Accepted = parse(accepted)?;
-    let proxy = cfg.outbounds.iter().filter(|out| out.tag == "proxy").collect::<Vec<_>>();
-    if proxy.len() != 1 { return Err(ApplyError); }
+    let proxy = cfg
+        .outbounds
+        .iter()
+        .filter(|out| out.tag == "proxy")
+        .collect::<Vec<_>>();
+    if proxy.len() != 1 {
+        return Err(ApplyError);
+    }
     let mut matched = nodes.iter().filter(|node| node_matches(proxy[0], node));
     let node = matched.next().ok_or(ApplyError)?;
-    if matched.next().is_some() { return Err(ApplyError); }
+    if matched.next().is_some() {
+        return Err(ApplyError);
+    }
     Ok(node.id.clone())
 }
 
@@ -445,23 +462,32 @@ fn text_field(object: &Object<'_>, name: &str) -> Result<String> {
 }
 fn list_objects<'a>(root: &Object<'a>, name: &str) -> Result<Vec<&'a RawValue>> {
     let values: Vec<&RawValue> = parse(root.0.get(name).ok_or(ApplyError)?.get().as_bytes())?;
-    if values.len() > 64 { return Err(ApplyError); }
+    if values.len() > 64 {
+        return Err(ApplyError);
+    }
     let mut tags = BTreeSet::new();
     for raw in &values {
         let item: Object = parse(raw.get().as_bytes())?;
-        if !tags.insert(text_field(&item, "tag")?) { return Err(ApplyError); }
+        if !tags.insert(text_field(&item, "tag")?) {
+            return Err(ApplyError);
+        }
     }
     Ok(values)
 }
 fn selection_shape(raw: &[u8]) -> Result<()> {
     let root: Object = parse(raw)?;
     let inbounds = list_objects(&root, "inbounds")?;
-    let tags = inbounds.iter().map(|raw| {
-        let item: Object = parse(raw.get().as_bytes())?;
-        text_field(&item, "tag")
-    }).collect::<Result<BTreeSet<_>>>()?;
+    let tags = inbounds
+        .iter()
+        .map(|raw| {
+            let item: Object = parse(raw.get().as_bytes())?;
+            text_field(&item, "tag")
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
     for name in ["mixed-in", "dns-in", "tun-in"] {
-        if !tags.contains(name) { return Err(ApplyError); }
+        if !tags.contains(name) {
+            return Err(ApplyError);
+        }
     }
     let outbounds = list_objects(&root, "outbounds")?;
     let mut found = false;
@@ -470,13 +496,20 @@ fn selection_shape(raw: &[u8]) -> Result<()> {
         let out: Object = parse(raw.get().as_bytes())?;
         let tag = text_field(&out, "tag")?;
         if tag == "direct" {
-            if text_field(&out, "type")? != "direct" { return Err(ApplyError); }
+            if text_field(&out, "type")? != "direct" {
+                return Err(ApplyError);
+            }
             direct = true;
         }
-        if tag != "proxy" { continue; }
+        if tag != "proxy" {
+            continue;
+        }
         found = true;
         if text_field(&out, "type")? != "vless"
-            || ["transport", "multiplex", "network"].iter().any(|key| out.0.contains_key(*key)) {
+            || ["transport", "multiplex", "network"]
+                .iter()
+                .any(|key| out.0.contains_key(*key))
+        {
             return Err(ApplyError);
         }
         if out.0.contains_key("packet_encoding") && text_field(&out, "packet_encoding")? != "xudp" {
@@ -491,7 +524,9 @@ fn selection_shape(raw: &[u8]) -> Result<()> {
             }
         }
     }
-    if !found || !direct { return Err(ApplyError); }
+    if !found || !direct {
+        return Err(ApplyError);
+    }
     let dns = part(&root, "dns")?;
     let route = part(&root, "route")?;
     if text_field(&route, "final")? != "proxy" || text_field(&dns, "final")? != "dns-proxy" {
@@ -499,25 +534,35 @@ fn selection_shape(raw: &[u8]) -> Result<()> {
     }
     for server in list_objects(&dns, "servers")? {
         let object: Object = parse(server.get().as_bytes())?;
-        if object.0.contains_key("tls") { part(&object, "tls")?; }
+        if object.0.contains_key("tls") {
+            part(&object, "tls")?;
+        }
     }
     for section in [&dns, &route] {
-        let rules: Vec<&RawValue> = parse(section.0.get("rules").ok_or(ApplyError)?.get().as_bytes())?;
-        if rules.len() > crate::policy::MAX_RULES * 2 + 128 { return Err(ApplyError); }
-        for rule in rules { let _: Object = parse(rule.get().as_bytes())?; }
+        let rules: Vec<&RawValue> =
+            parse(section.0.get("rules").ok_or(ApplyError)?.get().as_bytes())?;
+        if rules.len() > crate::policy::MAX_RULES * 2 + 128 {
+            return Err(ApplyError);
+        }
+        for rule in rules {
+            let _: Object = parse(rule.get().as_bytes())?;
+        }
     }
     Ok(())
 }
 fn encode_raw(value: &impl serde::Serialize) -> Result<Box<RawValue>> {
     let mut bytes = Bounded(Vec::with_capacity(4096));
     serde_json::to_writer(&mut bytes, value).map_err(|_| ApplyError)?;
-    RawValue::from_string(String::from_utf8(bytes.0).map_err(|_| ApplyError)?).map_err(|_| ApplyError)
+    RawValue::from_string(String::from_utf8(bytes.0).map_err(|_| ApplyError)?)
+        .map_err(|_| ApplyError)
 }
 fn replace_fields(old: &RawValue, new: &RawValue, keys: &[&str]) -> Result<Box<RawValue>> {
     let old: Object = parse(old.get().as_bytes())?;
     let new: Object = parse(new.get().as_bytes())?;
     let mut map = old.0;
-    for key in keys { map.insert((*key).into(), *new.0.get(*key).ok_or(ApplyError)?); }
+    for key in keys {
+        map.insert((*key).into(), *new.0.get(*key).ok_or(ApplyError)?);
+    }
     encode_raw(&map)
 }
 fn replace_proxy(old: &RawValue, new: &RawValue) -> Result<Box<RawValue>> {
@@ -525,10 +570,20 @@ fn replace_proxy(old: &RawValue, new: &RawValue) -> Result<Box<RawValue>> {
     let new_map: Object = parse(new.get().as_bytes())?;
     let old_tls = part(&old_map, "tls")?;
     let new_tls = part(&new_map, "tls")?;
-    let utls = replace_fields(old_tls.0.get("utls").ok_or(ApplyError)?, new_tls.0.get("utls").ok_or(ApplyError)?, &["enabled", "fingerprint"])?;
-    let reality = replace_fields(old_tls.0.get("reality").ok_or(ApplyError)?, new_tls.0.get("reality").ok_or(ApplyError)?, &["enabled", "public_key", "short_id"])?;
+    let utls = replace_fields(
+        old_tls.0.get("utls").ok_or(ApplyError)?,
+        new_tls.0.get("utls").ok_or(ApplyError)?,
+        &["enabled", "fingerprint"],
+    )?;
+    let reality = replace_fields(
+        old_tls.0.get("reality").ok_or(ApplyError)?,
+        new_tls.0.get("reality").ok_or(ApplyError)?,
+        &["enabled", "public_key", "short_id"],
+    )?;
     let mut tls = old_tls.0;
-    for key in ["enabled", "server_name"] { tls.insert(key.into(), *new_tls.0.get(key).ok_or(ApplyError)?); }
+    for key in ["enabled", "server_name"] {
+        tls.insert(key.into(), *new_tls.0.get(key).ok_or(ApplyError)?);
+    }
     tls.insert("utls".into(), &utls);
     tls.insert("reality".into(), &reality);
     let tls = encode_raw(&tls)?;
@@ -543,12 +598,21 @@ fn replace_proxy(old: &RawValue, new: &RawValue) -> Result<Box<RawValue>> {
 /// accepted non-controlled settings remain borrowed, not a private Value clone.
 pub fn compile_selection(accepted: Option<&[u8]>, input: CompileInput) -> Result<CompileOutput> {
     if let Some(raw) = accepted {
-        // Validate the supported accepted intent, not old-node credentials.
-        drop(selection_settings(raw, &input.node)?);
+        // Validate borrowed accepted shape without rebuilding a second owned
+        // settings and credential graph already prepared by the caller.
+        if raw.is_empty() || raw.len() > native::MAX_CONFIG_BYTES {
+            return Err(ApplyError);
+        }
+        readiness_tun::native_target(raw)
+            .map_err(|_| ApplyError)?
+            .ok_or(ApplyError)?;
+        selection_shape(raw)?;
     }
     let mut output = native::compile_native(&input).map_err(|_| ApplyError)?;
     drop(input);
-    let Some(raw) = accepted else { return Ok(output); };
+    let Some(raw) = accepted else {
+        return Ok(output);
+    };
     let old: Object = parse(raw)?;
     let generated: Object = parse(&output.config)?;
     let old_ins = list_objects(&old, "inbounds")?;
@@ -559,26 +623,70 @@ pub fn compile_selection(accepted: Option<&[u8]>, input: CompileInput) -> Result
         let tag = text_field(&item, "tag")?;
         let keys: &[&str] = match tag.as_str() {
             "mixed-in" | "dns-in" => &["listen", "listen_port"],
-            "tun-in" => &["interface_name", "address", "mtu", "dns_mode", "auto_route", "auto_redirect", "stack", "udp_timeout", "udp_nat_max"],
-            _ => { inbound_replacements.push(None); continue; }
+            "tun-in" => &[
+                "interface_name",
+                "address",
+                "mtu",
+                "dns_mode",
+                "auto_route",
+                "auto_redirect",
+                "stack",
+                "udp_timeout",
+                "udp_nat_max",
+            ],
+            _ => {
+                inbound_replacements.push(None);
+                continue;
+            }
         };
-        let new = new_ins.iter().find(|raw| {
-            parse::<Object>(raw.get().as_bytes()).and_then(|o| text_field(&o, "tag")).is_ok_and(|s| s == tag)
-        }).ok_or(ApplyError)?;
+        let new = new_ins
+            .iter()
+            .find(|raw| {
+                parse::<Object>(raw.get().as_bytes())
+                    .and_then(|o| text_field(&o, "tag"))
+                    .is_ok_and(|s| s == tag)
+            })
+            .ok_or(ApplyError)?;
         inbound_replacements.push(Some(replace_fields(old_in, new, keys)?));
     }
-    let ins = old_ins.iter().zip(&inbound_replacements).map(|(old, replacement)| replacement.as_deref().unwrap_or(old)).collect::<Vec<_>>();
+    let ins = old_ins
+        .iter()
+        .zip(&inbound_replacements)
+        .map(|(old, replacement)| replacement.as_deref().unwrap_or(old))
+        .collect::<Vec<_>>();
     let ins = encode_raw(&ins)?;
     let old_outs = list_objects(&old, "outbounds")?;
     let new_outs = list_objects(&generated, "outbounds")?;
-    let new_proxy = new_outs.iter().find(|raw| parse::<Object>(raw.get().as_bytes()).and_then(|o| text_field(&o,"tag")).is_ok_and(|s|s=="proxy")).ok_or(ApplyError)?;
-    let proxy_index = old_outs.iter().position(|raw| parse::<Object>(raw.get().as_bytes()).and_then(|o|text_field(&o,"tag")).is_ok_and(|s|s=="proxy")).ok_or(ApplyError)?;
+    let new_proxy = new_outs
+        .iter()
+        .find(|raw| {
+            parse::<Object>(raw.get().as_bytes())
+                .and_then(|o| text_field(&o, "tag"))
+                .is_ok_and(|s| s == "proxy")
+        })
+        .ok_or(ApplyError)?;
+    let proxy_index = old_outs
+        .iter()
+        .position(|raw| {
+            parse::<Object>(raw.get().as_bytes())
+                .and_then(|o| text_field(&o, "tag"))
+                .is_ok_and(|s| s == "proxy")
+        })
+        .ok_or(ApplyError)?;
     let proxy = replace_proxy(old_outs[proxy_index], new_proxy)?;
     let mut outs = old_outs;
     outs[proxy_index] = &proxy;
     let outs = encode_raw(&outs)?;
-    let dns = replace_fields(old.0.get("dns").ok_or(ApplyError)?, generated.0.get("dns").ok_or(ApplyError)?, &["rules"])?;
-    let route = replace_fields(old.0.get("route").ok_or(ApplyError)?, generated.0.get("route").ok_or(ApplyError)?, &["rules", "rule_set"])?;
+    let dns = replace_fields(
+        old.0.get("dns").ok_or(ApplyError)?,
+        generated.0.get("dns").ok_or(ApplyError)?,
+        &["rules"],
+    )?;
+    let route = replace_fields(
+        old.0.get("route").ok_or(ApplyError)?,
+        generated.0.get("route").ok_or(ApplyError)?,
+        &["rules", "rule_set"],
+    )?;
     let mut root = old.0;
     root.insert("inbounds".into(), &ins);
     root.insert("outbounds".into(), &outs);

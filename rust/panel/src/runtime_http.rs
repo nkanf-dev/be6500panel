@@ -533,6 +533,32 @@ impl RuntimeHttp {
         };
         acquisition.source.fetch_subscription(source, &budget)
     }
+    pub(crate) fn selection_scope(
+        &self,
+        budget: &crate::readiness_tun::Budget<'_>,
+    ) -> Result<crate::capture_lan::Snapshot, HookError> {
+        if !self.subscription_import_allowed() {
+            return Err(HookError::Cancelled);
+        }
+        self.capture
+            .as_deref()
+            .ok_or(HookError::Failed)?
+            .selection_scope(budget)
+    }
+    pub(crate) fn selection_endpoints(
+        &self,
+        host: &str,
+        budget: &crate::readiness_tun::Budget<'_>,
+    ) -> Result<Vec<String>, SourceError> {
+        if !self.subscription_import_allowed() {
+            return Err(SourceError::Cancelled);
+        }
+        self.acquisition
+            .as_ref()
+            .ok_or(SourceError::Input)?
+            .source
+            .selection_endpoints(host, budget)
+    }
     pub(crate) fn rule_status(&mut self) -> Result<Status, ManagerError> {
         self.manager.status(ServiceId::SingBox)
     }

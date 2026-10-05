@@ -40,6 +40,9 @@ pub struct RulesState {
     summary: PolicySummary,
     data_dir: PathBuf,
     source_store: crate::subscription_store::Store,
+    selection_store: Option<crate::subscription_store::Store>,
+    source_sha256: Option<[u8; 32]>,
+    source_fake_ip: bool,
 }
 impl fmt::Debug for RulesState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -191,6 +194,14 @@ impl RulesState {
             None => Subscription::default(),
         };
         let summary = summarize_policy(&subscription);
+        let source_fake_ip = subscription.fake_ip;
+        let source_sha256 = source_store
+            .current_sha256(&crate::readiness_tun::Budget {
+                deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+                cancel: &std::sync::atomic::AtomicBool::new(false),
+            })
+            .map_err(|_| RulesError)?;
+        let selection_store = crate::subscription_store::Store::open_selection(&data_dir).ok();
         let prepared = PreparedSubscription::new(subscription.rules).map_err(|_| RulesError)?;
         Ok(Self {
             store,
@@ -200,6 +211,9 @@ impl RulesState {
             summary,
             data_dir,
             source_store,
+            selection_store,
+            source_sha256,
+            source_fake_ip,
         })
     }
     fn preview(&self, policy: &Policy) -> Result<EffectivePolicy, RulesError> {
@@ -227,6 +241,12 @@ impl RulesState {
     ) -> io::Result<()> {
         let head = method == Method::Head;
         match (path, method) {
+            ("/api/proxy/select", Method::Post) => {
+                let Some(runtime) = runtime else {
+                    return runtime_unavailable(writer, false);
+                };
+                self.select_node(writer, body, runtime)
+            }
             ("/api/proxy/import", Method::Post) => {
                 let Some(runtime) = runtime else {
                     return runtime_unavailable(writer, false);
@@ -234,10 +254,11 @@ impl RulesState {
                 self.import_source(writer, body, runtime)
             }
             ("/api/proxy/nodes", Method::Get | Method::Head) => {
+                let selected = self.selection_evidence(runtime).unwrap_or_default();
                 let response = NodesResponse {
                     nodes: PublicNodes(&self.nodes),
                     diagnostics: &self.diagnostics,
-                    selected_node_id: "",
+                    selected_node_id: &selected,
                     revision: &self.summary.revision,
                     policy_summary: &self.summary,
                 };
@@ -413,6 +434,7 @@ impl RulesState {
             );
         }
         let summary = summarize_policy(&parsed);
+        let source_fake_ip = parsed.fake_ip;
         let prepared = match PreparedSubscription::new(parsed.rules) {
             Ok(prepared) => prepared,
             Err(_) => {
@@ -521,6 +543,8 @@ impl RulesState {
         self.nodes = parsed.nodes;
         self.diagnostics = parsed.diagnostics;
         self.summary = summary;
+        self.source_sha256 = Some(saved.sha256);
+        self.source_fake_ip = source_fake_ip;
         let response = NodesResponse {
             nodes: PublicNodes(&self.nodes),
             diagnostics: &self.diagnostics,
@@ -545,6 +569,576 @@ impl RulesState {
             );
         }
         write_json(writer, 200, "OK", &response, false)
+    }
+
+    fn selection_evidence(
+        &self,
+        runtime: Option<&mut crate::runtime_http::RuntimeHttp>,
+    ) -> Option<String> {
+        let runtime = runtime?;
+        let status = runtime.rule_status().ok()?;
+        if !status.configured || status.durability_uncertain || status.needs_recovery {
+            return None;
+        }
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let budget = crate::readiness_tun::Budget {
+            deadline: std::time::Instant::now() + std::time::Duration::from_secs(5),
+            cancel: &cancel,
+        };
+        let source = self.source_store.current_sha256(&budget).ok()??;
+        if Some(source) != self.source_sha256 {
+            return None;
+        }
+        let raw = self.selection_store.as_ref()?.load_until(&budget).ok()??;
+        let doc: SelectionManifest = serde_json::from_slice(&raw).ok()?;
+        if doc.generation != status.generation
+            || doc.source_sha256
+                != source
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+        {
+            return None;
+        }
+        let accepted = runtime.rule_config().ok()??;
+        if accepted.identity.generation != doc.generation
+            || accepted.identity.sha256 != doc.native_sha256
+        {
+            return None;
+        }
+        let node = crate::rule_apply::selected_node_id(accepted.bytes(), &self.nodes).ok()?;
+        if node != doc.node_id {
+            return None;
+        }
+        budget.check().ok()?;
+        Some(node)
+    }
+    fn select_node(
+        &mut self,
+        writer: &mut impl Write,
+        body: &[u8],
+        runtime: &mut crate::runtime_http::RuntimeHttp,
+    ) -> io::Result<()> {
+        use sha2::{Digest, Sha256};
+        if !runtime.subscription_import_allowed() {
+            return runtime_unavailable(writer, false);
+        }
+        if body.len() > 64 << 10
+            || input_bounds(body).is_err()
+            || body
+                .iter()
+                .find(|b| !b.is_ascii_whitespace())
+                .is_none_or(|b| *b != b'{')
+        {
+            return error(
+                writer,
+                400,
+                "Bad Request",
+                "invalid_json",
+                "Selection fields do not match the request contract.",
+                false,
+            );
+        }
+        let input: SelectInput = match serde_json::from_slice(body) {
+            Ok(input) => input,
+            Err(_) => {
+                return error(
+                    writer,
+                    400,
+                    "Bad Request",
+                    "invalid_json",
+                    "Selection fields do not match the request contract.",
+                    false,
+                );
+            }
+        };
+        if input.node_id.is_empty()
+            || input.node_id.len() > 128
+            || input.ipv6 != "direct"
+            || input.failure != "direct"
+            || !matches!(input.datapath.as_str(), "" | "routed-tun")
+            || input.ports.mixed == 0
+            || input.ports.dns == 0
+            || input.ports.mixed == input.ports.dns
+        {
+            return error(
+                writer,
+                422,
+                "Unprocessable Entity",
+                "proxy_input_invalid",
+                "Node, ports or routed-TUN policy is invalid.",
+                false,
+            );
+        }
+        let mut matches = self.nodes.iter().filter(|node| node.id == input.node_id);
+        let node = match matches.next() {
+            Some(node) if matches.next().is_none() => node.clone(),
+            _ => {
+                return error(
+                    writer,
+                    422,
+                    "Unprocessable Entity",
+                    "node_unavailable",
+                    "Selected node is not in the current subscription.",
+                    false,
+                );
+            }
+        };
+        let draft = self.store.snapshot();
+        if !input.revision.is_empty() && input.revision != draft.revision {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "local_rules_revision_changed",
+                "Local draft changed; read it again.",
+                false,
+            );
+        }
+        if (!input.subscription_revision.is_empty()
+            && input.subscription_revision != self.summary.revision)
+            || (!input.acknowledged_revision.is_empty()
+                && input.acknowledged_revision != self.summary.revision)
+        {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "policy_revision_changed",
+                "Subscription policy changed; read it again.",
+                false,
+            );
+        }
+        if self.summary.omitted > 0 && input.acknowledged_revision.is_empty() {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "policy_acknowledgment_required",
+                "Review and acknowledge omitted subscription rules.",
+                false,
+            );
+        }
+        let before = match runtime.rule_status() {
+            Ok(value) => value,
+            Err(failed) => return runtime.write_failure(writer, failed),
+        };
+        if input
+            .generation
+            .is_some_and(|generation| generation != before.generation)
+        {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "generation_conflict",
+                "Runtime configuration changed; read it again.",
+                false,
+            );
+        }
+        if before.needs_recovery || before.durability_uncertain {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "runtime_recovery_pending",
+                "Recover the runtime before changing nodes.",
+                false,
+            );
+        }
+        if before.desired
+            && (!before.ready || !before.running_matches_accepted || before.resource_suspended)
+        {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "runtime_not_ready",
+                "Verify the owned runtime before changing nodes.",
+                false,
+            );
+        }
+        let accepted = match runtime.rule_config() {
+            Ok(value) => value,
+            Err(failed) => return runtime.write_failure(writer, failed),
+        };
+        if accepted
+            .as_ref()
+            .is_some_and(|value| value.identity.generation != before.generation)
+        {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "generation_conflict",
+                "Runtime configuration changed; read it again.",
+                false,
+            );
+        }
+        let mut compile = match accepted.as_ref() {
+            Some(value) => match crate::rule_apply::selection_settings(value.bytes(), &node) {
+                Ok(input) => input,
+                Err(_) => {
+                    return error(
+                        writer,
+                        409,
+                        "Conflict",
+                        "proxy_configuration_invalid",
+                        "Accepted native settings cannot be preserved.",
+                        false,
+                    );
+                }
+            },
+            None => crate::native::CompileInput {
+                node: node.clone(),
+                datapath: "routed-tun".into(),
+                ipv6: "direct".into(),
+                failure: "direct".into(),
+                fake_ip: self.source_fake_ip,
+                ..crate::native::CompileInput::default()
+            },
+        };
+        compile.ports = crate::native::Ports {
+            mixed: input.ports.mixed,
+            tproxy: input.ports.tproxy,
+            dns: input.ports.dns,
+        };
+        if let Some(tun) = input.routed_tun {
+            compile.routed_tun = Some(tun);
+        }
+        compile.datapath = "routed-tun".into();
+        compile.ipv6 = "direct".into();
+        compile.failure = "direct".into();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let budget = crate::readiness_tun::Budget {
+            deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+            cancel: &cancel,
+        };
+        let source = match self.source_store.current_sha256(&budget) {
+            Ok(Some(hash)) if Some(hash) == self.source_sha256 => hash,
+            _ => {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "subscription_source_changed",
+                    "Accepted subscription source changed or is unavailable.",
+                    false,
+                );
+            }
+        };
+        let scope = match runtime.selection_scope(&budget) {
+            Ok(scope) => scope,
+            Err(_) => {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "lan_scope_unavailable",
+                    "Current LAN scope is unavailable.",
+                    false,
+                );
+            }
+        };
+        if accepted.is_none() {
+            let addresses = scope
+                .lan_addresses
+                .iter()
+                .filter(|address| address.parse::<std::net::Ipv4Addr>().is_ok())
+                .collect::<Vec<_>>();
+            if addresses.len() != 1 {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "lan_scope_unavailable",
+                    "Current LAN bind address is ambiguous.",
+                    false,
+                );
+            }
+            compile.mixed_listen_address = addresses[0].clone();
+            compile.dns_listen_address = addresses[0].clone();
+        }
+        compile.management_ips = scope.management_ips;
+        for listen in [&compile.mixed_listen_address, &compile.dns_listen_address] {
+            let Ok(address) = listen.parse::<std::net::IpAddr>() else {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "proxy_configuration_invalid",
+                    "Accepted listener address is invalid.",
+                    false,
+                );
+            };
+            if !address.is_unspecified()
+                && !address.is_loopback()
+                && !compile.management_ips.iter().any(|ip| ip == listen)
+            {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "lan_scope_changed",
+                    "Accepted listener address is not current router management.",
+                    false,
+                );
+            }
+        }
+        compile.endpoints.clear();
+        compile.bootstrap_domains.clear();
+        let mut hosts = vec![node.server.clone()];
+        for endpoint in [&compile.direct_dns.server, &compile.proxy_dns.server] {
+            if !endpoint.is_empty() {
+                hosts.push(endpoint.clone());
+            }
+        }
+        if let Some(accepted) = accepted.as_ref() {
+            let settings: SelectionEndpoints = match serde_json::from_slice(accepted.bytes()) {
+                Ok(settings) => settings,
+                Err(_) => {
+                    return error(
+                        writer,
+                        409,
+                        "Conflict",
+                        "proxy_configuration_invalid",
+                        "Accepted endpoint settings are invalid.",
+                        false,
+                    );
+                }
+            };
+            if settings.outbounds.len() > 64 || settings.dns.servers.len() > 64 {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "proxy_configuration_invalid",
+                    "Accepted endpoint settings exceed bounds.",
+                    false,
+                );
+            }
+            hosts.extend(
+                settings
+                    .outbounds
+                    .into_iter()
+                    .filter(|out| out.tag != "proxy")
+                    .map(|out| out.server),
+            );
+            hosts.extend(settings.dns.servers.into_iter().map(|server| server.server));
+        }
+        hosts.retain(|host| !host.is_empty());
+        hosts.sort();
+        hosts.dedup();
+        if hosts.len() > 128 || hosts.iter().any(|host| host.len() > 253) {
+            return error(
+                writer,
+                409,
+                "Conflict",
+                "proxy_configuration_invalid",
+                "Accepted endpoint settings exceed bounds.",
+                false,
+            );
+        }
+        for host in hosts {
+            let endpoints = match runtime.selection_endpoints(&host, &budget) {
+                Ok(endpoints) => endpoints,
+                Err(_) => {
+                    return error(
+                        writer,
+                        502,
+                        "Bad Gateway",
+                        "endpoint_dns_unavailable",
+                        "Native endpoint DNS did not complete.",
+                        false,
+                    );
+                }
+            };
+            if host.parse::<std::net::IpAddr>().is_err() {
+                compile.bootstrap_domains.push(host);
+            }
+            compile.endpoints.extend(endpoints);
+            if compile.endpoints.len() > 256 {
+                return error(
+                    writer,
+                    422,
+                    "Unprocessable Entity",
+                    "endpoint_limit",
+                    "Native endpoint set exceeds bounds.",
+                    false,
+                );
+            }
+        }
+        compile.endpoints.sort();
+        compile.endpoints.dedup();
+        compile.rule_sets = match crate::rule_apply::read_verified_refs(&self.data_dir) {
+            Ok(refs) => refs,
+            Err(_) => {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "rules_unavailable",
+                    "Pinned rule sets are unavailable or changed.",
+                    false,
+                );
+            }
+        };
+        let effective = match self.subscription.merge(&draft.policy) {
+            Ok(effective) => effective,
+            Err(_) => {
+                return error(
+                    writer,
+                    422,
+                    "Unprocessable Entity",
+                    "local_rules_invalid",
+                    "Local policy cannot be merged.",
+                    false,
+                );
+            }
+        };
+        compile.rules = effective.rules;
+        compile.diagnostics = self.diagnostics.clone();
+        compile.accept_unsupported_rules = input.acknowledged_revision == self.summary.revision;
+        drop(effective.provenance);
+        drop(effective.diagnostics);
+        let output = match crate::rule_apply::compile_selection(
+            accepted.as_ref().map(|snapshot| snapshot.bytes()),
+            compile,
+        ) {
+            Ok(output) => output,
+            Err(_) => {
+                return error(
+                    writer,
+                    409,
+                    "Conflict",
+                    "proxy_configuration_invalid",
+                    "Selected node cannot preserve accepted native settings.",
+                    false,
+                );
+            }
+        };
+        drop(accepted);
+        if budget.check().is_err() {
+            return error(
+                writer,
+                504,
+                "Gateway Timeout",
+                "operation_timeout",
+                "Selection preparation did not complete.",
+                false,
+            );
+        }
+        if let Err(error) = budget.check() {
+            let (status, code) = if error == crate::readiness_tun::TunError::Cancelled {
+                (409, "operation_cancelled")
+            } else {
+                (504, "operation_timeout")
+            };
+            return error_response_import(writer, status, code);
+        }
+        let status = match runtime.configure_rules(before.generation, &output.config) {
+            Ok(status) => status,
+            Err(failed) => return runtime.write_failure(writer, failed),
+        };
+        let readback = match runtime.rule_config() {
+            Ok(Some(readback)) => readback,
+            _ => {
+                return selection_uncertain(
+                    writer,
+                    status,
+                    output.sha256,
+                    output.diagnostics,
+                    "selection_readback_failed",
+                );
+            }
+        };
+        let same = readback.identity.generation == status.generation
+            && readback.bytes() == output.config
+            && format!("{:x}", Sha256::digest(readback.bytes())) == output.sha256
+            && crate::rule_apply::selected_node_id(readback.bytes(), &self.nodes)
+                .is_ok_and(|id| id == node.id);
+        drop(readback);
+        if !same
+            || status.needs_recovery
+            || status.durability_uncertain
+            || status.desired
+                && (!status.ready || !status.running_matches_accepted || status.resource_suspended)
+        {
+            return selection_uncertain(
+                writer,
+                status,
+                output.sha256,
+                output.diagnostics,
+                "selection_readback_failed",
+            );
+        }
+        let manifest = SelectionManifest {
+            node_id: node.id,
+            generation: status.generation,
+            native_sha256: output.sha256.clone(),
+            source_sha256: source
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>(),
+            draft_revision: draft.revision.clone(),
+        };
+        let raw = serde_json::to_vec(&manifest).map_err(io::Error::other)?;
+        let evidence_budget = crate::readiness_tun::Budget {
+            deadline: std::time::Instant::now() + std::time::Duration::from_secs(5),
+            cancel: &cancel,
+        };
+        if self.selection_store.is_none() {
+            self.selection_store =
+                crate::subscription_store::Store::open_selection(&self.data_dir).ok();
+        }
+        if !self.selection_store.as_mut().is_some_and(|store| {
+            store
+                .save(&raw, &evidence_budget)
+                .is_ok_and(|saved| saved.durability_error.is_none())
+        }) {
+            return selection_uncertain(
+                writer,
+                status,
+                output.sha256,
+                output.diagnostics,
+                "storage_failed",
+            );
+        }
+        let applied = status.desired
+            && status.ready
+            && status.running_matches_accepted
+            && !status.resource_suspended;
+        if applied
+            && crate::rule_apply::write_manifest(
+                &self.data_dir,
+                &crate::rule_apply::AppliedManifest {
+                    revision: draft.revision,
+                    native_sha256: output.sha256.clone(),
+                    generation: status.generation,
+                },
+            )
+            .is_err()
+        {
+            return selection_uncertain(
+                writer,
+                status,
+                output.sha256,
+                output.diagnostics,
+                "storage_failed",
+            );
+        }
+        write_json(
+            writer,
+            200,
+            "OK",
+            &SelectResponse {
+                status: status.into(),
+                config_sha256: output.sha256,
+                diagnostics: output.diagnostics,
+                applied,
+            },
+            false,
+        )
     }
     fn runtime_evidence(
         &self,
@@ -907,6 +1501,48 @@ impl RulesState {
     }
 }
 
+#[derive(Deserialize)]
+struct SelectionEndpoints {
+    outbounds: Vec<SelectionEndpoint>,
+    dns: SelectionDnsEndpoints,
+}
+#[derive(Deserialize)]
+struct SelectionDnsEndpoints {
+    servers: Vec<SelectionEndpoint>,
+}
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct SelectionEndpoint {
+    tag: String,
+    server: String,
+}
+fn selection_uncertain(
+    writer: &mut impl Write,
+    status: crate::runtime_manager::Status,
+    sha: String,
+    diagnostics: Vec<Diagnostic>,
+    code: &'static str,
+) -> io::Result<()> {
+    write_json(
+        writer,
+        500,
+        "Internal Server Error",
+        &SelectUncertain {
+            error: ApiError {
+                code,
+                message: "Runtime changed, but selection evidence is unconfirmed; read its status.",
+            },
+            committed: true,
+            selection: SelectResponse {
+                status: status.into(),
+                config_sha256: sha,
+                diagnostics,
+                applied: false,
+            },
+        },
+        false,
+    )
+}
 // Typed decoding rejects duplicate and unknown fields at every known object.
 // No JSON Value cache or second whole-body object graph is constructed.
 #[derive(Deserialize)]
@@ -1182,6 +1818,68 @@ impl Serialize for PublicNodes<'_> {
         }
         sequence.end()
     }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SelectInput {
+    node_id: String,
+    ipv6: String,
+    failure: String,
+    #[serde(deserialize_with = "object")]
+    ports: SelectPorts,
+    #[serde(default)]
+    datapath: String,
+    #[serde(default, rename = "routedTUN", deserialize_with = "optional_object")]
+    routed_tun: Option<crate::native::RoutedTUNConfig>,
+    #[serde(default)]
+    acknowledged_revision: String,
+    #[serde(default, deserialize_with = "optional_generation")]
+    generation: Option<u64>,
+    #[serde(default)]
+    revision: String,
+    #[serde(default)]
+    subscription_revision: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectPorts {
+    mixed: u16,
+    tproxy: u16,
+    dns: u16,
+}
+fn optional_object<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    object(d).map(Some)
+}
+fn optional_generation<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    u64::deserialize(d).map(Some)
+}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SelectionManifest {
+    node_id: String,
+    generation: u64,
+    #[serde(rename = "nativeSHA256")]
+    native_sha256: String,
+    #[serde(rename = "sourceSHA256")]
+    source_sha256: String,
+    draft_revision: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectResponse {
+    status: crate::runtime_http::WireStatus,
+    #[serde(rename = "configSHA256")]
+    config_sha256: String,
+    diagnostics: Vec<Diagnostic>,
+    applied: bool,
+}
+#[derive(Serialize)]
+struct SelectUncertain {
+    error: ApiError<'static>,
+    committed: bool,
+    selection: SelectResponse,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

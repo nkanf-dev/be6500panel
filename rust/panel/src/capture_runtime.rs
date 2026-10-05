@@ -282,13 +282,6 @@ impl CaptureRuntime {
             |argv, budget| executor.execute(argv, budget, None),
             context.deadline,
         );
-        if observed.is_err() {
-            // A failed read is not successful activation. Withdrawal receives
-            // the controller's independent bounded cleanup budget.
-            let _ = self
-                .controller
-                .cleanup(|argv, deadline| executor.execute(argv, deadline, None));
-        }
         if observed.is_ok() {
             self.applied_run = context.run.cloned();
         } else {
@@ -367,14 +360,7 @@ impl CaptureRuntime {
         // interception if the actual retained identity or DNS proof was lost.
         native(context)?;
         self.apply_input(context, input)?;
-        let current = self.observe_current(context, &mut native);
-        if current.active {
-            Ok(current)
-        } else {
-            // Query uncertainty after explicit Apply cannot become success.
-            let _ = self.cleanup_until(Instant::now() + std::time::Duration::from_secs(30));
-            Err(HookError::Failed)
-        }
+        Ok(self.current(CurrentState::Active))
     }
     /// Effective off intent first, including binary/executor admission failure.
     /// Persistence and best-effort cleanup remain attempted with independent
@@ -587,6 +573,15 @@ impl<O> fmt::Debug for CaptureHandle<O> {
     }
 }
 impl<O: Observer + 'static> CaptureHandle<O> {
+    pub(crate) fn selection_scope(
+        &self,
+        budget: &crate::readiness_tun::Budget<'_>,
+    ) -> Result<crate::capture_lan::Snapshot, HookError> {
+        self.native
+            .try_borrow_mut()
+            .map_err(|_| HookError::Failed)?
+            .selection_scope(budget)
+    }
     pub fn owned_command_count(&self) -> Result<usize, HookError> {
         Ok(self
             .capture

@@ -33,7 +33,7 @@ umask 077
 config="$2"
 case "$1" in run|check|verify) config="$3";; esac
 IFS= read -r behavior < "$config" || :
-case "$1" in check|verify) case "$behavior" in bad) exit 9;; *) exit 0;; esac;; esac
+case "$1" in check|verify) if test -f "$TMPDIR/reject-check";then exit 9;fi;case "$behavior" in bad) exit 9;; *) exit 0;; esac;; esac
 trap 'exit 0' TERM
 printf '%s\n' "$$" > "$TMPDIR/started"
 IFS= read -r value < "$TMPDIR/wait"
@@ -2445,4 +2445,566 @@ fn subscription_import_preserves_draft_and_runtime_and_orphans_changed_source_ed
         fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
         accepted
     );
+}
+
+struct SelectionLanObserver;
+impl be6500_panel::readiness_tun::Observer for SelectionLanObserver {
+    fn read_file(
+        &mut self,
+        _: &std::path::Path,
+        _: usize,
+        _: &be6500_panel::readiness_tun::Budget<'_>,
+    ) -> Result<Vec<u8>, be6500_panel::readiness_tun::TunError> {
+        Err(be6500_panel::readiness_tun::TunError::Unavailable)
+    }
+    fn read_link(
+        &mut self,
+        _: &std::path::Path,
+        _: &be6500_panel::readiness_tun::Budget<'_>,
+    ) -> Result<PathBuf, be6500_panel::readiness_tun::TunError> {
+        Err(be6500_panel::readiness_tun::TunError::Unavailable)
+    }
+    fn metadata(
+        &mut self,
+        _: &std::path::Path,
+        _: bool,
+        _: &be6500_panel::readiness_tun::Budget<'_>,
+    ) -> Result<be6500_panel::readiness_tun::FileIdentity, be6500_panel::readiness_tun::TunError>
+    {
+        Err(be6500_panel::readiness_tun::TunError::Unavailable)
+    }
+    fn list_dir(
+        &mut self,
+        _: &std::path::Path,
+        _: usize,
+        _: &be6500_panel::readiness_tun::Budget<'_>,
+    ) -> Result<Vec<String>, be6500_panel::readiness_tun::TunError> {
+        Err(be6500_panel::readiness_tun::TunError::Unavailable)
+    }
+    fn interfaces(
+        &mut self,
+        b: &be6500_panel::readiness_tun::Budget<'_>,
+    ) -> Result<Vec<be6500_panel::readiness_tun::Interface>, be6500_panel::readiness_tun::TunError>
+    {
+        b.check()?;
+        Ok(vec![be6500_panel::readiness_tun::Interface {
+            name: "br-lan".into(),
+            up: true,
+            mtu: 1500,
+            addresses: vec![be6500_panel::readiness_tun::InterfaceAddress {
+                address: "192.168.50.1".parse().unwrap(),
+                bits: 24,
+            }],
+        }])
+    }
+    fn ipv4_routes(
+        &mut self,
+        b: &be6500_panel::readiness_tun::Budget<'_>,
+    ) -> Result<Vec<be6500_panel::readiness_tun::Ipv4Prefix>, be6500_panel::readiness_tun::TunError>
+    {
+        b.check()?;
+        Ok(vec![])
+    }
+}
+fn load_selection_sources(fixture: &Fixture, runtime: &mut RuntimeHttp) {
+    use be6500_panel::{
+        artifact_source::SourcePolicy,
+        capture_executor::{Binaries, TrustedBinary},
+        capture_kernel::table_names,
+        capture_runtime::CaptureRuntime,
+        capture_state::Controller,
+        native_runtime::NativeReadiness,
+    };
+    for part in ["capture", "selection-exec"] {
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(fixture.root.join(part))
+            .unwrap();
+    }
+    let command = fixture.root.join("artifacts/.artifact-fake");
+    let hash = Sha256::digest(HELPER.as_bytes()).into();
+    let capture = CaptureRuntime::new(
+        Controller::open(fixture.root.join("capture")).unwrap(),
+        Binaries {
+            ip: TrustedBinary::admit(&command, hash).unwrap(),
+            iptables: TrustedBinary::admit(&command, hash).unwrap(),
+        },
+        fixture.root.join("selection-exec"),
+        table_names(b"").unwrap(),
+        |_, _, _| panic!("selection must not Apply capture"),
+    );
+    let (_, handle) = capture.into_hooks_with_handle(NativeReadiness::with_observer(
+        SelectionLanObserver,
+        Rc::new(std::sync::atomic::AtomicBool::new(false)),
+    ));
+    runtime.load_capture(handle).unwrap();
+    runtime
+        .load_artifact_source(
+            SourcePolicy::loopback_fixture("127.0.0.1:53".parse().unwrap()).unwrap(),
+            &fixture.root.join("artifacts"),
+            &fixture.root.join("artifacts"),
+        )
+        .unwrap();
+}
+fn stage_selection_refs(fixture: &Fixture) {
+    let mut refs = Vec::new();
+    for (tag, kind) in [("cn-domain", "domain"), ("cn-ip", "ip")] {
+        let path = fixture.root.join(format!("{tag}.srs"));
+        let bytes = format!("synthetic-{tag}").into_bytes();
+        fs::write(&path, &bytes).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        refs.push(json!({"Tag":tag,"Kind":kind,"Path":path,"SHA256":format!("{:x}",Sha256::digest(&bytes)),"SourceURL":"https://example.invalid/fixture","MaxBytes":4096}));
+    }
+    fs::write(
+        fixture.root.join("rule-sets.json"),
+        serde_json::to_vec(&refs).unwrap(),
+    )
+    .unwrap();
+    fs::set_permissions(
+        fixture.root.join("rule-sets.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+}
+#[test]
+fn node_selection_first_current_lan_off_config_and_new_subscription_preserves_settings() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.runtime();
+    load_selection_sources(&fixture, &mut owner.runtime);
+    stage_selection_refs(&fixture);
+    let service = Service::new(fixture.root.clone())
+        .with_auth(Auth::new("isolated-secret"))
+        .with_data_dir(&fixture.root);
+    let cookie = login(&service);
+    let imported = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/import",
+        Some(&json!({"content":IMPORT_YAML})),
+        &cookie,
+        200,
+    );
+    let id = imported["nodes"][0]["id"].as_str().unwrap();
+    let payload = json!({"nodeId":id,"ipv6":"direct","failure":"direct","ports":{"mixed":2080,"tproxy":7893,"dns":6450},"datapath":"routed-tun","routedTUN":{"interfaceName":"b6p-tun","address":"172.31.255.253/30"},"generation":0});
+    body(
+        &exchange(
+            &service,
+            Some(&mut owner.runtime),
+            request(
+                "POST",
+                "/api/proxy/select",
+                Some(&payload),
+                "",
+                "http://localhost",
+            ),
+        ),
+        401,
+    );
+    body(
+        &exchange(
+            &service,
+            Some(&mut owner.runtime),
+            request(
+                "POST",
+                "/api/proxy/select",
+                Some(&payload),
+                &cookie,
+                "http://foreign.test",
+            ),
+        ),
+        403,
+    );
+    for invalid in [
+        json!([id]),
+        json!({"nodeId":id,"ipv6":"direct","failure":"direct","ports":[2080,7893,6450]}),
+        json!({"nodeId":id,"ipv6":"direct","failure":"direct","ports":{"mixed":2080,"tproxy":7893,"dns":6450},"routedTUN":null}),
+        json!({"nodeId":id,"ipv6":"direct","failure":"direct","ports":{"mixed":2080,"tproxy":7893,"dns":6450},"generation":null}),
+    ] {
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/select",
+            Some(&invalid),
+            &cookie,
+            400,
+        );
+    }
+    let first = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/select",
+        Some(&payload),
+        &cookie,
+        200,
+    );
+    assert_eq!(first["status"]["generation"], 1);
+    assert_eq!(first["status"]["desired"], false);
+    assert_eq!(first["applied"], false);
+    assert!(!fixture.root.join("run/sing-box/started").exists());
+    assert!(!fixture.root.join("local-proxy-rules-applied.json").exists());
+    let config = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/config?service=sing-box",
+        None,
+        &cookie,
+        200,
+    );
+    let mut accepted: Value = serde_json::from_str(config["config"].as_str().unwrap()).unwrap();
+    for tag in ["mixed-in", "dns-in"] {
+        assert_eq!(
+            accepted["inbounds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|inbound| inbound["tag"] == tag)
+                .unwrap()["listen"],
+            "192.168.50.1"
+        );
+    }
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/nodes",
+            None,
+            &cookie,
+            200
+        )["selectedNodeId"],
+        id
+    );
+    accepted["log"]["level"] = "debug".into();
+    accepted["experimental"] =
+        json!({"clash_api":{"secret":"synthetic-private","external_controller":"127.0.0.1:9090"}});
+    accepted["dns"]["cache_capacity"] = 1234.into();
+    accepted["outbounds"][0]["bind_interface"] = "wan0".into();
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/configure",
+        Some(&json!({"service":"sing-box","config":accepted.to_string(),"generation":1})),
+        &cookie,
+        200,
+    );
+    let changed = IMPORT_YAML.replace("192.0.2.1", "192.0.2.2").replace(
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+    );
+    let newsource = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/import",
+        Some(&json!({"content":changed})),
+        &cookie,
+        200,
+    );
+    let newid = newsource["nodes"][0]["id"].as_str().unwrap();
+    assert_ne!(newid, id);
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/nodes",
+            None,
+            &cookie,
+            200
+        )["selectedNodeId"],
+        ""
+    );
+    let mut next = payload.clone();
+    next["nodeId"] = newid.into();
+    next["generation"] = 2.into();
+    let selected = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/select",
+        Some(&next),
+        &cookie,
+        200,
+    );
+    assert_eq!(selected["status"]["generation"], 3);
+    assert_eq!(selected["applied"], false);
+    let config = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/config?service=sing-box",
+        None,
+        &cookie,
+        200,
+    );
+    let now: Value = serde_json::from_str(config["config"].as_str().unwrap()).unwrap();
+    assert_eq!(now["log"], accepted["log"]);
+    assert_eq!(now["experimental"], accepted["experimental"]);
+    assert_eq!(now["dns"]["cache_capacity"], 1234);
+    assert_eq!(now["outbounds"][0]["bind_interface"], "wan0");
+    assert_eq!(
+        now["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|out| out["tag"] == "proxy")
+            .unwrap()["server"],
+        "192.0.2.2"
+    );
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/nodes",
+            None,
+            &cookie,
+            200
+        )["selectedNodeId"],
+        newid
+    );
+    let stale = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/select",
+        Some(&next),
+        &cookie,
+        409,
+    );
+    assert_eq!(stale["error"]["code"], "generation_conflict");
+}
+
+#[test]
+fn node_selection_running_checker_cleanup_readback_and_uncertain_evidence_are_truthful() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.runtime();
+    load_selection_sources(&fixture, &mut owner.runtime);
+    stage_selection_refs(&fixture);
+    let service = Service::new(fixture.root.clone())
+        .with_auth(Auth::new("isolated-secret"))
+        .with_data_dir(&fixture.root);
+    let cookie = login(&service);
+    let imported = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/import",
+        Some(&json!({"content":IMPORT_YAML})),
+        &cookie,
+        200,
+    );
+    let id = imported["nodes"][0]["id"].as_str().unwrap();
+    let payload = json!({"nodeId":id,"ipv6":"direct","failure":"direct","ports":{"mixed":2080,"tproxy":7893,"dns":6450},"generation":0});
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/select",
+        Some(&payload),
+        &cookie,
+        200,
+    );
+    let started = call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/start",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    let pid = started["pid"].as_u64().unwrap();
+    let state = fs::read(fixture.root.join("services/sing-box/state.json")).unwrap();
+    let mut next = payload.clone();
+    next["generation"] = 1.into();
+    next["ports"]["mixed"] = 2081.into();
+    fs::write(fixture.root.join("run/sing-box/reject-check"), b"synthetic").unwrap();
+    let failed = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/select",
+        Some(&next),
+        &cookie,
+        422,
+    );
+    assert_eq!(failed["error"]["code"], "config_check_failed");
+    assert_eq!(failed["status"]["pid"], pid);
+    assert_eq!(
+        fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+        state
+    );
+    fs::remove_file(fixture.root.join("run/sing-box/reject-check")).unwrap();
+    fixture.reject.set(true);
+    let failed = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/select",
+        Some(&next),
+        &cookie,
+        503,
+    );
+    assert_eq!(failed["status"]["pid"], pid);
+    assert_eq!(
+        fs::read(fixture.root.join("services/sing-box/state.json")).unwrap(),
+        state
+    );
+    fixture.reject.set(false);
+    // A failed safety withdrawal intentionally needs explicit same-owner recovery.
+    call(
+        &service,
+        &mut owner.runtime,
+        "/api/runtime/restart",
+        Some(&json!({"service":"sing-box"})),
+        &cookie,
+        200,
+    );
+    let changed = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/select",
+        Some(&next),
+        &cookie,
+        200,
+    );
+    assert_eq!(changed["status"]["generation"], 2);
+    assert_eq!(changed["applied"], true);
+    assert!(fixture.root.join("local-proxy-rules-applied.json").exists());
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/local-rules",
+            None,
+            &cookie,
+            200
+        )["applied"]["state"],
+        "known"
+    );
+    // Foreign evidence inode is never repaired or overwritten after runtime commit.
+    fs::rename(
+        fixture.root.join("proxy-selection.json"),
+        fixture.root.join("old-selection"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("proxy-selection.json"),
+        b"foreign-private",
+    )
+    .unwrap();
+    fs::set_permissions(
+        fixture.root.join("proxy-selection.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    next["generation"] = 2.into();
+    next["ports"]["mixed"] = 2082.into();
+    let uncertain = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/select",
+        Some(&next),
+        &cookie,
+        500,
+    );
+    assert_eq!(uncertain["committed"], true);
+    assert_eq!(uncertain["selection"]["status"]["generation"], 3);
+    assert_eq!(uncertain["selection"]["applied"], false);
+    assert_eq!(
+        fs::read(fixture.root.join("proxy-selection.json")).unwrap(),
+        b"foreign-private"
+    );
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/nodes",
+            None,
+            &cookie,
+            200
+        )["selectedNodeId"],
+        ""
+    );
+}
+#[test]
+fn node_selection_source_replacement_missing_refs_and_omission_ack_refuse_before_runtime() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fixture = Fixture::new();
+    let mut owner = fixture.runtime();
+    load_selection_sources(&fixture, &mut owner.runtime);
+    let service = Service::new(fixture.root.clone())
+        .with_auth(Auth::new("isolated-secret"))
+        .with_data_dir(&fixture.root);
+    let cookie = login(&service);
+    let imported = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/import",
+        Some(&json!({"content":IMPORT_YAML})),
+        &cookie,
+        200,
+    );
+    let id = imported["nodes"][0]["id"].as_str().unwrap();
+    let mut payload = json!({"nodeId":id,"ipv6":"direct","failure":"direct","ports":{"mixed":2080,"tproxy":7893,"dns":6450},"generation":0});
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/select",
+            Some(&payload),
+            &cookie,
+            409
+        )["error"]["code"],
+        "rules_unavailable"
+    );
+    assert!(!fixture.root.join("services/sing-box/state.json").exists());
+    stage_selection_refs(&fixture);
+    let omitted = IMPORT_YAML.replace("rules:", "rules:\n  - GEOIP,US,PROXY");
+    let imported = call(
+        &service,
+        &mut owner.runtime,
+        "/api/proxy/import",
+        Some(&json!({"content":omitted})),
+        &cookie,
+        200,
+    );
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/select",
+            Some(&payload),
+            &cookie,
+            409
+        )["error"]["code"],
+        "policy_acknowledgment_required"
+    );
+    payload["acknowledgedRevision"] = "0".repeat(64).into();
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/select",
+            Some(&payload),
+            &cookie,
+            409
+        )["error"]["code"],
+        "policy_revision_changed"
+    );
+    payload["acknowledgedRevision"] = imported["revision"].clone();
+    fs::rename(
+        fixture.root.join("subscription.yaml"),
+        fixture.root.join("old-source"),
+    )
+    .unwrap();
+    fs::write(fixture.root.join("subscription.yaml"), IMPORT_YAML).unwrap();
+    fs::set_permissions(
+        fixture.root.join("subscription.yaml"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &service,
+            &mut owner.runtime,
+            "/api/proxy/select",
+            Some(&payload),
+            &cookie,
+            409
+        )["error"]["code"],
+        "subscription_source_changed"
+    );
+    assert!(!fixture.root.join("services/sing-box/state.json").exists());
 }
