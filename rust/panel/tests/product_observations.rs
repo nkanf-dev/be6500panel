@@ -117,7 +117,9 @@ impl Fake {
     }
     fn network(&mut self) {
         self.dir("/sys/class/net", &["br-lan", "eth1", "lo"]);
+        self.meta("/sys/class/net", 1, 0o755);
         for iface in ["br-lan", "eth1", "lo"] {
+            self.meta(&format!("/sys/class/net/{iface}"), 1, 0o755);
             self.file(&format!("/sys/class/net/{iface}/flags"), "0x1003\n");
             self.file(&format!("/sys/class/net/{iface}/mtu"), "1500\n");
         }
@@ -419,6 +421,93 @@ fn network_interface_flags_mtu_routes_are_actual_source_rows() {
         fake.read_paths
             .iter()
             .all(|p| !p.contains("dhcp.leases") && !p.contains("wireless"))
+    );
+}
+#[test]
+fn sysfs_interfaces_exclude_regular_entries_and_keep_zero_mtu_vendor_devices() {
+    let mut fake = Fake::new();
+    fake.router();
+    fake.dir(
+        "/sys/class/net",
+        &[
+            "bonding_masters",
+            "br-lan",
+            "eth1",
+            "lo",
+            "miireg",
+            "soc0",
+            "soc1",
+        ],
+    );
+    fake.meta("/sys/class/net/bonding_masters", 0, 0o644);
+    fake.file("/sys/class/net/bonding_masters", "");
+    for iface in ["miireg", "soc0", "soc1"] {
+        let link = format!("/sys/class/net/{iface}");
+        let target = format!("/sys/devices/virtual/net/{iface}");
+        fake.meta(&link, 2, 0o777);
+        fake.meta(&target, 1, 0o755);
+        fake.links.insert(link, PathBuf::from(target));
+        fake.file(&format!("/sys/class/net/{iface}/flags"), "0x1002\n");
+        fake.file(&format!("/sys/class/net/{iface}/mtu"), "0\n");
+    }
+    // A backend with no entry metadata must not lose its observed interface.
+    fake.metadata.remove("/sys/class/net/lo");
+    let v = call(&mut Observations::new(), &mut fake, "/api/network");
+    let rows = v["interfaces"].as_array().unwrap();
+    assert_eq!(rows.len(), 6);
+    assert!(rows.iter().all(|row| row["name"] != "bonding_masters"));
+    assert!(rows.iter().any(|row| row["name"] == "lo"));
+    for iface in ["miireg", "soc0", "soc1"] {
+        let row = rows.iter().find(|row| row["name"] == iface).unwrap();
+        assert_eq!(row["mtu"], 0);
+        assert_eq!(row["mtuAvailable"], true);
+        assert_eq!(row["up"], false);
+        assert_eq!(row["upAvailable"], true);
+    }
+    assert_eq!(v["availability"]["network.interfaces"]["complete"], true);
+    assert!(v["errors"].as_array().unwrap().is_empty());
+    assert!(
+        fake.read_paths
+            .iter()
+            .all(|path| !path.contains("bonding_masters/"))
+    );
+    let router = call(&mut Observations::new(), &mut fake, "/api/router");
+    assert_eq!(router["devices"][0]["ip"], "192.168.31.5");
+    assert_eq!(router["devices"][0]["eligible"], true);
+    assert!(
+        router["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| { !row["module"].as_str().unwrap().starts_with("network.") })
+    );
+
+    fake.files.remove("/sys/class/net/soc0/flags");
+    fake.file("/sys/class/net/soc1/mtu", "-1\n");
+    let v = call(&mut Observations::new(), &mut fake, "/api/network");
+    let rows = v["interfaces"].as_array().unwrap();
+    assert_eq!(rows.len(), 6);
+    assert_eq!(
+        rows.iter().find(|row| row["name"] == "soc0").unwrap()["upAvailable"],
+        false
+    );
+    assert_eq!(
+        rows.iter().find(|row| row["name"] == "soc1").unwrap()["mtuAvailable"],
+        false
+    );
+    assert!(
+        v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["module"] == "network.flags" && row["code"] == "unavailable" })
+    );
+    assert!(
+        v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["module"] == "network.mtu" && row["code"] == "invalid" })
     );
 }
 #[test]
@@ -773,6 +862,147 @@ fn generated_resolver_symlink_is_observed_and_never_executed() {
     let v = call(&mut Observations::new(), &mut fake, "/api/router");
     assert_eq!(v["dns"]["resolvers"], json!(["9.9.9.9"]));
     assert!(fake.read_paths.iter().any(|p| p == "/tmp/resolv-native"));
+}
+#[test]
+fn generated_resolvers_keep_scoped_link_local_ipv6_literals_and_reject_bad_zones() {
+    let mut fake = Fake::new();
+    fake.router();
+    fake.files.remove("/tmp/resolv.conf.d/resolv.conf.auto");
+    fake.file(
+        "/tmp/resolv.conf.auto",
+        "nameserver 192.168.1.1\nnameserver fe80::1%eth0.1\n",
+    );
+    let v = call(&mut Observations::new(), &mut fake, "/api/router");
+    assert_eq!(
+        v["dns"]["resolvers"],
+        json!(["192.168.1.1", "fe80::1%eth0.1"])
+    );
+    assert_eq!(v["availability"]["dns"]["source"], "/tmp/resolv.conf.auto");
+    assert_eq!(v["availability"]["dns"]["complete"], true);
+    assert!(
+        v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["module"] != "dns")
+    );
+
+    fake.file(
+        "/tmp/resolv.conf.auto",
+        concat!(
+            "nameserver fe80:0:0:0:0:0:0:1%eth0.1\n",
+            "nameserver fe80::1%\n",
+            "nameserver fe80::1%../eth0\n",
+            "nameserver fe80::1%eth0%eth1\n",
+            "nameserver fe80::1%..\n",
+            "nameserver fe80::1%interface-name-too-long\n",
+            "nameserver 2001:db8::1%eth0\n",
+            "nameserver 192.168.1.1%eth0\n",
+            "nameserver router.invalid\n"
+        ),
+    );
+    let v = call(&mut Observations::new(), &mut fake, "/api/router");
+    assert_eq!(v["dns"]["resolvers"], json!(["fe80:0:0:0:0:0:0:1%eth0.1"]));
+    assert_eq!(v["availability"]["dns"]["complete"], false);
+    assert!(
+        v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["module"] == "dns" && row["code"] == "invalid" })
+    );
+}
+#[test]
+fn firewall_long_rule_options_and_comments_keep_exact_all_table_counts() {
+    let mut fake = Fake::new();
+    fake.router();
+    fake.file("/proc/net/ip_tables_names", "filter\nnat\nmangle\nraw\n");
+    let nat = concat!(
+        "-P PREROUTING ACCEPT\n-P INPUT ACCEPT\n-P OUTPUT ACCEPT\n-P POSTROUTING ACCEPT\n",
+        "-A POSTROUTING -s 192.168.31.0/24 -o eth1 -p tcp -m string ",
+        "--string \"PRIVATE_FIREWALL_STRING\" --algo bm --from 0 --to 65535 -j MASQUERADE\n"
+    );
+    fake.command(Program::Iptables, &["-t", "nat", "-S"], nat);
+    fake.command(
+        Program::Iptables,
+        &["-t", "mangle", "-S"],
+        "-P PREROUTING ACCEPT\n-A PREROUTING -j ACCEPT\n",
+    );
+    fake.command(
+        Program::Iptables,
+        &["-t", "raw", "-S"],
+        "-P PREROUTING ACCEPT\n-A PREROUTING -j ACCEPT\n",
+    );
+    let long_rule = concat!(
+        "-A INPUT -i eth1 -p tcp -m tcp --dport 443 ! -s fd00::/8 ",
+        "-m comment --comment \"PRIVATE_FIREWALL_COMMENT with a # marker\" -j ACCEPT\n"
+    );
+    let mut filter6 = "-P INPUT DROP\n-P FORWARD DROP\n-P OUTPUT ACCEPT\n-N custom\n".to_owned();
+    for _ in 0..20 {
+        filter6.push_str(long_rule);
+    }
+    fake.command(Program::Ip6tables, &["-t", "filter", "-S"], &filter6);
+    let v = call(&mut Observations::new(), &mut fake, "/api/router");
+    assert_eq!(v["firewall"]["ipv4"]["rules"], 5);
+    assert_eq!(v["firewall"]["ipv6"]["rules"], 20);
+    for family in ["ipv4", "ipv6"] {
+        assert_eq!(v["firewall"][family]["ruleCountAvailable"], true);
+        assert_eq!(v["firewall"][family]["policyAvailable"], true);
+        assert_eq!(
+            v["availability"][format!("firewall.{family}")]["complete"],
+            true
+        );
+    }
+    assert_eq!(v["firewall"]["ipv4"]["forward"], "DROP");
+    assert_eq!(v["firewall"]["ipv6"]["input"], "DROP");
+    assert!(
+        v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| { !row["module"].as_str().unwrap().starts_with("firewall.") })
+    );
+    let serialized = v.to_string();
+    assert!(!serialized.contains("PRIVATE_FIREWALL_STRING"));
+    assert!(!serialized.contains("PRIVATE_FIREWALL_COMMENT"));
+}
+#[test]
+fn malformed_firewall_prefixes_and_unknown_policies_remain_partial() {
+    let mut fake = Fake::new();
+    fake.router();
+    fake.command(
+        Program::Iptables,
+        &["-t", "filter", "-S"],
+        concat!(
+            "-P INPUT ACCEPT\n-P FORWARD DROP\n-P OUTPUT ACCEPT\n",
+            "-A INPUT -j ACCEPT\n",
+            "-P INPUT REJECT\n-P OUTPUT ACCEPT extra\n",
+            "-N\n-N custom extra\n-A INPUT\n-A ../bad -j ACCEPT\n",
+            "-X custom\nPRIVATE_BAD_FIREWALL_COMMAND\n"
+        ),
+    );
+    fake.command(
+        Program::Iptables,
+        &["-t", "nat", "-S"],
+        "-P PREROUTING PRIVATE_BAD_POLICY\n-A POSTROUTING -j MASQUERADE\n",
+    );
+    let v = call(&mut Observations::new(), &mut fake, "/api/router");
+    assert_eq!(v["firewall"]["ipv4"]["rules"], 2);
+    assert_eq!(v["firewall"]["ipv4"]["input"], "ACCEPT");
+    assert_eq!(v["firewall"]["ipv4"]["policyAvailable"], true);
+    assert_eq!(v["firewall"]["ipv4"]["ruleCountAvailable"], false);
+    for table in ["filter", "nat"] {
+        assert_eq!(
+            v["availability"][format!("firewall.ipv4.{table}")]["complete"],
+            false
+        );
+        assert!(v["errors"].as_array().unwrap().iter().any(|row| {
+            row["module"] == format!("firewall.ipv4.{table}") && row["code"] == "invalid"
+        }));
+    }
+    let serialized = v.to_string();
+    assert!(!serialized.contains("PRIVATE_BAD_POLICY"));
+    assert!(!serialized.contains("PRIVATE_BAD_FIREWALL_COMMAND"));
 }
 #[test]
 fn malformed_native_rows_remain_partial_and_private_command_errors_are_redacted() {

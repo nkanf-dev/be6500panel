@@ -273,7 +273,7 @@ fn wire(snapshot: Snapshot, current: CurrentStatus, commands: usize) -> Wire {
         cleanup_pending: current.intent.cleanup_pending,
         scope_state: if current.state == CurrentState::ScopeChanged {
             "changed"
-        } else if current.active {
+        } else if current.active || (current.state == CurrentState::Inactive && error.is_none()) {
             "current"
         } else {
             "unresolved"

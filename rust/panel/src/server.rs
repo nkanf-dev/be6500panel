@@ -283,6 +283,7 @@ impl Service {
         mut runtime: Option<&mut crate::runtime_http::RuntimeHttp>,
         streaming: &mut bool,
     ) -> io::Result<()> {
+        stream.set_nodelay(true)?;
         let deadline = Instant::now() + read_budget;
         let mut buffer = [0_u8; MAX_HEADER_BYTES + 1];
         let parsed = http::read_headers(stream, &mut buffer, deadline).and_then(|read| {
@@ -447,7 +448,13 @@ impl Service {
                 && let Ok(state) = rules.lock()
                 && let Ok(state) = state.as_ref()
             {
-                if let Some(owner) = runtime.as_deref_mut() {
+                if matches!(
+                    request.path(),
+                    "/api/proxy/node-probes"
+                        | "/api/proxy/node-probes/history"
+                        | "/api/proxy/request-traces"
+                ) && let Some(owner) = runtime.as_deref_mut()
+                {
                     product.diagnostic_bindings(
                         owner,
                         state.product_revision(),

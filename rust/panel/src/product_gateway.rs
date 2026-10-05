@@ -28,6 +28,14 @@ pub struct ApiError {
     pub code: &'static str,
     pub message: &'static str,
 }
+fn diagnostic_lan_addresses(addresses: &[String]) -> Vec<IpAddr> {
+    addresses
+        .iter()
+        .filter_map(|address| address.parse::<IpAddr>().ok())
+        .filter(|address| !matches!(address,IpAddr::V6(ip)if ip.is_unicast_link_local()))
+        .collect()
+}
+
 fn invalid() -> ApiError {
     ApiError {
         status: 400,
@@ -215,11 +223,7 @@ impl<B: Backend> Product<B> {
             ) {
                 let _ = pid;
                 if let Ok(scope) = runtime.selection_scope(budget) {
-                    let lan = scope
-                        .lan_addresses
-                        .iter()
-                        .filter_map(|address| address.parse().ok())
-                        .collect::<Vec<_>>();
+                    let lan = diagnostic_lan_addresses(&scope.lan_addresses);
                     if self
                         .diagnostics
                         .bind_accepted(config.bytes(), run, &path, &lan, &mut self.io, budget)
@@ -883,4 +887,21 @@ pub fn write(
         buffered.write_all(b"\n")?;
     }
     buffered.flush()
+}
+
+#[cfg(test)]
+mod diagnostic_lan_tests {
+    use super::*;
+    #[test]
+    fn scoped_link_local_address_does_not_reject_valid_mixed_listener_binding() {
+        let all = ["192.168.31.1", "fd00::1", "fe80::1"].map(str::to_owned);
+        let result = diagnostic_lan_addresses(&all);
+        assert_eq!(
+            result,
+            vec![
+                "192.168.31.1".parse::<IpAddr>().unwrap(),
+                "fd00::1".parse::<IpAddr>().unwrap()
+            ]
+        );
+    }
 }

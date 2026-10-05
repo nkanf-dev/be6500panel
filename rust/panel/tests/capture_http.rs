@@ -693,6 +693,7 @@ fn authenticated_gateway_capture_observes_current_and_delete_latches_off_without
     assert_eq!(inactive["active"], false);
     assert_eq!(inactive["cleanupPending"], false);
     assert_eq!(inactive["state"], "inactive");
+    assert_eq!(inactive["scopeState"], "current");
     assert!(!fixture.root.join("capture/capture-journal.json").exists());
     assert_eq!(
         call(

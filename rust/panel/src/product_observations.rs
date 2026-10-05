@@ -890,11 +890,26 @@ fn resolvers<B: Backend>(r: &mut Request<'_, '_, B>) -> Result<Vec<String>, ApiE
             bad = Some(Error::Invalid);
             continue;
         }
-        match f[1].parse::<IpAddr>() {
-            Ok(ip) if !ip.is_unspecified() && !ip.is_multicast() => {
-                out.insert(ip.to_string());
+        let resolver = match f[1].split_once('%') {
+            // A scoped resolver is a link-local IPv6 literal plus a kernel
+            // interface name (IFNAMSIZ includes its trailing NUL). Keep the
+            // literal and zone as observed; do not resolve or rewrite them.
+            Some((address, zone)) => address
+                .parse::<Ipv6Addr>()
+                .ok()
+                .filter(|ip| ip.is_unicast_link_local() && name(zone) && zone.len() < 16)
+                .map(|_| f[1].to_owned()),
+            None => f[1]
+                .parse::<IpAddr>()
+                .ok()
+                .filter(|ip| !ip.is_unspecified() && !ip.is_multicast())
+                .map(|ip| ip.to_string()),
+        };
+        match resolver {
+            Some(resolver) => {
+                out.insert(resolver);
             }
-            _ => bad = Some(Error::Invalid),
+            None => bad = Some(Error::Invalid),
         }
         if out.len() > 64 {
             bad = Some(Error::Limit);
@@ -1186,8 +1201,25 @@ fn interfaces<B: Backend>(r: &mut Request<'_, '_, B>) -> Result<Vec<Value>, ApiE
     let mut addresses = BTreeMap::new();
     match r.list("/sys/class/net", MAX_INTERFACES) {
         Ok(rows) => {
-            names.extend(rows);
-            r.available("network.interfaces", "/sys/class/net", None)?;
+            let mut bad = None;
+            for iface in rows {
+                let path = format!("/sys/class/net/{iface}");
+                r.check().map_err(api_error)?;
+                // Class entries normally link to device directories. Files
+                // such as bonding_masters are class attributes, not devices.
+                // Missing metadata still retains the row and field failures.
+                match r.io.metadata(Path::new(&path), true, r.budget) {
+                    Ok(meta) if !meta.directory => continue,
+                    Ok(_) | Err(Error::Unavailable) => (),
+                    Err(e) if matches!(e, Error::Deadline | Error::Cancelled) => {
+                        return Err(api_error(e));
+                    }
+                    Err(e) => bad = Some(e),
+                }
+                r.check().map_err(api_error)?;
+                names.insert(iface);
+            }
+            r.available("network.interfaces", "/sys/class/net", bad)?;
         }
         Err(e) => r.gap("network.interfaces", "/sys/class/net", e)?,
     }
@@ -1225,7 +1257,7 @@ fn interfaces<B: Backend>(r: &mut Request<'_, '_, B>) -> Result<Vec<Value>, ApiE
         }
         match r.read(&format!("{prefix}/mtu"), SMALL_BYTES) {
             Ok(data) => match data.trim().parse::<u32>() {
-                Ok(n) if n > 0 => {
+                Ok(n) => {
                     mtu = n;
                     mtu_available = true;
                 }
@@ -1662,30 +1694,39 @@ fn firewall<B: Backend>(r: &mut Request<'_, '_, B>, ipv6: bool) -> Result<Value,
                 available = true;
                 let mut bad = None;
                 for line in data.lines() {
-                    let f = match words(line) {
-                        Ok(f) => f,
-                        Err(e) => {
-                            bad = Some(e);
-                            continue;
-                        }
+                    // Project only the -S command prefix. Rule options and
+                    // quoted comments are private and need no token vector or
+                    // UCI word limit; the command byte and rule caps remain.
+                    let mut fields = line.split_whitespace();
+                    let Some(command) = fields.next() else {
+                        continue;
                     };
-                    if f.is_empty() || f[0].starts_with('#') {
+                    if command.starts_with('#') {
                         continue;
                     }
-                    match f[0].as_str() {
-                        "-P" if f.len() == 3
-                            && table == "filter"
-                            && ["INPUT", "FORWARD", "OUTPUT"].contains(&f[1].as_str()) =>
-                        {
-                            if ["ACCEPT", "DROP"].contains(&f[2].as_str()) {
-                                policies.insert(f[1].clone(), f[2].clone());
-                            } else {
-                                bad = Some(Error::Invalid);
+                    let Some(chain) = fields.next().filter(|chain| name(chain)) else {
+                        bad = Some(Error::Invalid);
+                        continue;
+                    };
+                    match command {
+                        "-P" => match fields.next() {
+                            Some(policy)
+                                if ["ACCEPT", "DROP"].contains(&policy)
+                                    && fields.next().is_none() =>
+                            {
+                                if table == "filter"
+                                    && ["INPUT", "FORWARD", "OUTPUT"].contains(&chain)
+                                {
+                                    policies.insert(chain.to_owned(), policy.to_owned());
+                                }
                             }
-                        }
-                        "-P" if f.len() == 3 => (),
-                        "-N" if f.len() == 2 => (),
-                        "-A" if f.len() >= 3 => {
+                            _ => bad = Some(Error::Invalid),
+                        },
+                        "-N" if fields.next().is_none() => (),
+                        "-A" if fields
+                            .next()
+                            .is_some_and(|field| field.starts_with('-') || field == "!") =>
+                        {
                             if count >= 4096 {
                                 bad = Some(Error::Limit);
                                 break;

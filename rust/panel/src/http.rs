@@ -540,17 +540,21 @@ fn write_headers_extra(
     length: u64,
     extra: &[(&str, &str)],
 ) -> io::Result<()> {
+    let mut storage = [0_u8; 2048];
+    let mut header = io::Cursor::new(storage.as_mut_slice());
     write!(
-        writer,
+        header,
         "HTTP/1.1 {status} {reason}\r\nContent-Length: {length}\r\nContent-Type: {content_type}\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: same-origin\r\nCache-Control: no-store\r\n"
     )?;
     if status == 405 && !extra.iter().any(|(name, _)| *name == "Allow") {
-        writer.write_all(b"Allow: GET, HEAD\r\n")?;
+        header.write_all(b"Allow: GET, HEAD\r\n")?;
     }
     for (name, value) in extra {
-        write!(writer, "{name}: {value}\r\n")?;
+        write!(header, "{name}: {value}\r\n")?;
     }
-    writer.write_all(b"\r\n")
+    header.write_all(b"\r\n")?;
+    let length = header.position() as usize;
+    writer.write_all(&storage[..length])
 }
 
 pub(crate) fn write_response(
@@ -592,4 +596,41 @@ pub(crate) fn write_response_extra(
         writer.write_all(body)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod header_write_tests {
+    use super::*;
+    #[derive(Default)]
+    struct Sink {
+        calls: usize,
+        bytes: Vec<u8>,
+    }
+    impl Write for Sink {
+        fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+            self.calls += 1;
+            self.bytes.extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn complete_response_header_uses_one_output_write() {
+        let mut sink = Sink::default();
+        write_headers_extra(
+            &mut sink,
+            405,
+            "Method Not Allowed",
+            "application/json",
+            0,
+            &[("Set-Cookie", "test=1")],
+        )
+        .unwrap();
+        assert_eq!(sink.calls, 1);
+        let text = String::from_utf8(sink.bytes).unwrap();
+        assert!(text.contains("Allow: GET, HEAD\r\n"));
+        assert!(text.ends_with("Set-Cookie: test=1\r\n\r\n"));
+    }
 }
