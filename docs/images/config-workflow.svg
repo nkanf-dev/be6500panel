@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 200" width="100%" height="100%">
+  <defs>
+    <style>
+      .bg { fill: #0d1117; }
+      .step-card { fill: #161b22; stroke: #30363d; stroke-width: 1.5; rx: 8px; }
+      .commit-card { fill: #161b22; stroke: #238636; stroke-width: 1.5; rx: 8px; }
+      .rollback-card { fill: #161b22; stroke: #da3633; stroke-width: 1.5; rx: 8px; }
+      .title-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 600; fill: #f0f6fc; }
+      .sub-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 11px; fill: #8b949e; }
+      .code-badge { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; fill: #58a6ff; }
+      .line { stroke: #388bfd; stroke-width: 1.5; fill: none; }
+      .dash-line { stroke: #f85149; stroke-width: 1.5; stroke-dasharray: 4 3; fill: none; }
+      .arrow-blue { fill: #388bfd; }
+      .arrow-red { fill: #f85149; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" class="bg" rx="10"/>
+
+  <!-- Step 1: Draft -->
+  <rect x="25" y="35" width="165" height="70" class="step-card"/>
+  <text x="40" y="62" class="title-text">1. 修改配置参数</text>
+  <text x="40" y="80" class="sub-text">本地内存与草稿隔离</text>
+  <text x="40" y="94" class="code-badge">Draft</text>
+
+  <!-- Arrow 1 -> 2 -->
+  <path d="M 190 70 L 225 70" class="line"/>
+  <path d="M 225 70 L 217 66 L 217 74 Z" class="arrow-blue"/>
+
+  <!-- Step 2: Stage -->
+  <rect x="225" y="35" width="165" height="70" class="step-card"/>
+  <text x="240" y="62" class="title-text">2. 暂存变更</text>
+  <text x="240" y="80" class="sub-text">校验字段与生成代次</text>
+  <text x="240" y="94" class="code-badge">Stage</text>
+
+  <!-- Arrow 2 -> 3 -->
+  <path d="M 390 70 L 425 70" class="line"/>
+  <path d="M 425 70 L 417 66 L 417 74 Z" class="arrow-blue"/>
+
+  <!-- Step 3: Diff -->
+  <rect x="425" y="35" width="165" height="70" class="step-card"/>
+  <text x="440" y="62" class="title-text">3. 差异比对</text>
+  <text x="440" y="80" class="sub-text">精确呈现 Unified Diff</text>
+  <text x="440" y="94" class="code-badge">Diff &amp; Validate</text>
+
+  <!-- Arrow 3 -> 4 -->
+  <path d="M 590 70 L 625 70" class="line"/>
+  <path d="M 625 70 L 617 66 L 617 74 Z" class="arrow-blue"/>
+
+  <!-- Step 4: Commit -->
+  <rect x="625" y="35" width="225" height="70" class="commit-card"/>
+  <text x="640" y="62" class="title-text" fill="#3fb950">4. 试探应用与提交</text>
+  <text x="640" y="80" class="sub-text">高危变更启动倒计时确认</text>
+  <text x="640" y="94" class="code-badge" fill="#7ee787">Commit &amp; Guard</text>
+
+  <!-- Rollback branch -->
+  <path d="M 737 105 L 737 150 L 590 150" class="dash-line"/>
+  <path d="M 590 150 L 598 146 L 598 154 Z" class="arrow-red"/>
+
+  <rect x="360" y="125" width="230" height="50" class="rollback-card"/>
+  <text x="375" y="146" class="title-text" fill="#f85149">超时未确认：自动安全回滚</text>
+  <text x="375" y="162" class="sub-text">原子恢复上一代配置，防止断网失联</text>
+
+  <!-- Arrow back to Stable -->
+  <path d="M 360 150 L 107 150 L 107 105" class="dash-line"/>
+  <path d="M 107 105 L 103 113 L 111 113 Z" class="arrow-red"/>
+  <text x="120" y="142" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif" font-size="10" fill="#f85149">恢复上一代稳定状态</text>
+</svg>
