@@ -226,13 +226,36 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
                 | "/api/runtime/restart"
                 | "/api/runtime/restore"
                 | "/api/runtime/acquire"
+                | "/api/configuration/stage"
+                | "/api/configuration/commit"
+                | "/api/configuration/confirm"
+                | "/api/configuration/rollback"
+                | "/api/maintenance/backup"
+                | "/api/maintenance/import/preview"
+                | "/api/maintenance/import/stage"
+                | "/api/devices/annotations"
+                | "/api/system/services/action"
+                | "/api/proxy/request-traces"
+                | "/api/proxy/node-probes"
+                | "/api/proxy/probe"
+                | "/api/proxy/plan"
+                | "/api/frpc/plan"
+                | "/api/operations/apply"
         )
     {
         return Err(error(ErrorKind::MethodNotAllowed, bytes));
     }
     // DELETE is a fixed empty-body capture action, not general API support.
     // Query metadata stays intact for the authenticated endpoint to validate.
-    if method == Method::Delete && request.path() != "/api/proxy/capture" {
+    if method == Method::Delete
+        && !matches!(
+            request.path(),
+            "/api/proxy/capture"
+                | "/api/configuration/drafts"
+                | "/api/maintenance/import/preview"
+                | "/api/proxy/node-probes"
+        )
+    {
         return Err(error(ErrorKind::MethodNotAllowed, bytes));
     }
     request.content_length = match (method, content_length) {
@@ -248,6 +271,7 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request<'_>, HttpError> {
         "/api/proxy/local-rules" | "/api/proxy/local-rules/preview" => MAX_RULES_BODY_BYTES,
         "/api/runtime/configure" => MAX_RUNTIME_BODY_BYTES,
         "/api/proxy/import" => MAX_IMPORT_BODY_BYTES,
+        "/api/configuration/stage" | "/api/maintenance/import/preview" => 2 << 20,
         _ => MAX_BODY_BYTES,
     };
     if request.content_length > limit {

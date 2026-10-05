@@ -19,6 +19,7 @@ pub struct Service {
     auth: Mutex<Auth>,
     // None means no data directory; Err isolates a failed rule feature.
     rules: Option<Mutex<Result<RulesState, rules_http::RulesError>>>,
+    streams: Mutex<crate::product_events::Streams>,
 }
 
 #[derive(Clone, Copy)]
@@ -134,6 +135,7 @@ impl Service {
             static_files: None,
             auth: Mutex::new(Auth::new("")),
             rules: None,
+            streams: Mutex::new(crate::product_events::Streams::new()),
         }
     }
 
@@ -157,6 +159,23 @@ impl Service {
         self
     }
 
+    pub fn stream_snapshot_due(&self) -> bool {
+        self.streams.lock().is_ok_and(|streams| streams.due())
+    }
+    pub fn publish_system_stream(
+        &self,
+        system: Result<serde_json::Value, (&'static str, &'static str)>,
+        now: u64,
+    ) {
+        if let Ok(mut streams) = self.streams.lock() {
+            let _ = streams.publish(system, now);
+        }
+    }
+    pub(crate) fn flush_streams(&self) {
+        if let (Ok(mut streams), Ok(mut auth)) = (self.streams.lock(), self.auth.lock()) {
+            streams.flush(&mut auth);
+        }
+    }
     fn draft_writes_available(&self) -> bool {
         self.rules
             .as_ref()
@@ -174,8 +193,11 @@ impl Service {
         read_budget: Duration,
         write_budget: Duration,
     ) -> io::Result<()> {
-        let result = self.respond(&mut stream, read_budget, write_budget, None);
-        let _ = stream.shutdown(Shutdown::Both);
+        let mut streaming = false;
+        let result = self.respond(&mut stream, read_budget, write_budget, None, &mut streaming);
+        if !streaming {
+            let _ = stream.shutdown(Shutdown::Both);
+        }
         result
     }
 
@@ -186,13 +208,17 @@ impl Service {
         mut stream: TcpStream,
         runtime: &mut crate::runtime_http::RuntimeHttp,
     ) -> io::Result<()> {
+        let mut streaming = false;
         let result = self.respond(
             &mut stream,
             http::REQUEST_DEADLINE,
             http::WRITE_DEADLINE,
             Some(runtime),
+            &mut streaming,
         );
-        let _ = stream.shutdown(Shutdown::Both);
+        if !streaming {
+            let _ = stream.shutdown(Shutdown::Both);
+        }
         result
     }
 
@@ -202,6 +228,7 @@ impl Service {
         read_budget: Duration,
         write_budget: Duration,
         runtime: Option<&mut crate::runtime_http::RuntimeHttp>,
+        streaming: &mut bool,
     ) -> io::Result<()> {
         let deadline = Instant::now() + read_budget;
         let mut buffer = [0_u8; MAX_HEADER_BYTES + 1];
@@ -300,6 +327,41 @@ impl Service {
                 head_only,
                 &[],
             );
+        }
+        if request.path() == "/api/events" {
+            if request.method == Method::Head {
+                return http::write_response_extra(
+                    &mut writer,
+                    200,
+                    "OK",
+                    b"",
+                    true,
+                    "text/event-stream",
+                    &[],
+                );
+            }
+            if request.method != Method::Get {
+                return rules_http::method_not_allowed(&mut writer, false, "GET, HEAD");
+            }
+            drop(auth);
+            let mut streams = self
+                .streams
+                .lock()
+                .map_err(|_| io::Error::other("stream owner unavailable"))?;
+            if streams.len() >= 8 {
+                return api_error(
+                    &mut DeadlineWriter::new(stream, write_budget),
+                    503,
+                    "Service Unavailable",
+                    "stream_limit",
+                    "Too many event streams.",
+                    false,
+                    &[],
+                );
+            }
+            streams.add(stream.try_clone()?, request.cookie)?;
+            *streaming = true;
+            return Ok(());
         }
         if crate::runtime_http::is_runtime_path(request.path())
             || request.path() == "/api/proxy/capture"

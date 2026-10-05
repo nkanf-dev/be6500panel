@@ -3,8 +3,8 @@ import { ProxyPolicySummarySchema } from "../modules/proxy/policy-contracts";
 
 export const HealthSchema = Schema.Struct({
   status: Schema.Literal("ok"),
-  mode: Schema.Literal("demo", "host"),
-  readOnly: Schema.Boolean,
+  mode:Schema.Literal("demo","host","manager"),
+  readOnly:Schema.Boolean,
 });
 export const SessionSchema = Schema.Struct({
   authenticated: Schema.Boolean,

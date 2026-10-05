@@ -63,6 +63,7 @@ pub fn serve(
         if stopped(cancel) {
             return close(&mut runtime, Ok(()));
         }
+        service.flush_streams();
         let now = Instant::now();
         if now >= next_recovery {
             if let Some(owner) = runtime.as_deref_mut() {

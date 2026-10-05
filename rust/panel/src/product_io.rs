@@ -318,7 +318,12 @@ impl Backend for Native {
             })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .env_clear()
+            .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
             .env("LC_ALL", "C");
+        if let Some(libdir) = std::env::var_os("XTABLES_LIBDIR") {
+            command.env("XTABLES_LIBDIR", libdir);
+        }
         unsafe {
             command.pre_exec(|| {
                 if libc::setsid() < 0 {
